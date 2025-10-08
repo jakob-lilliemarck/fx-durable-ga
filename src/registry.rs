@@ -56,6 +56,12 @@ pub trait Phenotype: Sized {
     fn to_genes(&self) -> Vec<Box<dyn Gene>>;
 }
 
+/// The collection of genes of a type
+pub struct Genome<T: Phenotype> {
+    pub genome: Vec<Box<dyn Gene>>,
+    pub concrete: PhantomData<T>,
+}
+
 /// Type-erased trait for converting genes to concrete phenotype types
 pub trait PhenotypeConverter: Send + Sync {
     /// Convert genes to a concrete phenotype type (boxed as Any)

@@ -442,6 +442,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "dotenv",
+ "futures",
  "fx-event-bus",
  "fx-mq-jobs",
  "serde",
