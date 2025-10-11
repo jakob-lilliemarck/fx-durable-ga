@@ -55,8 +55,8 @@ impl GeneBounds {
 /// Collection of bounds defining possible gene values for a genome
 #[derive(Debug)]
 pub struct Morphology {
-    id: Uuid,
-    bounds: Vec<GeneBounds>,
+    pub(crate) id: Uuid,
+    pub(crate) bounds: Vec<GeneBounds>,
 }
 
 impl Morphology {
@@ -167,9 +167,9 @@ impl Genome {
 /// Collection of genomes forming one generation
 #[derive(Debug)]
 pub struct Population {
-    id: Uuid,
-    morphology: Rc<Morphology>,
-    individuals: Vec<Genome>,
+    pub(crate) id: Uuid,
+    pub(crate) morphology: Rc<Morphology>,
+    pub(crate) individuals: Vec<Genome>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -188,7 +188,7 @@ pub enum SelectionError {
 /// Core trait for encoding/decoding an individual to/from genes
 pub trait Individual: Send + Sync {
     /// Returns the bounds for each gene in this individual's genetic representation
-    fn bounds(&self) -> Vec<GeneBounds>;
+    fn bounds(&self) -> Result<Vec<GeneBounds>, BoundsError>;
 
     /// Creates a new instance from a slice of gene values
     fn from_genes(&self, genes: &[f64]) -> Self
@@ -286,11 +286,13 @@ mod tests {
     }
 
     impl Individual for Cube {
-        fn bounds(&self) -> Vec<GeneBounds> {
-            let bounds = GeneBounds::new(0, 100, 101).unwrap();
-            vec![bounds.clone(), bounds.clone(), bounds]
+        fn bounds(&self) -> Result<Vec<GeneBounds>, BoundsError> {
+            let bounds = GeneBounds::new(0, 100, 101)?;
+            Ok(vec![bounds.clone(), bounds.clone(), bounds])
         }
 
+        // FIXME
+        // I dont like that it is f64 here! genes should be i64! Discrete steps!
         fn from_genes(&self, genes: &[f64]) -> Self {
             Self {
                 x: genes[0] as i64,
@@ -299,6 +301,8 @@ mod tests {
             }
         }
 
+        // FIXME
+        // I dont like that it is f64 here! genes should be i64! Discrete steps!
         fn to_genes(&self) -> Vec<f64> {
             vec![self.x as f64, self.y as f64, self.z as f64]
         }

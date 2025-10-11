@@ -1,139 +1,243 @@
-use crate::gene::{GeneBounds, Individual};
-use std::{
-    collections::HashMap,
-    sync::{Arc, Mutex},
-};
-use thiserror::Error;
-use uuid::Uuid;
+use crate::gene::GeneBounds;
+use futures::future::BoxFuture;
+use std::{any::TypeId, collections::HashMap};
 
-/// Registry entry for a concrete Individual type
-struct Entry {
-    individual: Box<dyn Individual>,
-    fitness: Box<dyn Fn(&[f64]) -> f64 + Send + Sync>,
+// For the registry to function, we probably need to contain the fitness evaluation operation within it.
+// The reason is that we will not be able to return an arbitary type from the registry, since we would not know what that that would be?
+
+pub trait Encodeable {
+    type Phenotype;
+    fn morphology() -> Vec<GeneBounds>;
+    fn encode(&self) -> Vec<i64>;
+    fn decode(genes: &[i64]) -> Self::Phenotype;
 }
 
-/// Type registry to resolve Individual instances and fitness functions by type_id
-pub struct Registry {
-    entries: Mutex<HashMap<Uuid, Arc<Entry>>>,
+pub trait Evaluator<P> {
+    fn fitness<'a>(&self, phenotype: P) -> BoxFuture<'a, Result<f64, String>>;
 }
 
-#[derive(Debug, Error)]
-pub enum RegistryError {
-    #[error("type id not registered: {0}")]
-    TypeNotRegistered(Uuid),
+pub trait TypeErasedEvaluator {
+    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, String>>;
 }
 
-impl Registry {
-    /// Create empty registry
+struct ErasedEvaluator<P, E: Evaluator<P>> {
+    evaluator: E,
+    decode: fn(&[i64]) -> P,
+}
+
+impl<P, E: Evaluator<P>> TypeErasedEvaluator for ErasedEvaluator<P, E> {
+    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, String>> {
+        let phenotype = (self.decode)(genes);
+        self.evaluator.fitness(phenotype)
+    }
+}
+
+pub struct Registry<'a> {
+    evaluators: HashMap<TypeId, Box<dyn TypeErasedEvaluator + 'a>>,
+}
+
+impl<'a> Registry<'a> {
     pub fn new() -> Self {
         Self {
-            entries: Mutex::new(HashMap::new()),
+            evaluators: HashMap::new(),
         }
     }
 
-    /// Register an Individual type with a fitness function
-    ///
-    /// - `type_id`: unique identifier for the type
-    /// - `individual`: prototype instance used for bounds() and from_genes()
-    /// - `fitness`: function evaluating fitness from gene values
-    pub fn register(
-        &self,
-        type_id: Uuid,
-        individual: Box<dyn Individual>,
-        fitness: Box<dyn Fn(&[f64]) -> f64 + Send + Sync>,
-    ) {
-        let mut map = self.entries.lock().unwrap();
-        map.insert(
-            type_id,
-            Arc::new(Entry {
-                individual,
-                fitness,
-            }),
-        );
+    pub fn register<T, E>(mut self, type_id: TypeId, evaluator: E) -> Self
+    where
+        T: Encodeable + 'a,
+        E: Evaluator<T::Phenotype> + 'a,
+    {
+        let erased = ErasedEvaluator {
+            evaluator,
+            decode: T::decode,
+        };
+
+        self.evaluators.insert(type_id, Box::new(erased));
+        self
     }
 
-    /// Get the bounds for a registered individual type
-    pub fn bounds(&self, type_id: &Uuid) -> Result<Vec<GeneBounds>, RegistryError> {
-        let map = self.entries.lock().unwrap();
-        map.get(type_id)
-            .map(|e| e.individual.bounds())
-            .ok_or_else(|| RegistryError::TypeNotRegistered(*type_id))
-    }
-
-    /// Evaluate fitness for gene values
-    pub fn evaluate_fitness(&self, type_id: &Uuid, genes: &[f64]) -> Result<f64, RegistryError> {
-        let map = self.entries.lock().unwrap();
-        map.get(type_id)
-            .map(|e| (e.fitness)(genes))
-            .ok_or_else(|| RegistryError::TypeNotRegistered(*type_id))
+    pub fn evaluate<'b>(
+        &'b self,
+        type_id: TypeId,
+        genes: &[i64],
+    ) -> BoxFuture<'b, Result<f64, String>> {
+        match self.evaluators.get(&type_id) {
+            Some(evaluator) => evaluator.fitness(genes),
+            None => Box::pin(futures::future::ready(Err(
+                "No evaluator found for type".to_string()
+            ))),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gene::{Morphology, Population};
+    use futures::future::ready;
+    use std::rc::Rc;
+    use uuid::Uuid;
 
-    #[derive(Debug)]
-    struct Cube {
+    #[derive(Clone)]
+    struct MyEvaluator;
+
+    pub struct Rect {
+        x: i64,
+        y: i64,
+    }
+
+    impl Encodeable for Rect {
+        type Phenotype = Rect;
+
+        fn decode(genes: &[i64]) -> Self::Phenotype {
+            Rect {
+                x: genes[0],
+                y: genes[1],
+            }
+        }
+
+        fn encode(&self) -> Vec<i64> {
+            vec![self.x, self.y]
+        }
+
+        fn morphology() -> Vec<GeneBounds> {
+            vec![
+                GeneBounds::new(-50, 50, 101).unwrap(), // x: -50 to 50 in 101 steps
+                GeneBounds::new(-50, 50, 101).unwrap(), // y: -50 to 50 in 101 steps
+            ]
+        }
+    }
+
+    impl Evaluator<Rect> for MyEvaluator {
+        fn fitness<'a>(&self, rect: Rect) -> BoxFuture<'a, Result<f64, String>> {
+            // Simple fitness: distance from origin (closer is better)
+            let dist = ((rect.x.pow(2) + rect.y.pow(2)) as f64).sqrt();
+            // Convert to a maximization problem (higher is better)
+            Box::pin(ready(Ok(1.0 / (1.0 + dist))))
+        }
+    }
+
+    pub struct Cube {
         x: i64,
         y: i64,
         z: i64,
     }
 
-    impl Cube {
-        fn new() -> Self {
-            Self { x: 0, y: 0, z: 0 }
-        }
-    }
+    impl Encodeable for Cube {
+        type Phenotype = Cube;
 
-    impl Individual for Cube {
-        fn bounds(&self) -> Vec<GeneBounds> {
-            let bounds = GeneBounds::new(0, 100, 101).unwrap();
-            vec![bounds.clone(), bounds.clone(), bounds]
-        }
-
-        fn from_genes(&self, genes: &[f64]) -> Self {
-            Self {
-                x: genes[0] as i64,
-                y: genes[1] as i64,
-                z: genes[2] as i64,
+        fn decode(genes: &[i64]) -> Self::Phenotype {
+            Cube {
+                x: genes[0],
+                y: genes[1],
+                z: genes[2],
             }
         }
 
-        fn to_genes(&self) -> Vec<f64> {
-            vec![self.x as f64, self.y as f64, self.z as f64]
+        fn encode(&self) -> Vec<i64> {
+            vec![self.x, self.y, self.z]
+        }
+
+        fn morphology() -> Vec<GeneBounds> {
+            let bounds = GeneBounds::new(0, 100, 101).unwrap();
+            vec![bounds.clone(), bounds.clone(), bounds]
         }
     }
 
-    #[test]
-    fn test_registry_register_and_use() {
-        let registry = Registry::new();
-        let type_id = Uuid::now_v7();
+    impl Evaluator<Cube> for MyEvaluator {
+        fn fitness<'a>(&self, cube: Cube) -> BoxFuture<'a, Result<f64, String>> {
+            // Similar fitness: distance from origin (closer is better)
+            let dist = ((cube.x.pow(2) + cube.y.pow(2) + cube.z.pow(2)) as f64).sqrt();
+            Box::pin(ready(Ok(1.0 / (1.0 + dist))))
+        }
+    }
 
-        // Create prototype cube and fitness function
-        let prototype = Box::new(Cube::new());
-        let fitness = Box::new(|genes: &[f64]| {
-            // Fitness: negative distance from origin (maximize)
-            -((genes[0] * genes[0] + genes[1] * genes[1] + genes[2] * genes[2]).sqrt())
+    #[tokio::test]
+    async fn it_optimizes_different_types() {
+        let mut rng = rand::rng();
+        let my_evaluator = MyEvaluator;
+
+        let registry = Registry::new()
+            .register::<Cube, _>(TypeId::of::<Cube>(), my_evaluator.clone())
+            .register::<Rect, _>(TypeId::of::<Rect>(), my_evaluator);
+
+        // First optimize rectangle (find point closest to origin)
+        println!("\nOptimizing Rectangle (2D):");
+        let rect_morphology = Rc::new(Morphology {
+            id: Uuid::now_v7(),
+            bounds: Rect::morphology(),
         });
+        let mut rect_pop = Population::random(&mut rng, 100, rect_morphology);
 
-        // Register cube type
-        registry.register(type_id, prototype, fitness);
+        for generation in 0..10 {
+            let mut fitness = Vec::new();
+            for individual in rect_pop.individuals.iter() {
+                let fit = registry
+                    .evaluate(TypeId::of::<Rect>(), individual.genes())
+                    .await
+                    .unwrap();
+                fitness.push(fit);
+            }
 
-        // Test cube at (30,40,0) -> distance=50 in gene space
-        let test_genes = vec![30.0, 40.0, 0.0];
-        let fit = registry.evaluate_fitness(&type_id, &test_genes).unwrap();
+            let best_idx = fitness
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(idx, _)| idx)
+                .unwrap();
+            let best_fitness = fitness[best_idx];
+            let best_genes = rect_pop.individuals.iter().nth(best_idx).unwrap().genes();
+            println!(
+                "Generation {}: best fitness {} at position ({}, {})",
+                generation, best_fitness, best_genes[0], best_genes[1]
+            );
 
-        // Should be -50.0 (negative distance)
-        assert!((fit + 50.0).abs() < 1e-6);
+            if (best_fitness - 1.0).abs() < 1e-10 {
+                println!("Found perfect solution!");
+                break;
+            }
 
-        // Verify bounds
-        let bounds = registry.bounds(&type_id).unwrap();
-        assert_eq!(bounds.len(), 3);
-        for bound in bounds {
-            assert_eq!(bound.start, 0);
-            assert_eq!(bound.end, 100);
-            assert_eq!(bound.divisor, 101);
+            rect_pop = rect_pop.next_generation(&mut rng, fitness, 50, 10).unwrap();
+        }
+
+        // Then optimize cube (find point closest to origin)
+        println!("\nOptimizing Cube (3D):");
+        let cube_morphology = Rc::new(Morphology {
+            id: Uuid::now_v7(),
+            bounds: Cube::morphology(),
+        });
+        let mut cube_pop = Population::random(&mut rng, 100, cube_morphology);
+
+        for generation in 0..10 {
+            let mut fitness = Vec::new();
+            for individual in cube_pop.individuals.iter() {
+                let fit = registry
+                    .evaluate(TypeId::of::<Cube>(), individual.genes())
+                    .await
+                    .unwrap();
+                fitness.push(fit);
+            }
+
+            let best_idx = fitness
+                .iter()
+                .enumerate()
+                .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+                .map(|(idx, _)| idx)
+                .unwrap();
+            let best_fitness = fitness[best_idx];
+            let best_genes = cube_pop.individuals.iter().nth(best_idx).unwrap().genes();
+            println!(
+                "Generation {}: best fitness {} at position ({}, {}, {})",
+                generation, best_fitness, best_genes[0], best_genes[1], best_genes[2]
+            );
+
+            if (best_fitness - 1.0).abs() < 1e-10 {
+                println!("Found perfect solution!");
+                break;
+            }
+
+            cube_pop = cube_pop.next_generation(&mut rng, fitness, 50, 10).unwrap();
         }
     }
 }

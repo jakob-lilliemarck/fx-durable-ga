@@ -1,12 +1,9 @@
-use crate::{gene::Population, registry::Registry};
+use crate::gene::Population;
 use std::sync::Arc;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
-pub enum ServiceError {
-    #[error("registry error: {0}")]
-    Registry(#[from] crate::registry::RegistryError),
-}
+pub enum ServiceError {}
 
 pub enum PopulationStatus {
     InProgress { remaining: u32 },
@@ -20,7 +17,6 @@ pub enum OptimizationStatus {
 
 pub struct GAOptimization {
     id: Uuid,
-    registry: Arc<Registry>,
     population: Population,
 }
 
