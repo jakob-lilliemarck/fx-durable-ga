@@ -6,7 +6,7 @@ pub struct OptimizationRequested {
 }
 
 /// A generation of genotypes was generated
-pub struct GenerationGenerated {
+pub struct PopulationGenerated {
     optimization_id: Uuid,
 }
 
