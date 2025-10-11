@@ -1,4 +1,4 @@
-use crate::gene::GeneBounds;
+use crate::gene::{GeneBounds, Morphology};
 use futures::future::BoxFuture;
 use std::{any::TypeId, collections::HashMap};
 
@@ -69,6 +69,11 @@ impl<'a> Registry<'a> {
             ))),
         }
     }
+
+    pub fn morphology(&self, type_id: TypeId) -> Option<Morphology> {
+        // We need to be able to get the Morphology of each type
+        todo!()
+    }
 }
 
 #[cfg(test)]
@@ -103,8 +108,8 @@ mod tests {
 
         fn morphology() -> Vec<GeneBounds> {
             vec![
-                GeneBounds::new(-50, 50, 101).unwrap(), // x: -50 to 50 in 101 steps
-                GeneBounds::new(-50, 50, 101).unwrap(), // y: -50 to 50 in 101 steps
+                GeneBounds::new(-500, 500, 1000).unwrap(), // x: -50 to 50 in 101 steps
+                GeneBounds::new(-500, 500, 1000).unwrap(), // y: -50 to 50 in 101 steps
             ]
         }
     }
@@ -140,8 +145,10 @@ mod tests {
         }
 
         fn morphology() -> Vec<GeneBounds> {
-            let bounds = GeneBounds::new(0, 100, 101).unwrap();
-            vec![bounds.clone(), bounds.clone(), bounds]
+            let x_bounds = GeneBounds::new(0, 1000, 1000).unwrap();
+            let y_bounds = GeneBounds::new(0, 1000, 1000).unwrap();
+            let z_bounds = GeneBounds::new(0, 1000, 1000).unwrap();
+            vec![x_bounds, y_bounds, z_bounds]
         }
     }
 
@@ -168,9 +175,9 @@ mod tests {
             id: Uuid::now_v7(),
             bounds: Rect::morphology(),
         });
-        let mut rect_pop = Population::random(&mut rng, 100, rect_morphology);
+        let mut rect_pop = Population::random(&mut rng, 10, rect_morphology);
 
-        for generation in 0..10 {
+        for generation in 0..100 {
             let mut fitness = Vec::new();
             for individual in rect_pop.individuals.iter() {
                 let fit = registry
@@ -207,9 +214,9 @@ mod tests {
             id: Uuid::now_v7(),
             bounds: Cube::morphology(),
         });
-        let mut cube_pop = Population::random(&mut rng, 100, cube_morphology);
+        let mut cube_pop = Population::random(&mut rng, 10, cube_morphology);
 
-        for generation in 0..10 {
+        for generation in 0..100 {
             let mut fitness = Vec::new();
             for individual in cube_pop.individuals.iter() {
                 let fit = registry

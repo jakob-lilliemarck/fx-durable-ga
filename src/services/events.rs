@@ -5,17 +5,19 @@ pub struct OptimizationRequested {
     optimization_id: Uuid,
 }
 
-/// A generation of genotypes was generated
-pub struct PopulationGenerated {
+/// A genotypes was generated
+pub struct GenotypeGenerated {
     optimization_id: Uuid,
+    genotype_id: Uuid,
 }
 
-/// The fitness of a phenotype was successfully computed
+/// A phenotype was successfully evaluated
 pub struct PhenotypeEvaluated {
     optimization_id: Uuid,
+    genotype_id: Uuid,
 }
 
-/// The optimization reached its optimization goal, or ran until the termination condition was met
+/// The optimization reached its optimization goal or ran termination condition
 pub struct OptimizationCompleted {
     optimization_id: Uuid,
 }

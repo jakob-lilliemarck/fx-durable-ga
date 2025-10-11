@@ -67,7 +67,7 @@ impl Morphology {
 
 /// Instance of a genome with specific gene values
 #[derive(Debug)]
-pub struct Genome {
+pub struct Genotype {
     id: Uuid,
     genes: Vec<Gene>,
     morphology: Rc<Morphology>,
@@ -87,11 +87,12 @@ pub enum PercentageError {
     OutOfRange { name: &'static str, value: u8 },
 }
 
-impl Genome {
+impl Genotype {
     /// Get the gene values
     pub fn genes(&self) -> &[Gene] {
         &self.genes
     }
+
     /// Creates new genome with random gene values
     pub fn random(rng: &mut ThreadRng, morphology: &Rc<Morphology>) -> Self {
         Self {
@@ -102,7 +103,11 @@ impl Genome {
     }
 
     /// Creates child genome by mixing genes from two parents
-    pub fn crossover(&self, rng: &mut ThreadRng, other: &Genome) -> Result<Genome, CrossoverError> {
+    pub fn crossover(
+        &self,
+        rng: &mut ThreadRng,
+        other: &Genotype,
+    ) -> Result<Genotype, CrossoverError> {
         if !Rc::ptr_eq(&self.morphology, &other.morphology) {
             return Err(CrossoverError::IncompatibleMorphology {
                 self_id: self.morphology.id,
@@ -118,7 +123,7 @@ impl Genome {
             .map(|(&a, &b)| if rng.random_bool(0.5) { a } else { b })
             .collect();
 
-        Ok(Genome {
+        Ok(Genotype {
             id: Uuid::now_v7(),
             genes,
             morphology: Rc::clone(&self.morphology),
@@ -169,7 +174,7 @@ impl Genome {
 pub struct Population {
     pub(crate) id: Uuid,
     pub(crate) morphology: Rc<Morphology>,
-    pub(crate) individuals: Vec<Genome>,
+    pub(crate) individuals: Vec<Genotype>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -203,7 +208,7 @@ impl Population {
     /// Creates initial population with random genomes
     pub fn random(rng: &mut ThreadRng, size: usize, morphology: Rc<Morphology>) -> Population {
         let individuals = (0..size)
-            .map(|_| Genome {
+            .map(|_| Genotype {
                 id: Uuid::now_v7(),
                 genes: morphology.random(rng),
                 morphology: Rc::clone(&morphology),
@@ -249,7 +254,7 @@ impl Population {
                 // Maybe mutate
                 child.mutate(rng, temperature, mutation_rate)?;
 
-                Ok::<Genome, SelectionError>(child)
+                Ok::<Genotype, SelectionError>(child)
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -260,7 +265,7 @@ impl Population {
         })
     }
 
-    fn select_parent<'a>(&'a self, rng: &mut ThreadRng, weights: &[f64]) -> &'a Genome {
+    fn select_parent<'a>(&'a self, rng: &mut ThreadRng, weights: &[f64]) -> &'a Genotype {
         // Simple weighted random selection
         let mut r = rng.random_range(0.0..1.0);
         for (genome, &weight) in self.individuals.iter().zip(weights) {
