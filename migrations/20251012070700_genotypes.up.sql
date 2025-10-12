@@ -3,6 +3,7 @@ CREATE TABLE fx_durable_ga.genotypes (
     generated_at TIMESTAMPTZ NOT NULL,
     type_name TEXT NOT NULL,
     type_hash INTEGER NOT NULL,
-    genome JSONB NOT NULL,
-    request_id UUID NOT NULL
+    genome BIGINT[] NOT NULL,
+    request_id UUID NOT NULL,
+    fitness DOUBLE PRECISION
 );
