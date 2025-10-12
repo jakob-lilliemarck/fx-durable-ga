@@ -1,13 +1,13 @@
-use crate::repositories::requests::{Chain, FromTxType, ToTx};
+use crate::repositories::chainable::{Chain, FromTxType};
+use crate::repositories::populations;
 use crate::repositories::{
     genotypes,
     morphologies::{self, Morphology},
     requests::{self, Request},
 };
-use crate::service::events::OptimizationRequested;
+use crate::service::events::{GenotypeGenerated, OptimizationRequested};
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
-use fx_mq_jobs::Publisher;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -57,6 +57,7 @@ pub struct Service<'a> {
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
+    populations: populations::Repository,
     evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
 }
 
@@ -64,6 +65,7 @@ pub struct ServiceBuilder<'a> {
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
+    populations: populations::Repository,
     evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
 }
 
@@ -101,6 +103,7 @@ impl<'a> ServiceBuilder<'a> {
             requests: self.requests,
             morphologies: self.morphologies,
             genotypes: self.genotypes,
+            populations: self.populations,
             evaluators: self.evaluators,
         }
     }
@@ -111,11 +114,13 @@ impl<'a> Service<'a> {
         requests: requests::Repository,
         morphologies: morphologies::Repository,
         genotypes: genotypes::Repository,
+        populations: populations::Repository,
     ) -> ServiceBuilder<'a> {
         ServiceBuilder {
             requests,
             morphologies,
             genotypes,
+            populations,
             evaluators: HashMap::new(),
         }
     }
@@ -127,18 +132,18 @@ impl<'a> Service<'a> {
         goal: requests::FitnessGoal,
         threshold: f64,
         strategy: requests::Strategy,
-    ) -> Result<requests::Request, Error> {
-        let request = self
-            .requests
+    ) -> Result<(), Error> {
+        self.requests
             .chain(|mut tx_requests| {
                 Box::pin(async move {
-                    // Create a new optimization request
+                    // Create a new optimization request with the repository
                     let request = tx_requests
                         .new_request(Request::new(
                             type_name, type_hash, goal, threshold, strategy,
                         ))
                         .await?;
 
+                    // Instantiate a publisher
                     let mut publisher = fx_event_bus::Publisher::from_other(tx_requests);
 
                     // Publish an event within the same transaction
@@ -151,7 +156,52 @@ impl<'a> Service<'a> {
             })
             .await?;
 
-        Ok(request)
+        Ok(())
+    }
+
+    pub async fn generate_initial_population(&self, request_id: Uuid) -> Result<(), Error> {
+        // Get the optimization request
+        let request = self.requests.get_request(request_id).await?;
+
+        // Get the morphology of the type under optimization
+        let morphology = self.morphologies.get_morphology(request.type_hash).await?;
+
+        let mut rng = rand::rng();
+        let mut genotypes = Vec::with_capacity(request.population_size() as usize);
+        let mut events = Vec::with_capacity(request.population_size() as usize);
+        for _ in 0..request.population_size() {
+            let genotype = genotypes::Genotype::new(
+                &request.type_name,
+                request.type_hash,
+                morphology.random(&mut rng),
+                request.id,
+            );
+            let event = GenotypeGenerated::new(request.id, genotype.id);
+
+            genotypes.push(genotype);
+            events.push(event);
+        }
+
+        self.genotypes
+            .chain(|mut tx_genotypes| {
+                Box::pin(async move {
+                    // Create the genotypes with the repository
+                    tx_genotypes.new_genotypes(genotypes).await?;
+
+                    // Instantiate a publisher
+                    let mut publisher = fx_event_bus::Publisher::from_other(tx_genotypes);
+
+                    // Publish one event for each generated phenotype
+                    publisher
+                        .publish(OptimizationRequested::new(request.id))
+                        .await?;
+
+                    Ok((publisher, request))
+                })
+            })
+            .await?;
+
+        Ok(())
     }
 
     pub fn evaluate_phenotype(

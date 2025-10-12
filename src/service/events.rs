@@ -15,3 +15,22 @@ impl OptimizationRequested {
         Self { request_id }
     }
 }
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct GenotypeGenerated {
+    request_id: Uuid,
+    genotype_id: Uuid,
+}
+
+impl fx_event_bus::Event for GenotypeGenerated {
+    const NAME: &'static str = "GenotypeGenerated";
+}
+
+impl GenotypeGenerated {
+    pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
+        Self {
+            request_id,
+            genotype_id,
+        }
+    }
+}

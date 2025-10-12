@@ -1,6 +1,9 @@
 use chrono::{DateTime, Utc};
+use rand::{Rng, rngs::ThreadRng};
 use serde::{Deserialize, Serialize};
 use sqlx::{PgExecutor, PgPool, PgTransaction};
+
+use crate::repositories::genotypes;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -48,14 +51,6 @@ impl<'tx> TxRepository<'tx> {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Clone, PartialEq))]
-pub struct GeneBounds {
-    lower: i32,
-    upper: i32,
-    divisor: i32,
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum GeneBoundError {
     #[error(
@@ -79,6 +74,14 @@ impl GeneBoundError {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[cfg_attr(test, derive(Clone, PartialEq))]
+pub struct GeneBounds {
+    lower: i32,
+    upper: i32,
+    divisor: i32,
+}
+
 impl GeneBounds {
     pub fn new(lower: i32, upper: i32, divisor: u32) -> Result<Self, GeneBoundError> {
         if lower > upper {
@@ -93,6 +96,10 @@ impl GeneBounds {
             upper,
             divisor,
         })
+    }
+
+    pub fn random(&self, rng: &mut ThreadRng) -> genotypes::Gene {
+        rng.random_range(0..self.divisor as i64)
     }
 }
 
@@ -113,6 +120,13 @@ impl Morphology {
             type_hash,
             gene_bounds,
         }
+    }
+
+    pub fn random(&self, rng: &mut ThreadRng) -> Vec<genotypes::Gene> {
+        self.gene_bounds
+            .iter()
+            .map(|gene_bound| gene_bound.random(rng))
+            .collect()
     }
 }
 

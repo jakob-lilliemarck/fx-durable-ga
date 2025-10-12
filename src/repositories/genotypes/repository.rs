@@ -1,11 +1,15 @@
+use crate::repositories::chainable::{Chain, ToTx};
 use chrono::{DateTime, Utc};
-use sqlx::{PgExecutor, PgPool, PgTransaction};
+use futures::future::BoxFuture;
+use sqlx::{PgExecutor, PgPool, PgTransaction, prelude::FromRow};
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
+    #[error("Tx error: {0}")]
+    Tx(anyhow::Error),
 }
 
 pub struct Repository {
@@ -23,6 +27,13 @@ impl Repository {
 
     pub(crate) async fn new_genotype(&self, genotype: Genotype) -> Result<Genotype, Error> {
         new_genotype(&self.pool, genotype).await
+    }
+
+    pub(crate) async fn new_genotypes(
+        &self,
+        genotypes: Vec<Genotype>,
+    ) -> Result<Vec<Genotype>, Error> {
+        new_genotypes(&self.pool, genotypes).await
     }
 
     pub(crate) async fn get_genotype(&self, id: Uuid) -> Result<Genotype, Error> {
@@ -43,6 +54,13 @@ impl<'tx> TxRepository<'tx> {
         new_genotype(&mut *self.tx, genotype).await
     }
 
+    pub(crate) async fn new_genotypes(
+        &mut self,
+        genotypes: Vec<Genotype>,
+    ) -> Result<Vec<Genotype>, Error> {
+        new_genotypes(&mut *self.tx, genotypes).await
+    }
+
     pub(crate) async fn get_genotype(&mut self, id: Uuid) -> Result<Genotype, Error> {
         get_genotype(&mut *self.tx, id).await
     }
@@ -52,18 +70,53 @@ impl<'tx> TxRepository<'tx> {
     }
 }
 
+impl<'tx> ToTx<'tx> for TxRepository<'tx> {
+    fn tx(self) -> PgTransaction<'tx> {
+        self.tx
+    }
+}
+
+impl<'tx> Chain<'tx> for Repository {
+    type TxType = TxRepository<'tx>;
+    type TxError = Error;
+
+    fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
+    where
+        R: ToTx<'tx>,
+        F: FnOnce(Self::TxType) -> BoxFuture<'tx, Result<(R, T), anyhow::Error>>
+            + Send
+            + Sync
+            + 'tx,
+        T: Send + Sync + 'tx,
+    {
+        Box::pin(async move {
+            let pool = self.pool.clone();
+            let tx = pool.begin().await?;
+
+            let (tx, ret) = f(TxRepository { tx }).await.map_err(|err| Error::Tx(err))?;
+
+            let tx: PgTransaction<'_> = tx.tx();
+            tx.commit()
+                .await
+                .map_err(|err| Error::Tx(anyhow::Error::new(err)))?;
+
+            Ok(ret)
+        })
+    }
+}
+
 pub type Gene = i64;
 
-#[derive(Debug)]
+#[derive(Debug, FromRow)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct Genotype {
-    id: Uuid,
-    generated_at: DateTime<Utc>,
-    type_name: String,
-    type_hash: i32,
-    genome: Vec<Gene>,
-    request_id: Uuid,
-    fitness: Option<f64>,
+    pub(crate) id: Uuid,
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) type_name: String,
+    pub(crate) type_hash: i32,
+    pub(crate) genome: Vec<Gene>,
+    pub(crate) request_id: Uuid,
+    pub(crate) fitness: Option<f64>,
 }
 
 impl Genotype {
@@ -116,6 +169,56 @@ pub async fn new_genotype<'tx, E: PgExecutor<'tx>>(
     .await?;
 
     Ok(genotype)
+}
+
+pub async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    genotypes: Vec<Genotype>,
+) -> Result<Vec<Genotype>, Error> {
+    let mut query_builder = sqlx::QueryBuilder::new(
+        "INSERT INTO fx_durable_ga.genotypes (
+            id,
+            generated_at,
+            type_name,
+            type_hash,
+            genome,
+            request_id
+        ) VALUES ",
+    );
+
+    let mut first = true;
+    // Stream serialization: serialize each event as needed rather than
+    // pre-allocating all payloads, reducing peak memory usage
+    for g in genotypes {
+        if first {
+            first = false;
+        } else {
+            query_builder.push(", ");
+        }
+
+        query_builder
+            .push("(")
+            .push_bind(g.id)
+            .push(", ")
+            .push_bind(g.generated_at)
+            .push(", ")
+            .push_bind(g.type_name)
+            .push(", ")
+            .push_bind(g.type_hash)
+            .push(", ")
+            .push_bind(g.genome)
+            .push(", ")
+            .push_bind(g.request_id)
+            .push(")");
+    }
+    query_builder.push(" RETURNING id, generated_at, type_name, type_hash, genome, request_id");
+
+    let genotypes = query_builder
+        .build_query_as::<Genotype>()
+        .fetch_all(tx)
+        .await?;
+
+    Ok(genotypes)
 }
 
 pub async fn set_fitness<'tx, E: PgExecutor<'tx>>(

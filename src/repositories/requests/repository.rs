@@ -1,3 +1,4 @@
+use crate::repositories::chainable::{Chain, ToTx};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use sqlx::{
@@ -20,26 +21,36 @@ pub struct Repository {
     pool: PgPool,
 }
 
-pub trait Chain<'tx> {
-    type TxType: ToTx<'tx>;
-    type TxError;
-
-    fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
-    where
-        R: ToTx<'tx>,
-        F: FnOnce(Self::TxType) -> BoxFuture<'tx, Result<(R, T), anyhow::Error>>
-            + Send
-            + Sync
-            + 'tx,
-        T: Send + Sync + 'tx;
+pub struct TxRepository<'tx> {
+    tx: PgTransaction<'tx>,
 }
 
-pub trait ToTx<'tx>: Send + Sync {
-    fn tx(self) -> PgTransaction<'tx>;
+impl Repository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
+    pub async fn new_request(&self, request: Request) -> Result<Request, Error> {
+        new_request(&self.pool, request).await
+    }
+
+    pub async fn get_request(&self, id: Uuid) -> Result<Request, Error> {
+        get_request(&self.pool, id).await
+    }
 }
 
-pub trait FromTxType<'tx> {
-    fn from_other(other: impl ToTx<'tx>) -> Self;
+impl<'tx> TxRepository<'tx> {
+    pub fn new(tx: PgTransaction<'tx>) -> Self {
+        Self { tx }
+    }
+
+    pub async fn new_request(&mut self, request: Request) -> Result<Request, Error> {
+        new_request(&mut *self.tx, request).await
+    }
+
+    pub async fn get_request(&mut self, id: Uuid) -> Result<Request, Error> {
+        get_request(&mut *self.tx, id).await
+    }
 }
 
 impl<'tx> ToTx<'tx> for TxRepository<'tx> {
@@ -74,50 +85,6 @@ impl<'tx> Chain<'tx> for Repository {
 
             Ok(ret)
         })
-    }
-}
-
-impl<'tx> FromTxType<'tx> for fx_event_bus::Publisher<'tx> {
-    fn from_other(other: impl ToTx<'tx>) -> Self {
-        let tx: PgTransaction<'_> = other.tx();
-        fx_event_bus::Publisher::new(tx)
-    }
-}
-impl<'tx> ToTx<'tx> for fx_event_bus::Publisher<'tx> {
-    fn tx(self) -> PgTransaction<'tx> {
-        self.into()
-    }
-}
-
-pub struct TxRepository<'tx> {
-    tx: PgTransaction<'tx>,
-}
-
-impl Repository {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
-    }
-
-    pub async fn new_request(&self, request: Request) -> Result<Request, Error> {
-        new_request(&self.pool, request).await
-    }
-
-    pub async fn get_request(&self, id: Uuid) -> Result<Request, Error> {
-        get_request(&self.pool, id).await
-    }
-}
-
-impl<'tx> TxRepository<'tx> {
-    pub fn new(tx: PgTransaction<'tx>) -> Self {
-        Self { tx }
-    }
-
-    pub async fn new_request(&mut self, request: Request) -> Result<Request, Error> {
-        new_request(&mut *self.tx, request).await
-    }
-
-    pub async fn get_request(&mut self, id: Uuid) -> Result<Request, Error> {
-        get_request(&mut *self.tx, id).await
     }
 }
 
@@ -183,6 +150,17 @@ impl Request {
             goal,
             threshold,
             strategy,
+        }
+    }
+
+    pub fn population_size(&self) -> u32 {
+        match self.strategy {
+            Strategy::Generational {
+                population_size, ..
+            } => population_size,
+            Strategy::Rolling {
+                population_size, ..
+            } => population_size,
         }
     }
 }

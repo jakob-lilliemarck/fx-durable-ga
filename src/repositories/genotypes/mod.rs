@@ -1,3 +1,3 @@
 mod repository;
 
-pub use repository::{Error, Genotype, Repository};
+pub use repository::{Error, Gene, Genotype, Repository};

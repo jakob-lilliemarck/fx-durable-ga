@@ -1,3 +1,3 @@
 mod repository;
 
-pub use repository::{Chain, Error, FitnessGoal, FromTxType, Repository, Request, Strategy, ToTx};
+pub use repository::{Error, FitnessGoal, Repository, Request, Strategy};
