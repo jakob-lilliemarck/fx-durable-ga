@@ -1,6 +1,6 @@
 use crate::{
     gene::Population,
-    repositories::{genotypes, populations, requests},
+    repositories::{genotypes, requests},
 };
 use sqlx::PgPool;
 use std::any::TypeId;
@@ -13,7 +13,6 @@ pub enum Error {}
 pub struct Service<'a> {
     requests: requests::Repository,
     genotypes: genotypes::Repository,
-    population: populations::Repository,
     registry: crate::registry::Registry<'a>,
 }
 

@@ -441,6 +441,7 @@ name = "fx-durable-ga"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
  "const-fnv1a-hash",
  "dotenv",
  "futures",
