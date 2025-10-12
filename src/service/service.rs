@@ -1,11 +1,11 @@
 use crate::repositories::chainable::{Chain, FromTxType};
-use crate::repositories::populations;
+
 use crate::repositories::{
     genotypes,
     morphologies::{self, Morphology},
     requests::{self, Request},
 };
-use crate::service::events::{GenotypeGenerated, OptimizationRequested};
+use crate::service::events::{GenotypeEvaluated, GenotypeGenerated, OptimizationRequested};
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
 use std::collections::HashMap;
@@ -19,6 +19,10 @@ pub enum Error {
     MorphologiesRepositoryError(#[from] morphologies::Error),
     #[error("GenotypesRepositoryError: {0}")]
     GenotypesRepositoryError(#[from] genotypes::Error),
+    #[error("UnknownType: type_name={type_name}, type_hash={type_hash}")]
+    UnknownTypeError { type_hash: i32, type_name: String },
+    #[error("EvaluationError: {0}")]
+    EvaluationError(#[from] anyhow::Error),
 }
 
 pub trait Encodeable {
@@ -33,11 +37,11 @@ pub trait Encodeable {
 }
 
 pub trait Evaluator<P> {
-    fn fitness<'a>(&self, phenotype: P) -> BoxFuture<'a, Result<f64, String>>;
+    fn fitness<'a>(&self, phenotype: P) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
 
 trait TypeErasedEvaluator {
-    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, String>>;
+    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
 
 struct ErasedEvaluator<P, E: Evaluator<P>> {
@@ -46,7 +50,7 @@ struct ErasedEvaluator<P, E: Evaluator<P>> {
 }
 
 impl<P, E: Evaluator<P>> TypeErasedEvaluator for ErasedEvaluator<P, E> {
-    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, String>> {
+    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
         let phenotype = (self.decode)(genes);
         self.evaluator.fitness(phenotype)
     }
@@ -57,7 +61,6 @@ pub struct Service<'a> {
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
-    populations: populations::Repository,
     evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
 }
 
@@ -65,12 +68,11 @@ pub struct ServiceBuilder<'a> {
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
-    populations: populations::Repository,
     evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
 }
 
 impl<'a> ServiceBuilder<'a> {
-    // TODO:
+    // NOTE:
     // This is a N+1, probably not so bad, it shouldn't be like this.
     // Its simple though, so I'll go with it for a first version
     pub async fn register<T, E>(mut self, evaluator: E) -> Result<Self, Error>
@@ -103,7 +105,6 @@ impl<'a> ServiceBuilder<'a> {
             requests: self.requests,
             morphologies: self.morphologies,
             genotypes: self.genotypes,
-            populations: self.populations,
             evaluators: self.evaluators,
         }
     }
@@ -114,13 +115,11 @@ impl<'a> Service<'a> {
         requests: requests::Repository,
         morphologies: morphologies::Repository,
         genotypes: genotypes::Repository,
-        populations: populations::Repository,
     ) -> ServiceBuilder<'a> {
         ServiceBuilder {
             requests,
             morphologies,
             genotypes,
-            populations,
             evaluators: HashMap::new(),
         }
     }
@@ -159,7 +158,12 @@ impl<'a> Service<'a> {
         Ok(())
     }
 
-    pub async fn generate_initial_population(&self, request_id: Uuid) -> Result<(), Error> {
+    // Shall be run in a job triggered by OptimizationRequested
+    pub async fn generate_initial_population(
+        &self,
+        request_id: Uuid,
+        generation_id: i32,
+    ) -> Result<(), Error> {
         // Get the optimization request
         let request = self.requests.get_request(request_id).await?;
 
@@ -168,6 +172,7 @@ impl<'a> Service<'a> {
 
         let mut rng = rand::rng();
         let mut genotypes = Vec::with_capacity(request.population_size() as usize);
+        let mut population = Vec::with_capacity(request.population_size() as usize);
         let mut events = Vec::with_capacity(request.population_size() as usize);
         for _ in 0..request.population_size() {
             let genotype = genotypes::Genotype::new(
@@ -175,7 +180,9 @@ impl<'a> Service<'a> {
                 request.type_hash,
                 morphology.random(&mut rng),
                 request.id,
+                generation_id,
             );
+            population.push((request.id, genotype.id));
             let event = GenotypeGenerated::new(request.id, genotype.id);
 
             genotypes.push(genotype);
@@ -188,13 +195,14 @@ impl<'a> Service<'a> {
                     // Create the genotypes with the repository
                     tx_genotypes.new_genotypes(genotypes).await?;
 
+                    // Add all to the active population of this request
+                    tx_genotypes.add_to_population(&population).await?;
+
                     // Instantiate a publisher
                     let mut publisher = fx_event_bus::Publisher::from_other(tx_genotypes);
 
                     // Publish one event for each generated phenotype
-                    publisher
-                        .publish(OptimizationRequested::new(request.id))
-                        .await?;
+                    publisher.publish_many(&events).await?;
 
                     Ok((publisher, request))
                 })
@@ -204,41 +212,182 @@ impl<'a> Service<'a> {
         Ok(())
     }
 
-    pub fn evaluate_phenotype(
+    // Shall be run in a job triggerd by GenotypeGenerated
+    pub async fn evaluate_genotype(
         &self,
-        optimization_id: Uuid,
+        request_id: Uuid,
         genotype_id: Uuid,
     ) -> Result<(), Error> {
-        // 1. Get the Genotype
-        // 2. Pass it to Registry::evaluate <- this is the long running user defined function
-        // 3. Write a fitness score to the repository
-        // 4. Publish PhenotypeEvaluated event
-        todo!()
+        // Get the genotype from the database
+        let genotype = self.genotypes.get_genotype(genotype_id).await?;
+
+        // Get the evaluator to use for this type
+        let evaluator =
+            self.evaluators
+                .get(&genotype.type_hash)
+                .ok_or(Error::UnknownTypeError {
+                    type_hash: genotype.type_hash,
+                    type_name: genotype.type_name,
+                })?;
+
+        // Call the evaluation function. This is a long running function!
+        let fitness = evaluator.fitness(&genotype.genome).await?;
+
+        self.genotypes
+            .chain(|mut tx_genotypes| {
+                Box::pin(async move {
+                    // Update the fitness of the genotype
+                    tx_genotypes.set_fitness(genotype_id, fitness).await?;
+
+                    // Remove the genotype from the activde population
+                    tx_genotypes
+                        .remove_from_population(request_id, genotype_id)
+                        .await?;
+
+                    // Instantiate a publisher
+                    let mut publisher = fx_event_bus::Publisher::from_other(tx_genotypes);
+
+                    // Publish an event
+                    publisher
+                        .publish(GenotypeEvaluated::new(request_id, genotype_id))
+                        .await?;
+
+                    Ok((publisher, ()))
+                })
+            })
+            .await?;
+
+        Ok(())
     }
 
-    pub fn next_population(&self, optimization_id: Uuid, type_hash: i32) -> Result<(), Error> {
-        // 1. Get the Morphology under optimization <- this is the user defined morphology
-        // 2. Check if there is a prior generation for this optimization
-        //  -> if there is, use it to breed a new one
-        //  -> otherwise randomize the first population
-        // 3. Publish GenotypeGenerated events (for each)
-        todo!()
-    }
-
-    pub fn evaluate_population(
+    async fn maintain_generational(
         &self,
-        optimization_id: Uuid,
-        population_id: Uuid,
+        request: Request,
+        max_generations: u32,
+        population_size: u32,
     ) -> Result<(), Error> {
-        // 1. Get genotypes of this population
-        // 2. If any miss a fitness value, return
+        let genotypes = self
+            .genotypes
+            .search_genotypes_in_latest_generation(
+                population_size as i64,
+                &genotypes::Filter::default().with_fitness(true),
+            )
+            .await?;
+
+        if genotypes.len() < population_size as usize {
+            // population_size is not yet reached, return
+            return Ok(());
+        }
+
+        let generation_id = genotypes
+            .get(0)
+            .map(|g| g.generation_id)
+            .expect("genotypes len is equal or larger to population size");
+
+        if max_generations < generation_id as u32 {
+            // FIXME!
+            //
+            // Perform selection and generate the next generation!
+            todo!()
+        }
+
+        // FIXME!
         //
-        // 3. Get the Optimization
-        // 4. Get the Population
-        // 5. Get the top performing Genotype
-        // 6. If the generation number is equal to the max number of generations or if the top performer meets the goal
-        //  -> Publish OptimizationCompleted event
-        //  -> Otherwise publish GenerationCompleted event
+        // Publish RequestTerminated::new(request.id)
         todo!()
+    }
+
+    async fn maintain_rolling(
+        &self,
+        request: Request,
+        max_evaluations: u32,
+        population_size: u32,
+        selection_interval: u32,
+    ) -> Result<(), Error> {
+        // Get the count of completed evaluations in the latest generation
+        let evaluations = self
+            .genotypes
+            .count_genotypes_in_latest_iteration(
+                &genotypes::Filter::default()
+                    .with_request_ids(vec![request.id])
+                    .with_fitness(true),
+            )
+            .await?;
+
+        if (max_evaluations as i64) < evaluations {
+            // max_evaluations not yet reached, return
+            return Ok(());
+        }
+
+        let population_count = self.genotypes.get_population_count(request.id).await?;
+        if population_count < (population_size - selection_interval) as i64 {
+            // FIXME!
+            //
+            // Perform selection and generate selection_interval number of new Genotypes!
+            todo!()
+        }
+
+        // FIXME!
+        //
+        // Publish RequestTerminated::new(request.id)
+        todo!()
+    }
+
+    // Shall be run in a job triggered by GenotypeEvaluated
+    pub async fn maintain_population(&self, request_id: Uuid) -> Result<(), Error> {
+        // Get the request
+        let request = self.requests.get_request(request_id).await?;
+
+        // Check for completion
+        let top_performer = self
+            .genotypes
+            .search_genotypes_in_latest_generation(
+                1,
+                &genotypes::Filter::default()
+                    .with_request_ids(vec![request.id])
+                    .with_fitness(true),
+            )
+            .await?;
+
+        if top_performer.is_empty() {
+            // Nothing to do
+            return Ok(());
+        }
+
+        let fitness = top_performer[0]
+            .fitness()
+            .expect("Filtered out genotypes without fitness in query");
+
+        if request.is_completed(fitness) {
+            // FIXME!
+            //
+            // Publish RequestCompleted::new(request_id)
+            return Ok(());
+        }
+
+        match request.strategy {
+            requests::Strategy::Generational {
+                max_generations,
+                population_size,
+            } => {
+                return self
+                    .maintain_generational(request, max_generations, population_size)
+                    .await;
+            }
+            requests::Strategy::Rolling {
+                max_evaluations,
+                population_size,
+                selection_interval,
+            } => {
+                return self
+                    .maintain_rolling(
+                        request,
+                        max_evaluations,
+                        population_size,
+                        selection_interval,
+                    )
+                    .await;
+            }
+        }
     }
 }

@@ -93,7 +93,6 @@ impl<'tx> Chain<'tx> for Repository {
 pub enum FitnessGoal {
     Minimize,
     Maximize,
-    Exact,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -161,6 +160,25 @@ impl Request {
             Strategy::Rolling {
                 population_size, ..
             } => population_size,
+        }
+    }
+
+    pub fn is_completed(&self, fitness: f64) -> bool {
+        match self.goal {
+            FitnessGoal::Minimize => fitness <= self.threshold,
+            FitnessGoal::Maximize => fitness >= self.threshold,
+        }
+    }
+
+    pub fn check_termination(&self, evaluations: i64) -> bool {
+        match self.strategy {
+            Strategy::Generational {
+                max_generations,
+                population_size,
+            } => evaluations as u32 >= max_generations * population_size,
+            Strategy::Rolling {
+                max_evaluations, ..
+            } => evaluations as u32 >= max_evaluations,
         }
     }
 }
