@@ -8,6 +8,8 @@ pub enum Error {
     Database(#[from] sqlx::Error),
     #[error("Serde error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("Not found")]
+    NotFound,
 }
 
 pub struct Repository {
@@ -200,7 +202,11 @@ async fn get_morphology<'tx, E: PgExecutor<'tx>>(
         type_hash
     )
     .fetch_one(tx)
-    .await?;
+    .await
+    .map_err(|err| match err {
+        sqlx::Error::RowNotFound => Error::NotFound,
+        err => Error::Database(err),
+    })?;
 
     let morphology = Morphology::try_from(db_morphology)?;
     Ok(morphology)
@@ -303,6 +309,7 @@ mod tests {
         let selected = repository.get_morphology(morphology_type_hash).await;
 
         assert!(selected.is_err());
+        assert!(matches!(selected, Err(Error::NotFound)));
 
         Ok(())
     }

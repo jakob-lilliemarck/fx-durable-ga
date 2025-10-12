@@ -1,3 +1,3 @@
 mod repository;
 
-pub use repository::{Error, Morphology, Repository};
+pub use repository::{Error, GeneBoundError, GeneBounds, Morphology, Repository};

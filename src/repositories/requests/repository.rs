@@ -1,3 +1,4 @@
+use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use sqlx::{
     PgExecutor, PgPool, PgTransaction,
@@ -11,10 +12,81 @@ pub enum Error {
     Database(#[from] sqlx::Error),
     #[error("Serde error: {0}")]
     Serde(#[from] serde_json::Error),
+    #[error("Tx error: {0}")]
+    Tx(anyhow::Error),
 }
 
 pub struct Repository {
     pool: PgPool,
+}
+
+pub trait Chain<'tx> {
+    type TxType: ToTx<'tx>;
+    type TxError;
+
+    fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
+    where
+        R: ToTx<'tx>,
+        F: FnOnce(Self::TxType) -> BoxFuture<'tx, Result<(R, T), anyhow::Error>>
+            + Send
+            + Sync
+            + 'tx,
+        T: Send + Sync + 'tx;
+}
+
+pub trait ToTx<'tx>: Send + Sync {
+    fn tx(self) -> PgTransaction<'tx>;
+}
+
+pub trait FromTxType<'tx> {
+    fn from_other(other: impl ToTx<'tx>) -> Self;
+}
+
+impl<'tx> ToTx<'tx> for TxRepository<'tx> {
+    fn tx(self) -> PgTransaction<'tx> {
+        self.tx
+    }
+}
+
+impl<'tx> Chain<'tx> for Repository {
+    type TxType = TxRepository<'tx>;
+    type TxError = Error;
+
+    fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
+    where
+        R: ToTx<'tx>,
+        F: FnOnce(Self::TxType) -> BoxFuture<'tx, Result<(R, T), anyhow::Error>>
+            + Send
+            + Sync
+            + 'tx,
+        T: Send + Sync + 'tx,
+    {
+        Box::pin(async move {
+            let pool = self.pool.clone();
+            let tx = pool.begin().await?;
+
+            let (tx, ret) = f(TxRepository { tx }).await.map_err(|err| Error::Tx(err))?;
+
+            let tx: PgTransaction<'_> = tx.tx();
+            tx.commit()
+                .await
+                .map_err(|err| Error::Tx(anyhow::Error::new(err)))?;
+
+            Ok(ret)
+        })
+    }
+}
+
+impl<'tx> FromTxType<'tx> for fx_event_bus::Publisher<'tx> {
+    fn from_other(other: impl ToTx<'tx>) -> Self {
+        let tx: PgTransaction<'_> = other.tx();
+        fx_event_bus::Publisher::new(tx)
+    }
+}
+impl<'tx> ToTx<'tx> for fx_event_bus::Publisher<'tx> {
+    fn tx(self) -> PgTransaction<'tx> {
+        self.into()
+    }
 }
 
 pub struct TxRepository<'tx> {
@@ -86,19 +158,19 @@ struct DbRequest {
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
 pub struct Request {
-    id: Uuid,
-    requested_at: DateTime<Utc>,
-    type_name: String,
-    type_hash: i32,
-    goal: FitnessGoal,
-    threshold: f64,
-    strategy: Strategy,
+    pub(crate) id: Uuid,
+    pub(crate) requested_at: DateTime<Utc>,
+    pub(crate) type_name: String,
+    pub(crate) type_hash: i32,
+    pub(crate) goal: FitnessGoal,
+    pub(crate) threshold: f64,
+    pub(crate) strategy: Strategy,
 }
 
 impl Request {
     pub fn new(
-        name: &str,
-        hash: i32,
+        type_name: &str,
+        type_hash: i32,
         goal: FitnessGoal,
         threshold: f64,
         strategy: Strategy,
@@ -106,8 +178,8 @@ impl Request {
         Self {
             id: Uuid::now_v7(),
             requested_at: Utc::now(),
-            type_name: name.to_string(),
-            type_hash: hash,
+            type_name: type_name.to_string(),
+            type_hash,
             goal,
             threshold,
             strategy,
