@@ -1,8 +1,5 @@
-use std::i32;
-
 use chrono::{DateTime, Utc};
 use sqlx::{PgExecutor, PgPool, PgTransaction};
-use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -34,13 +31,13 @@ impl Repository {
         let db_morphology = insert_morphology(&self.pool, db_morphology).await?;
 
         let db_gene_bounds =
-            insert_gene_bounds(&self.pool, db_morphology.id, &db_gene_bounds).await?;
+            insert_gene_bounds(&self.pool, db_morphology.type_hash, &db_gene_bounds).await?;
 
         Ok(Morphology::from((db_morphology, db_gene_bounds)))
     }
 
-    pub async fn get_morphology(&self, id: Uuid) -> Result<Morphology, Error> {
-        get_morphology(&self.pool, id).await
+    pub async fn get_morphology(&self, type_hash: i32) -> Result<Morphology, Error> {
+        get_morphology(&self.pool, type_hash).await
     }
 }
 
@@ -56,13 +53,13 @@ impl<'tx> TxRepository<'tx> {
         let db_morphology = insert_morphology(&mut *self.tx, db_morphology).await?;
 
         let db_gene_bounds =
-            insert_gene_bounds(&mut *self.tx, db_morphology.id, &db_gene_bounds).await?;
+            insert_gene_bounds(&mut *self.tx, db_morphology.type_hash, &db_gene_bounds).await?;
 
         Ok(Morphology::from((db_morphology, db_gene_bounds)))
     }
 
-    pub async fn get_morphology(&mut self, id: Uuid) -> Result<Morphology, Error> {
-        get_morphology(&mut *self.tx, id).await
+    pub async fn get_morphology(&mut self, type_hash: i32) -> Result<Morphology, Error> {
+        get_morphology(&mut *self.tx, type_hash).await
     }
 }
 
@@ -117,7 +114,6 @@ impl GeneBounds {
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct Morphology {
-    id: Uuid,
     revised_at: DateTime<Utc>,
     type_name: String,
     type_hash: i32,
@@ -127,7 +123,6 @@ pub struct Morphology {
 impl Morphology {
     pub fn new(type_name: &str, type_hash: i32, gene_bounds: Vec<GeneBounds>) -> Self {
         Self {
-            id: Uuid::now_v7(),
             revised_at: Utc::now(),
             type_name: type_name.to_string(),
             type_hash,
@@ -138,7 +133,7 @@ impl Morphology {
 
 #[derive(Debug, sqlx::FromRow)]
 struct DbGeneBounds {
-    morphology_id: Uuid,
+    morphology_id: i32,
     position: i32,
     lower: i32,
     upper: i32,
@@ -147,7 +142,6 @@ struct DbGeneBounds {
 
 #[derive(Debug)]
 struct DbMorphology {
-    id: Uuid,
     revised_at: DateTime<Utc>,
     type_name: String,
     type_hash: i32,
@@ -163,7 +157,7 @@ impl TryFrom<Morphology> for (DbMorphology, Vec<DbGeneBounds>) {
             .enumerate()
             .map(|(i, b)| {
                 Ok(DbGeneBounds {
-                    morphology_id: morphology.id,
+                    morphology_id: morphology.type_hash,
                     position: i32::try_from(i)
                         .map_err(|_| Error::IntegerOverflow("position".to_string()))?,
                     lower: b.lower,
@@ -175,7 +169,6 @@ impl TryFrom<Morphology> for (DbMorphology, Vec<DbGeneBounds>) {
             .collect();
 
         let morphology = DbMorphology {
-            id: morphology.id,
             revised_at: morphology.revised_at,
             type_name: morphology.type_name,
             type_hash: morphology.type_hash,
@@ -188,7 +181,6 @@ impl TryFrom<Morphology> for (DbMorphology, Vec<DbGeneBounds>) {
 impl From<(DbMorphology, Vec<DbGeneBounds>)> for Morphology {
     fn from((db_morphology, db_gene_bounds): (DbMorphology, Vec<DbGeneBounds>)) -> Self {
         Morphology {
-            id: db_morphology.id,
             revised_at: db_morphology.revised_at,
             type_name: db_morphology.type_name.clone(),
             type_hash: db_morphology.type_hash,
@@ -212,19 +204,16 @@ async fn insert_morphology<'tx, E: PgExecutor<'tx>>(
         DbMorphology,
         r#"
             INSERT INTO fx_durable_ga.morphologies (
-                id,
                 revised_at,
                 type_name,
                 type_hash
             )
-            VALUES ($1, $2, $3, $4)
+            VALUES ($1, $2, $3)
             RETURNING
-                id,
                 revised_at,
                 type_name,
                 type_hash;
             "#,
-        morphology.id,
         morphology.revised_at,
         morphology.type_name,
         morphology.type_hash
@@ -237,7 +226,7 @@ async fn insert_morphology<'tx, E: PgExecutor<'tx>>(
 
 async fn insert_gene_bounds<'tx, E: PgExecutor<'tx>>(
     tx: E,
-    morphology_id: Uuid,
+    morphology_id: i32,
     gene_bounds: &[DbGeneBounds],
 ) -> Result<Vec<DbGeneBounds>, Error> {
     let mut query_builder = sqlx::QueryBuilder::new(
@@ -285,7 +274,6 @@ async fn insert_gene_bounds<'tx, E: PgExecutor<'tx>>(
 }
 
 struct MorphologyRow {
-    morphology_id: Uuid,
     revised_at: DateTime<Utc>,
     type_name: String,
     type_hash: i32,
@@ -315,7 +303,6 @@ impl TryFrom<Vec<MorphologyRow>> for Morphology {
             .collect();
 
         Ok(Morphology {
-            id: first.morphology_id,
             revised_at: first.revised_at,
             type_name: first.type_name.clone(),
             type_hash: first.type_hash,
@@ -324,12 +311,14 @@ impl TryFrom<Vec<MorphologyRow>> for Morphology {
     }
 }
 
-async fn get_morphology<'tx, E: PgExecutor<'tx>>(tx: E, id: Uuid) -> Result<Morphology, Error> {
+async fn get_morphology<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    type_hash: i32,
+) -> Result<Morphology, Error> {
     let rows = sqlx::query_as!(
         MorphologyRow,
         r#"
             SELECT
-                m.id AS morphology_id,
                 m.revised_at,
                 m.type_name,
                 m.type_hash,
@@ -338,11 +327,11 @@ async fn get_morphology<'tx, E: PgExecutor<'tx>>(tx: E, id: Uuid) -> Result<Morp
                 b.upper,
                 b.divisor
             FROM fx_durable_ga.morphologies m
-            JOIN fx_durable_ga.gene_bounds b ON m.id = b.morphology_id
-            WHERE m.id = $1
+            JOIN fx_durable_ga.gene_bounds b ON m.type_hash = b.morphology_id
+            WHERE m.type_hash = $1
             ORDER BY position ASC;
         "#,
-        id
+        type_hash
     )
     .fetch_all(tx)
     .await?;
@@ -382,7 +371,6 @@ mod tests {
 
         let inserted = repository.new_morphology(morphology).await?;
 
-        assert_eq!(morphology_clone.id, inserted.id);
         assert_eq!(
             morphology_clone.revised_at.trunc_subsecs(6),
             inserted.revised_at
@@ -430,12 +418,12 @@ mod tests {
                 GeneBounds::new(1, 10, 10)?,
             ],
         );
-        let morphology_id = morphology.id;
+        let morphology_type_hash = morphology.type_hash;
 
         let _ = repository.new_morphology(morphology).await?;
-        let selected = repository.get_morphology(morphology_id).await?;
+        let selected = repository.get_morphology(morphology_type_hash).await?;
 
-        assert_eq!(morphology_id, selected.id);
+        assert_eq!(morphology_type_hash, selected.type_hash);
 
         Ok(())
     }
@@ -453,9 +441,9 @@ mod tests {
                 GeneBounds::new(1, 10, 10)?,
             ],
         );
-        let morphology_id = morphology.id;
+        let morphology_type_hash = morphology.type_hash;
 
-        let selected = repository.get_morphology(morphology_id).await;
+        let selected = repository.get_morphology(morphology_type_hash).await;
 
         assert!(selected.is_err());
 
