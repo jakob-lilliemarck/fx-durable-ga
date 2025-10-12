@@ -1,38 +1,29 @@
 use crate::{
-    gene::Population,
     repositories::{genotypes, requests},
+    service::models::gene::Population,
 };
-use sqlx::PgPool;
-use std::any::TypeId;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
-pub enum Error {}
+pub enum Error {
+    #[error("RequestsRepositoryError: {0}")]
+    RequestsRepositoryError(#[from] requests::Error),
+    #[error("GenotypesRepositoryError: {0}")]
+    GenotypesRepositoryError(#[from] genotypes::Error),
+}
 
 // optimization service
 pub struct Service<'a> {
     requests: requests::Repository,
     genotypes: genotypes::Repository,
-    registry: crate::registry::Registry<'a>,
+    registry: super::Registry<'a>,
 }
 
 impl<'a> Service<'a> {
-    pub fn new_optimization() -> Result<(), Error> {
+    pub fn new_optimization(&self) -> Result<requests::Request, Error> {
         // 1. Write the optimization to the database
-        // 2. Publish OptimizationRequested
-        todo!()
-    }
 
-    pub fn next_population(
-        &self,
-        optimization_id: Uuid,
-        phenotype_id: TypeId,
-    ) -> Result<Population, Error> {
-        // 1. Get the Morphology under optimization <- this is the user defined morphology
-        // 2. Check if there is a prior generation for this optimization
-        //  -> if there is, use it to breed a new one
-        //  -> otherwise randomize the first population
-        // 3. Publish GenotypeGenerated events (for each)
+        // 2. Publish OptimizationRequested
         todo!()
     }
 
@@ -45,6 +36,19 @@ impl<'a> Service<'a> {
         // 2. Pass it to Registry::evaluate <- this is the long running user defined function
         // 3. Write a fitness score to the repository
         // 4. Publish PhenotypeEvaluated event
+        todo!()
+    }
+
+    pub fn next_population(
+        &self,
+        optimization_id: Uuid,
+        type_hash: i32,
+    ) -> Result<Population, Error> {
+        // 1. Get the Morphology under optimization <- this is the user defined morphology
+        // 2. Check if there is a prior generation for this optimization
+        //  -> if there is, use it to breed a new one
+        //  -> otherwise randomize the first population
+        // 3. Publish GenotypeGenerated events (for each)
         todo!()
     }
 

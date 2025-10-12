@@ -1,12 +1,16 @@
-use crate::gene::{GeneBounds, Morphology};
+use super::GeneBounds;
+use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
-use std::{any::TypeId, collections::HashMap};
+use std::collections::HashMap;
 
 // For the registry to function, we probably need to contain the fitness evaluation operation within it.
 // The reason is that we will not be able to return an arbitary type from the registry, since we would not know what that that would be?
-
 pub trait Encodeable {
+    const NAME: &str;
+    const HASH: i32 = fnv1a_hash_str_32(Self::NAME) as i32;
+
     type Phenotype;
+
     fn morphology() -> Vec<GeneBounds>;
     fn encode(&self) -> Vec<i64>;
     fn decode(genes: &[i64]) -> Self::Phenotype;
@@ -16,34 +20,20 @@ pub trait Evaluator<P> {
     fn fitness<'a>(&self, phenotype: P) -> BoxFuture<'a, Result<f64, String>>;
 }
 
-pub trait TypeErasedEvaluator {
-    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, String>>;
-}
-
-struct ErasedEvaluator<P, E: Evaluator<P>> {
-    evaluator: E,
-    decode: fn(&[i64]) -> P,
-}
-
-impl<P, E: Evaluator<P>> TypeErasedEvaluator for ErasedEvaluator<P, E> {
-    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, String>> {
-        let phenotype = (self.decode)(genes);
-        self.evaluator.fitness(phenotype)
-    }
-}
-
 pub struct Registry<'a> {
-    evaluators: HashMap<TypeId, Box<dyn TypeErasedEvaluator + 'a>>,
+    evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
+    morphologies: HashMap<i32, Vec<GeneBounds>>,
 }
 
 impl<'a> Registry<'a> {
     pub fn new() -> Self {
         Self {
             evaluators: HashMap::new(),
+            morphologies: HashMap::new(),
         }
     }
 
-    pub fn register<T, E>(mut self, type_id: TypeId, evaluator: E) -> Self
+    pub fn register<T, E>(mut self, type_hash: i32, evaluator: E) -> Self
     where
         T: Encodeable + 'a,
         E: Evaluator<T::Phenotype> + 'a,
@@ -51,18 +41,19 @@ impl<'a> Registry<'a> {
         let erased = ErasedEvaluator {
             evaluator,
             decode: T::decode,
+            morphology: T::morphology(),
         };
 
-        self.evaluators.insert(type_id, Box::new(erased));
+        self.evaluators.insert(type_hash, Box::new(erased));
         self
     }
 
     pub fn evaluate<'b>(
         &'b self,
-        type_id: TypeId,
+        type_hash: i32,
         genes: &[i64],
     ) -> BoxFuture<'b, Result<f64, String>> {
-        match self.evaluators.get(&type_id) {
+        match self.evaluators.get(&type_hash) {
             Some(evaluator) => evaluator.fitness(genes),
             None => Box::pin(futures::future::ready(Err(
                 "No evaluator found for type".to_string()
@@ -70,16 +61,40 @@ impl<'a> Registry<'a> {
         }
     }
 
-    pub fn morphology(&self, type_id: TypeId) -> Option<Morphology> {
-        // We need to be able to get the Morphology of each type
-        todo!()
+    pub fn morphology(&self, type_hash: i32) -> Result<&[GeneBounds], String> {
+        match self.evaluators.get(&type_hash) {
+            Some(evaluator) => Ok(evaluator.morphology()),
+            None => Err("bullshiet".to_string()),
+        }
+    }
+}
+
+trait TypeErasedEvaluator {
+    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, String>>;
+    fn morphology(&self) -> &[GeneBounds];
+}
+
+struct ErasedEvaluator<P, E: Evaluator<P>> {
+    evaluator: E,
+    decode: fn(&[i64]) -> P,
+    morphology: Vec<GeneBounds>,
+}
+
+impl<P, E: Evaluator<P>> TypeErasedEvaluator for ErasedEvaluator<P, E> {
+    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, String>> {
+        let phenotype = (self.decode)(genes);
+        self.evaluator.fitness(phenotype)
+    }
+
+    fn morphology(&self) -> &[GeneBounds] {
+        &self.morphology
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::gene::{Morphology, Population};
     use super::*;
-    use crate::gene::{Morphology, Population};
     use futures::future::ready;
     use std::rc::Rc;
     use uuid::Uuid;
@@ -93,6 +108,8 @@ mod tests {
     }
 
     impl Encodeable for Rect {
+        const NAME: &str = "rect";
+
         type Phenotype = Rect;
 
         fn decode(genes: &[i64]) -> Self::Phenotype {
@@ -130,6 +147,8 @@ mod tests {
     }
 
     impl Encodeable for Cube {
+        const NAME: &str = "cube";
+
         type Phenotype = Cube;
 
         fn decode(genes: &[i64]) -> Self::Phenotype {
@@ -166,8 +185,8 @@ mod tests {
         let my_evaluator = MyEvaluator;
 
         let registry = Registry::new()
-            .register::<Cube, _>(TypeId::of::<Cube>(), my_evaluator.clone())
-            .register::<Rect, _>(TypeId::of::<Rect>(), my_evaluator);
+            .register::<Cube, _>(Cube::HASH, my_evaluator.clone())
+            .register::<Rect, _>(Rect::HASH, my_evaluator);
 
         // First optimize rectangle (find point closest to origin)
         println!("\nOptimizing Rectangle (2D):");
@@ -181,7 +200,7 @@ mod tests {
             let mut fitness = Vec::new();
             for individual in rect_pop.individuals.iter() {
                 let fit = registry
-                    .evaluate(TypeId::of::<Rect>(), individual.genes())
+                    .evaluate(Rect::HASH, individual.genes())
                     .await
                     .unwrap();
                 fitness.push(fit);
@@ -220,7 +239,7 @@ mod tests {
             let mut fitness = Vec::new();
             for individual in cube_pop.individuals.iter() {
                 let fit = registry
-                    .evaluate(TypeId::of::<Cube>(), individual.genes())
+                    .evaluate(Cube::HASH, individual.genes())
                     .await
                     .unwrap();
                 fitness.push(fit);

@@ -1,4 +1,3 @@
-use crate::gene::Gene;
 use chrono::{DateTime, Utc};
 use sqlx::{PgExecutor, PgPool, PgTransaction};
 use uuid::Uuid;
@@ -18,6 +17,10 @@ pub struct TxRepository<'tx> {
 }
 
 impl Repository {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
+
     pub(crate) async fn new_genotype(&self, genotype: Genotype) -> Result<Genotype, Error> {
         new_genotype(&self.pool, genotype).await
     }
@@ -32,6 +35,10 @@ impl Repository {
 }
 
 impl<'tx> TxRepository<'tx> {
+    pub fn new(tx: PgTransaction<'tx>) -> Self {
+        Self { tx }
+    }
+
     pub(crate) async fn new_genotype(&mut self, genotype: Genotype) -> Result<Genotype, Error> {
         new_genotype(&mut *self.tx, genotype).await
     }
@@ -44,6 +51,8 @@ impl<'tx> TxRepository<'tx> {
         set_fitness(&mut *self.tx, id, fitness).await
     }
 }
+
+pub type Gene = i64;
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
@@ -160,7 +169,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_inserts_a_new_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let repository = Repository { pool };
+        let repository = Repository::new(pool);
 
         let request_id = Uuid::now_v7();
         let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id);
@@ -183,7 +192,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let repository = Repository { pool };
+        let repository = Repository::new(pool);
 
         let request_id = Uuid::now_v7();
         let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id);
@@ -198,7 +207,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_updates_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let repository = Repository { pool };
+        let repository = Repository::new(pool);
 
         let request_id = Uuid::now_v7();
         let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id);
@@ -211,7 +220,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_if_fitness_is_already_set(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let repository = Repository { pool };
+        let repository = Repository::new(pool);
 
         let request_id = Uuid::now_v7();
         let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id);
@@ -226,7 +235,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_an_existing_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let repository = Repository { pool };
+        let repository = Repository::new(pool);
 
         let genotype = Genotype {
             id: Uuid::now_v7(),
@@ -248,7 +257,7 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let repository = Repository { pool };
+        let repository = Repository::new(pool);
         let non_existent_id = Uuid::now_v7();
 
         let result = repository.get_genotype(non_existent_id).await;

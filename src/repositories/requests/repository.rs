@@ -221,28 +221,9 @@ pub async fn get_request<'tx, E: PgExecutor<'tx>>(tx: E, id: Uuid) -> Result<Req
 mod tests {
     use super::*;
     use chrono::SubsecRound;
-    use crate::migrations::run_migrations;
-
-    async fn setup_test_db(pool: &PgPool) -> Result<(), sqlx::Error> {
-        // Drop schema if it exists
-        sqlx::query!("DROP SCHEMA IF EXISTS fx_durable_ga CASCADE")
-            .execute(pool)
-            .await?;
-
-        // Create schema
-        sqlx::query!("CREATE SCHEMA fx_durable_ga")
-            .execute(pool)
-            .await?;
-
-        // Run migrations
-        run_migrations(pool).await?;
-
-        Ok(())
-    }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_inserts_a_new_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        setup_test_db(&pool).await?;
         let repository = Repository::new(pool);
 
         let request = Request::new(
@@ -275,7 +256,6 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        setup_test_db(&pool).await?;
         let repository = Repository::new(pool);
 
         let request = Request::new(
@@ -300,7 +280,6 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_an_existing_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        setup_test_db(&pool).await?;
         let repository = Repository::new(pool);
 
         let request = Request::new(
@@ -324,7 +303,6 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        setup_test_db(&pool).await?;
         let repository = Repository::new(pool);
 
         let request = Request::new(
