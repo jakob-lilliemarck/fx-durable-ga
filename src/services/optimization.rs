@@ -2,6 +2,7 @@ use crate::{
     gene::Population,
     repositories::{genotypes, populations, requests},
 };
+use sqlx::PgPool;
 use std::any::TypeId;
 use uuid::Uuid;
 
