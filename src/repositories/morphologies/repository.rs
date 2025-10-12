@@ -1,3 +1,5 @@
+use std::i32;
+
 use chrono::{DateTime, Utc};
 use sqlx::{PgExecutor, PgPool, PgTransaction};
 use uuid::Uuid;
@@ -65,19 +67,73 @@ impl<'tx> TxRepository<'tx> {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct GeneBounds {
     lower: i32,
     upper: i32,
-    divisor: u32,
+    divisor: i32,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum GeneBoundError {
+    #[error(
+        "InvalidBounds: lower bound must be smaller than upper. lower = {lower}, upper={upper}"
+    )]
+    InvalidBound { lower: i32, upper: i32 },
+    #[error("DivisorOverflow: divisor is too large. divisor={divisor}, max={max}")]
+    DivisorOverflow { divisor: u32, max: i32 },
+}
+
+impl GeneBoundError {
+    fn divisor_overflow(divisor: u32) -> Self {
+        Self::DivisorOverflow {
+            divisor,
+            max: i32::MAX,
+        }
+    }
+
+    fn invalid_bound(lower: i32, upper: i32) -> Self {
+        Self::InvalidBound { lower, upper }
+    }
+}
+
+impl GeneBounds {
+    pub fn new(lower: i32, upper: i32, divisor: u32) -> Result<Self, GeneBoundError> {
+        if lower > upper {
+            return Err(GeneBoundError::invalid_bound(lower, upper));
+        };
+
+        let divisor =
+            i32::try_from(divisor).map_err(|_| GeneBoundError::divisor_overflow(divisor))?;
+
+        Ok(Self {
+            lower,
+            upper,
+            divisor,
+        })
+    }
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct Morphology {
     id: Uuid,
     revised_at: DateTime<Utc>,
     type_name: String,
     type_hash: i32,
     gene_bounds: Vec<GeneBounds>,
+}
+
+impl Morphology {
+    pub fn new(type_name: &str, type_hash: i32, gene_bounds: Vec<GeneBounds>) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            revised_at: Utc::now(),
+            type_name: type_name.to_string(),
+            type_hash,
+            gene_bounds,
+        }
+    }
 }
 
 #[derive(Debug, sqlx::FromRow)]
@@ -141,7 +197,7 @@ impl From<(DbMorphology, Vec<DbGeneBounds>)> for Morphology {
                 .map(|b| GeneBounds {
                     lower: b.lower,
                     upper: b.upper,
-                    divisor: b.divisor as u32,
+                    divisor: b.divisor,
                 })
                 .collect::<Vec<GeneBounds>>(),
         }
@@ -253,8 +309,7 @@ impl TryFrom<Vec<MorphologyRow>> for Morphology {
                 Ok(GeneBounds {
                     lower: b.lower,
                     upper: b.upper,
-                    divisor: u32::try_from(b.divisor)
-                        .map_err(|_| Error::IntegerOverflow("divisor".to_string()))?,
+                    divisor: b.divisor,
                 })
             })
             .collect();
@@ -298,32 +353,112 @@ async fn get_morphology<'tx, E: PgExecutor<'tx>>(tx: E, id: Uuid) -> Result<Morp
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::SubsecRound;
+
+    #[test]
+    fn it_errors_on_position_overflow() {
+        todo!()
+    }
+
+    #[test]
+    fn it_errors_on_divisor_overflow() {
+        todo!()
+    }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_inserts_a_new_morphology(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let repository = Repository::new(pool);
 
-        todo!()
+        let morphology = Morphology::new(
+            "test",
+            1,
+            vec![
+                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::new(1, 10, 10)?,
+            ],
+        );
+        let morphology_clone = morphology.clone();
+
+        let inserted = repository.new_morphology(morphology).await?;
+
+        assert_eq!(morphology_clone.id, inserted.id);
+        assert_eq!(
+            morphology_clone.revised_at.trunc_subsecs(6),
+            inserted.revised_at
+        );
+        assert_eq!(morphology_clone.type_name, inserted.type_name);
+        assert_eq!(morphology_clone.type_hash, inserted.type_hash);
+        assert_eq!(morphology_clone.gene_bounds, inserted.gene_bounds);
+
+        Ok(())
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let repository = Repository::new(pool);
 
-        todo!()
+        let morphology = Morphology::new(
+            "test",
+            1,
+            vec![
+                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::new(1, 10, 10)?,
+            ],
+        );
+        let morphology_clone = morphology.clone();
+
+        let _ = repository.new_morphology(morphology).await?;
+        let inserted = repository.new_morphology(morphology_clone).await;
+
+        assert!(inserted.is_err());
+
+        Ok(())
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_an_existing_morphology(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let repository = Repository::new(pool);
 
-        todo!()
+        let morphology = Morphology::new(
+            "test",
+            1,
+            vec![
+                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::new(1, 10, 10)?,
+            ],
+        );
+        let morphology_id = morphology.id;
+
+        let _ = repository.new_morphology(morphology).await?;
+        let selected = repository.get_morphology(morphology_id).await?;
+
+        assert_eq!(morphology_id, selected.id);
+
+        Ok(())
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let repository = Repository::new(pool);
 
-        todo!()
+        let morphology = Morphology::new(
+            "test",
+            1,
+            vec![
+                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::new(1, 10, 10)?,
+            ],
+        );
+        let morphology_id = morphology.id;
+
+        let selected = repository.get_morphology(morphology_id).await;
+
+        assert!(selected.is_err());
+
+        Ok(())
     }
 }
