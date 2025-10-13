@@ -55,8 +55,8 @@ impl GeneBoundError {
     }
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[cfg_attr(test, derive(Clone, PartialEq))]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct GeneBounds {
     pub(crate) lower: i32,
     pub(crate) upper: i32,
@@ -103,10 +103,12 @@ impl Morphology {
         }
     }
 
-    pub fn random(&self, rng: &mut ThreadRng) -> Vec<genotypes::Gene> {
+    pub fn random(&self) -> Vec<genotypes::Gene> {
+        let mut rng = rand::rng();
+
         self.gene_bounds
             .iter()
-            .map(|gene_bound| gene_bound.random(rng))
+            .map(|gene_bound| gene_bound.random(&mut rng))
             .collect()
     }
 }

@@ -5,15 +5,7 @@ use crate::{
     service,
 };
 
-pub struct Configuration {
-    database_url: String,
-}
-
-pub async fn bootstrap_optimizer<'o>(
-    config: Configuration,
-) -> anyhow::Result<service::ServiceBuilder<'o>> {
-    let pool = PgPool::connect(&config.database_url).await?;
-
+pub async fn bootstrap(pool: PgPool) -> anyhow::Result<service::ServiceBuilder> {
     let genotypes = genotypes::Repository::new(pool.clone());
     let populations = populations::Repository::new(pool.clone());
     let morphologies = morphologies::Repository::new(pool.clone());

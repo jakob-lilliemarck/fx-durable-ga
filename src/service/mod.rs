@@ -1,6 +1,7 @@
-mod events;
-mod models;
-mod service;
+pub mod events;
+pub mod jobs;
+pub mod service;
 
-pub use models::{Encodeable, Evaluator, Registry};
-pub use service::{Service, ServiceBuilder};
+pub mod models;
+pub use models::Registry;
+pub use service::{Encodeable, Error, Evaluator, Service, ServiceBuilder};

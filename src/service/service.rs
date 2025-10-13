@@ -7,13 +7,13 @@ use crate::repositories::{
     requests::{self, Request},
 };
 use crate::service::events::{
-    GenotypeEvaluated, GenotypeGenerated, OptimizationRequested, RequestCompleted,
-    RequestTerminated,
+    GenotypeEvaluatedEvent, GenotypeGenerated, OptimizationRequestedEvent, RequestCompletedEvent,
+    RequestTerminatedEvent,
 };
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
+use rand::Rng;
 use rand::seq::SliceRandom;
-use rand::{Rng, rngs::ThreadRng};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -33,6 +33,8 @@ pub enum Error {
     EvaluationError(#[from] anyhow::Error),
     #[error("NoValidParents")]
     NoValidParents,
+    #[error("PublishErrorTemp")]
+    PublishErrorTemp, //FIXME
 }
 
 pub trait Encodeable {
@@ -50,7 +52,7 @@ pub trait Evaluator<P> {
     fn fitness<'a>(&self, phenotype: P) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
 
-trait TypeErasedEvaluator {
+trait TypeErasedEvaluator: Send + Sync {
     fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
 
@@ -59,7 +61,10 @@ struct ErasedEvaluator<P, E: Evaluator<P>> {
     decode: fn(&[i64]) -> P,
 }
 
-impl<P, E: Evaluator<P>> TypeErasedEvaluator for ErasedEvaluator<P, E> {
+impl<P, E> TypeErasedEvaluator for ErasedEvaluator<P, E>
+where
+    E: Evaluator<P> + Send + Sync + 'static,
+{
     fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
         let phenotype = (self.decode)(genes);
         self.evaluator.fitness(phenotype)
@@ -67,30 +72,30 @@ impl<P, E: Evaluator<P>> TypeErasedEvaluator for ErasedEvaluator<P, E> {
 }
 
 // optimization service
-pub struct Service<'a> {
+pub struct Service {
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
     populations: populations::Repository,
-    evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
+    evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
 }
 
-pub struct ServiceBuilder<'a> {
+pub struct ServiceBuilder {
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
     populations: populations::Repository,
-    evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
+    evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
 }
 
-impl<'a> ServiceBuilder<'a> {
+impl ServiceBuilder {
     // NOTE:
     // This is a N+1, probably not so bad, it shouldn't be like this.
     // Its simple though, so I'll go with it for a first version
     pub async fn register<T, E>(mut self, evaluator: E) -> Result<Self, Error>
     where
-        T: Encodeable + 'a,
-        E: Evaluator<T::Phenotype> + 'a,
+        T: Encodeable + 'static,
+        E: Evaluator<T::Phenotype> + Send + Sync + 'static,
     {
         // Insert the morphology of the type if it does not already exist in the database
         if let Err(morphologies::Error::NotFound) = self.morphologies.get_morphology(T::HASH).await
@@ -112,7 +117,7 @@ impl<'a> ServiceBuilder<'a> {
         Ok(self)
     }
 
-    pub fn build(self) -> Service<'a> {
+    pub fn build(self) -> Service {
         Service {
             requests: self.requests,
             morphologies: self.morphologies,
@@ -123,13 +128,13 @@ impl<'a> ServiceBuilder<'a> {
     }
 }
 
-impl<'a> Service<'a> {
+impl Service {
     pub fn builder(
         requests: requests::Repository,
         morphologies: morphologies::Repository,
         genotypes: genotypes::Repository,
         populations: populations::Repository,
-    ) -> ServiceBuilder<'a> {
+    ) -> ServiceBuilder {
         ServiceBuilder {
             requests,
             morphologies,
@@ -170,7 +175,7 @@ impl<'a> Service<'a> {
 
                     // Publish an event within the same transaction
                     publisher
-                        .publish(OptimizationRequested::new(request.id))
+                        .publish(OptimizationRequestedEvent::new(request.id))
                         .await?;
 
                     Ok((publisher, request))
@@ -182,18 +187,13 @@ impl<'a> Service<'a> {
     }
 
     // Shall be run in a job triggered by OptimizationRequested
-    pub async fn generate_initial_population(
-        &self,
-        request_id: Uuid,
-        generation_id: i32,
-    ) -> Result<(), Error> {
+    pub async fn generate_initial_population(&self, request_id: Uuid) -> Result<(), Error> {
         // Get the optimization request
         let request = self.requests.get_request(request_id).await?;
 
         // Get the morphology of the type under optimization
         let morphology = self.morphologies.get_morphology(request.type_hash).await?;
 
-        let mut rng = rand::rng();
         let mut genotypes = Vec::with_capacity(request.population_size() as usize);
         let mut population = Vec::with_capacity(request.population_size() as usize);
         let mut events = Vec::with_capacity(request.population_size() as usize);
@@ -201,9 +201,9 @@ impl<'a> Service<'a> {
             let genotype = genotypes::Genotype::new(
                 &request.type_name,
                 request.type_hash,
-                morphology.random(&mut rng),
+                morphology.random(),
                 request.id,
-                generation_id,
+                1,
             );
             population.push((request.id, genotype.id));
             let event = GenotypeGenerated::new(request.id, genotype.id);
@@ -278,7 +278,7 @@ impl<'a> Service<'a> {
 
                     // Publish an event
                     publisher
-                        .publish(GenotypeEvaluated::new(request_id, genotype_id))
+                        .publish(GenotypeEvaluatedEvent::new(request_id, genotype_id))
                         .await?;
 
                     Ok((publisher, ()))
@@ -294,10 +294,10 @@ impl<'a> Service<'a> {
         &self,
         a: &Genotype,
         b: &Genotype,
-        rng: &mut ThreadRng,
         request_id: Uuid,
         generation_id: i32,
     ) -> Genotype {
+        let mut rng = rand::rng();
         // Option 1: Simple uniform crossover (50/50 chance for each gene)
         let genome: Vec<genotypes::Gene> = a
             .genome
@@ -314,10 +314,10 @@ impl<'a> Service<'a> {
         &self,
         genotype: &mut Genotype,
         morphology: &Morphology,
-        rng: &mut ThreadRng,
         temperature: f64,
         rate: f64,
     ) {
+        let mut rng = rand::rng();
         for (gene, bounds) in genotype
             .genome
             .iter_mut()
@@ -340,16 +340,16 @@ impl<'a> Service<'a> {
 
     fn select_by_tournament(
         &self,
-        rng: &mut ThreadRng,
         num_pairs: usize,
         tournament_size: usize,
         mut candidates: Vec<Genotype>,
     ) -> Result<Vec<(Genotype, Genotype)>, Error> {
+        let mut rng = rand::rng();
         let mut pairs = Vec::with_capacity(num_pairs);
 
         for _ in 0..num_pairs {
             // Shuffle once at the start of each iteration
-            candidates.shuffle(rng);
+            candidates.shuffle(&mut rng);
 
             // Take first tournament_size elements for first parent
             // Panics if fitness is None - but it is never expected to be
@@ -390,11 +390,8 @@ impl<'a> Service<'a> {
             )
             .await?;
 
-        let mut rng = rand::rng();
-
         // Select parents
-        let parent_pairs =
-            self.select_by_tournament(&mut rng, num_offspring, tournament_size, candidates)?;
+        let parent_pairs = self.select_by_tournament(num_offspring, tournament_size, candidates)?;
 
         // Get morphology for mutation bounds
         let morphology = self.morphologies.get_morphology(request.type_hash).await?;
@@ -405,13 +402,11 @@ impl<'a> Service<'a> {
         let mut events = Vec::with_capacity(num_offspring);
 
         for (parent1, parent2) in parent_pairs {
-            let mut child =
-                self.crossover(&parent1, &parent2, &mut rng, request.id, next_generation_id);
+            let mut child = self.crossover(&parent1, &parent2, request.id, next_generation_id);
 
             self.mutate(
                 &mut child,
                 &morphology,
-                &mut rng,
                 request.temperature,
                 request.mutation_rate,
             );
@@ -542,7 +537,9 @@ impl<'a> Service<'a> {
                         let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
 
                         // Publish completion event
-                        publisher.publish(RequestCompleted::new(request.id)).await?;
+                        publisher
+                            .publish(RequestCompletedEvent::new(request.id))
+                            .await?;
 
                         Ok((publisher, ()))
                     })
@@ -586,7 +583,7 @@ impl<'a> Service<'a> {
 
                     // Publish termination event
                     publisher
-                        .publish(RequestTerminated::new(request_id))
+                        .publish(RequestTerminatedEvent::new(request_id))
                         .await?;
 
                     Ok((publisher, ()))
