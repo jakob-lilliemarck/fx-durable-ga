@@ -91,7 +91,7 @@ async fn main() -> Result<()> {
         &mut registry,
     );
     let mut listener = fx_event_bus::Listener::new(pool.clone(), registry);
-    tokio::spawn(async move {
+    let events_handle = tokio::spawn(async move {
         listener.listen(None).await?;
         Ok::<(), sqlx::Error>(())
     });
@@ -99,7 +99,7 @@ async fn main() -> Result<()> {
     // setup job handling and initiate workers
     let host_id = Uuid::parse_str("ba3a4752-c4ce-4129-aa1d-55a0b2107e68").expect("valid uuid");
     let hold_for = Duration::from_secs(300);
-    let jobs_listener = fx_mq_jobs::Listener::new(
+    let mut jobs_listener = fx_mq_jobs::Listener::new(
         pool.clone(),
         register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
         4,
@@ -107,6 +107,10 @@ async fn main() -> Result<()> {
         hold_for,
     )
     .await?;
+    let jobs_handle = tokio::spawn(async move {
+        jobs_listener.listen().await?;
+        Ok::<(), anyhow::Error>(())
+    });
 
     // Create optimization request
     service
@@ -124,7 +128,7 @@ async fn main() -> Result<()> {
         )
         .await?;
 
-    println!("Optimization started! Monitor the database for progress.");
-
-    Ok(())
+    loop {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
 }
