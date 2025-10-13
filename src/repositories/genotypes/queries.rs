@@ -57,7 +57,8 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             type_name,
             type_hash,
             genome,
-            request_id
+            request_id,
+            generation_id
         ) VALUES ",
     );
 
@@ -84,9 +85,11 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             .push_bind(g.genome)
             .push(", ")
             .push_bind(g.request_id)
+            .push(", ")
+            .push_bind(g.generation_id)
             .push(")");
     }
-    query_builder.push(" RETURNING id, generated_at, type_name, type_hash, genome, request_id");
+    query_builder.push(" RETURNING id, generated_at, type_name, type_hash, genome, request_id, generation_id, fitness");
 
     let genotypes = query_builder
         .build_query_as::<Genotype>()

@@ -62,7 +62,7 @@ impl fx_durable_ga::service::Evaluator<(i64, i64, i64)> for CubeEvaluator {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv().ok();
+    dotenv::from_filename(".env.local").ok();
 
     // Initialize logging
     tracing_subscriber::fmt::init();
@@ -120,8 +120,8 @@ async fn main() -> Result<()> {
             FitnessGoal::Maximize,
             0.99, // Stop when we get very close to origin
             Strategy::Generational {
-                max_generations: 10,
-                population_size: 100,
+                max_generations: 100,
+                population_size: 10,
             },
             0.5, // temperature
             0.1, // mutation_rate
