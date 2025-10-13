@@ -57,7 +57,6 @@ impl GenotypeEvaluated {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RequestCompleted {
     request_id: Uuid,
-    genotype_id: Uuid,
 }
 
 impl fx_event_bus::Event for RequestCompleted {
@@ -65,11 +64,8 @@ impl fx_event_bus::Event for RequestCompleted {
 }
 
 impl RequestCompleted {
-    pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
-        Self {
-            request_id,
-            genotype_id,
-        }
+    pub fn new(request_id: Uuid) -> Self {
+        Self { request_id }
     }
 }
 

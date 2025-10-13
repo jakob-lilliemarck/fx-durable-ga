@@ -1,3 +1,5 @@
+mod queries;
 mod repository;
 
-pub use repository::{Error, Filter, Gene, Genotype, Repository};
+pub(crate) use queries::{Filter, Order};
+pub(crate) use repository::{Error, Gene, Genotype, Repository};

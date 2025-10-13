@@ -1,7 +1,7 @@
-use crate::repositories::chainable::{Chain, ToTx};
+use crate::repositories::chainable::{Chain, ToTx, TxType};
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
-use sqlx::{PgExecutor, PgPool, PgTransaction, prelude::FromRow};
+use sqlx::{PgPool, PgTransaction, prelude::FromRow};
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -12,12 +12,49 @@ pub enum Error {
     Tx(anyhow::Error),
 }
 
-pub struct Repository {
-    pool: PgPool,
+pub(crate) type Gene = i64;
+
+#[derive(Debug, Clone, FromRow)]
+#[cfg_attr(test, derive(PartialEq))]
+pub(crate) struct Genotype {
+    pub(crate) id: Uuid,
+    pub(crate) generated_at: DateTime<Utc>,
+    pub(crate) type_name: String,
+    pub(crate) type_hash: i32,
+    pub(crate) genome: Vec<Gene>,
+    pub(crate) request_id: Uuid,
+    pub(crate) fitness: Option<f64>,
+    pub(crate) generation_id: i32,
 }
 
-pub struct TxRepository<'tx> {
-    tx: PgTransaction<'tx>,
+impl Genotype {
+    pub(crate) fn new(
+        type_name: &str,
+        type_hash: i32,
+        genome: Vec<Gene>,
+        request_id: Uuid,
+        generation_id: i32,
+    ) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            generated_at: Utc::now(),
+            type_name: type_name.to_string(),
+            type_hash,
+            genome,
+            request_id,
+            fitness: None,
+            generation_id,
+        }
+    }
+
+    /// Panics if the genotype does not have fitness
+    pub(crate) fn must_fitness(&self) -> f64 {
+        self.fitness.expect("Genotype must have a fitness value")
+    }
+}
+
+pub struct Repository {
+    pool: PgPool,
 }
 
 impl Repository {
@@ -26,122 +63,52 @@ impl Repository {
     }
 
     pub(crate) async fn new_genotype(&self, genotype: Genotype) -> Result<Genotype, Error> {
-        new_genotype(&self.pool, genotype).await
+        super::queries::new_genotype(&self.pool, genotype).await
     }
 
     pub(crate) async fn new_genotypes(
         &self,
         genotypes: Vec<Genotype>,
     ) -> Result<Vec<Genotype>, Error> {
-        new_genotypes(&self.pool, genotypes).await
+        super::queries::new_genotypes(&self.pool, genotypes).await
     }
 
-    pub(crate) async fn get_genotype(&self, id: Uuid) -> Result<Genotype, Error> {
-        get_genotype(&self.pool, id).await
+    pub(crate) async fn get_genotype(&self, id: &Uuid) -> Result<Genotype, Error> {
+        super::queries::get_genotype(&self.pool, id).await
     }
 
     pub(crate) async fn set_fitness(&self, id: Uuid, fitness: f64) -> Result<(), Error> {
-        set_fitness(&self.pool, id, fitness).await
+        super::queries::set_fitness(&self.pool, id, fitness).await
     }
 
-    pub(crate) async fn count_genotypes_in_latest_iteration(
+    pub(crate) async fn get_count_of_genotypes_in_latest_iteration(
         &self,
-        filter: &Filter,
+        filter: &super::queries::Filter,
     ) -> Result<i64, Error> {
-        count_genotypes_in_latest_iteration(&self.pool, filter).await
+        super::queries::count_genotypes_in_latest_iteration(&self.pool, filter).await
     }
 
     pub(crate) async fn search_genotypes_in_latest_generation(
         &self,
         limit: i64,
-        filter: &Filter,
+        order: super::queries::Order,
+        filter: &super::queries::Filter,
     ) -> Result<Vec<Genotype>, Error> {
-        search_genotypes_in_latest_generation(&self.pool, limit, filter).await
+        super::queries::search_genotypes_in_latest_generation(&self.pool, limit, order, filter)
+            .await
     }
 
-    pub(crate) async fn add_to_population(&mut self, pairs: &[(Uuid, Uuid)]) -> Result<(), Error> {
-        add_to_population(&self.pool, &pairs).await
-    }
-
-    pub(crate) async fn remove_from_population(
-        &mut self,
-        request_id: Uuid,
-        genotype_id: Uuid,
-    ) -> Result<(), Error> {
-        remove_from_population(&self.pool, request_id, genotype_id).await
-    }
-
-    pub(crate) async fn get_population_count(&self, request_id: Uuid) -> Result<i64, Error> {
-        get_population_count(&self.pool, request_id).await
+    pub(crate) async fn get_generation_coun(&self, request_id: Uuid) -> Result<i32, Error> {
+        super::queries::get_generation_count(&self.pool, request_id).await
     }
 }
 
-impl<'tx> TxRepository<'tx> {
-    pub fn new(tx: PgTransaction<'tx>) -> Self {
-        Self { tx }
-    }
-
-    pub(crate) async fn new_genotype(&mut self, genotype: Genotype) -> Result<Genotype, Error> {
-        new_genotype(&mut *self.tx, genotype).await
-    }
-
-    pub(crate) async fn new_genotypes(
-        &mut self,
-        genotypes: Vec<Genotype>,
-    ) -> Result<Vec<Genotype>, Error> {
-        new_genotypes(&mut *self.tx, genotypes).await
-    }
-
-    pub(crate) async fn get_genotype(&mut self, id: Uuid) -> Result<Genotype, Error> {
-        get_genotype(&mut *self.tx, id).await
-    }
-
-    pub(crate) async fn set_fitness(&mut self, id: Uuid, fitness: f64) -> Result<(), Error> {
-        set_fitness(&mut *self.tx, id, fitness).await
-    }
-
-    pub(crate) async fn count_genotypes_in_latest_iteration(
-        &mut self,
-        filter: &Filter,
-    ) -> Result<i64, Error> {
-        count_genotypes_in_latest_iteration(&mut *self.tx, filter).await
-    }
-
-    pub(crate) async fn search_genotypes_in_latest_generation(
-        &mut self,
-        limit: i64,
-        filter: &Filter,
-    ) -> Result<Vec<Genotype>, Error> {
-        search_genotypes_in_latest_generation(&mut *self.tx, limit, filter).await
-    }
-
-    pub(crate) async fn add_to_population(&mut self, pairs: &[(Uuid, Uuid)]) -> Result<(), Error> {
-        add_to_population(&mut *self.tx, pairs).await
-    }
-
-    pub(crate) async fn remove_from_population(
-        &mut self,
-        request_id: Uuid,
-        genotype_id: Uuid,
-    ) -> Result<(), Error> {
-        remove_from_population(&mut *self.tx, request_id, genotype_id).await
-    }
-
-    pub(crate) async fn get_population_count(&mut self, request_id: Uuid) -> Result<i64, Error> {
-        get_population_count(&mut *self.tx, request_id).await
-    }
-}
-
-impl<'tx> ToTx<'tx> for TxRepository<'tx> {
-    fn tx(self) -> PgTransaction<'tx> {
-        self.tx
-    }
+impl<'tx> TxType<'tx> for Repository {
+    type TxType = TxRepository<'tx>;
+    type TxError = Error;
 }
 
 impl<'tx> Chain<'tx> for Repository {
-    type TxType = TxRepository<'tx>;
-    type TxError = Error;
-
     fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
     where
         R: ToTx<'tx>,
@@ -167,337 +134,62 @@ impl<'tx> Chain<'tx> for Repository {
     }
 }
 
-pub type Gene = i64;
-
-#[derive(Debug, FromRow)]
-#[cfg_attr(test, derive(Clone, PartialEq))]
-pub struct Genotype {
-    pub(crate) id: Uuid,
-    pub(crate) generated_at: DateTime<Utc>,
-    pub(crate) type_name: String,
-    pub(crate) type_hash: i32,
-    pub(crate) genome: Vec<Gene>,
-    pub(crate) request_id: Uuid,
-    pub(crate) fitness: Option<f64>,
-    pub(crate) generation_id: i32,
+pub struct TxRepository<'tx> {
+    tx: PgTransaction<'tx>,
 }
 
-impl Genotype {
-    pub fn new(
-        type_name: &str,
-        type_hash: i32,
-        genome: Vec<Gene>,
-        request_id: Uuid,
-        generation_id: i32,
-    ) -> Self {
-        Self {
-            id: Uuid::now_v7(),
-            generated_at: Utc::now(),
-            type_name: type_name.to_string(),
-            type_hash,
-            genome,
-            request_id,
-            fitness: None,
-            generation_id,
-        }
+impl<'tx> TxRepository<'tx> {
+    pub(crate) async fn new_genotype(&mut self, genotype: Genotype) -> Result<Genotype, Error> {
+        super::queries::new_genotype(&mut *self.tx, genotype).await
     }
 
-    pub fn fitness(&self) -> Option<f64> {
-        self.fitness
+    pub(crate) async fn new_genotypes(
+        &mut self,
+        genotypes: Vec<Genotype>,
+    ) -> Result<Vec<Genotype>, Error> {
+        super::queries::new_genotypes(&mut *self.tx, genotypes).await
     }
-}
 
-pub async fn new_genotype<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    genotype: Genotype,
-) -> Result<Genotype, Error> {
-    let genotype = sqlx::query_as!(
-        Genotype,
-        r#"
-            INSERT INTO fx_durable_ga.genotypes (
-                id,
-                generated_at,
-                type_name,
-                type_hash,
-                genome,
-                request_id,
-                generation_id
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING
-                id,
-                generated_at,
-                type_name,
-                type_hash,
-                genome,
-                request_id,
-                fitness,
-                generation_id;
-            "#,
-        genotype.id,
-        genotype.generated_at,
-        genotype.type_name,
-        genotype.type_hash,
-        &genotype.genome,
-        genotype.request_id,
-        genotype.generation_id
-    )
-    .fetch_one(tx)
-    .await?;
-
-    Ok(genotype)
-}
-
-pub async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    genotypes: Vec<Genotype>,
-) -> Result<Vec<Genotype>, Error> {
-    let mut query_builder = sqlx::QueryBuilder::new(
-        "INSERT INTO fx_durable_ga.genotypes (
-            id,
-            generated_at,
-            type_name,
-            type_hash,
-            genome,
-            request_id
-        ) VALUES ",
-    );
-
-    let mut first = true;
-    // Stream serialization: serialize each event as needed rather than
-    // pre-allocating all payloads, reducing peak memory usage
-    for g in genotypes {
-        if first {
-            first = false;
-        } else {
-            query_builder.push(", ");
-        }
-
-        query_builder
-            .push("(")
-            .push_bind(g.id)
-            .push(", ")
-            .push_bind(g.generated_at)
-            .push(", ")
-            .push_bind(g.type_name)
-            .push(", ")
-            .push_bind(g.type_hash)
-            .push(", ")
-            .push_bind(g.genome)
-            .push(", ")
-            .push_bind(g.request_id)
-            .push(")");
+    pub(crate) async fn get_genotype(&mut self, id: &Uuid) -> Result<Genotype, Error> {
+        super::queries::get_genotype(&mut *self.tx, id).await
     }
-    query_builder.push(" RETURNING id, generated_at, type_name, type_hash, genome, request_id");
 
-    let genotypes = query_builder
-        .build_query_as::<Genotype>()
-        .fetch_all(tx)
-        .await?;
+    pub(crate) async fn set_fitness(&mut self, id: Uuid, fitness: f64) -> Result<(), Error> {
+        super::queries::set_fitness(&mut *self.tx, id, fitness).await
+    }
 
-    Ok(genotypes)
-}
+    pub(crate) async fn count_genotypes_in_latest_iteration(
+        &mut self,
+        filter: &super::queries::Filter,
+    ) -> Result<i64, Error> {
+        super::queries::count_genotypes_in_latest_iteration(&mut *self.tx, filter).await
+    }
 
-pub async fn set_fitness<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    id: Uuid,
-    fitness: f64,
-) -> Result<(), Error> {
-    sqlx::query!(
-        r#"
-            UPDATE fx_durable_ga.genotypes
-            SET fitness = $2
-            WHERE id = $1 AND fitness IS NULL
-            RETURNING id;
-        "#,
-        id,
-        fitness
-    )
-    .fetch_one(tx)
-    .await?;
+    pub(crate) async fn search_genotypes_in_latest_generation(
+        &mut self,
+        limit: i64,
+        order: super::queries::Order,
+        filter: &super::queries::Filter,
+    ) -> Result<Vec<Genotype>, Error> {
+        super::queries::search_genotypes_in_latest_generation(&mut *self.tx, limit, order, filter)
+            .await
+    }
 
-    Ok(())
-}
-
-pub async fn get_genotype<'tx, E: PgExecutor<'tx>>(tx: E, id: Uuid) -> Result<Genotype, Error> {
-    let genotype = sqlx::query_as!(
-        Genotype,
-        r#"
-            SELECT
-                id,
-                generated_at,
-                type_name,
-                type_hash,
-                genome,
-                request_id,
-                fitness,
-                generation_id
-            FROM fx_durable_ga.genotypes
-            WHERE id = $1;
-        "#,
-        id
-    )
-    .fetch_one(tx)
-    .await?;
-
-    Ok(genotype)
-}
-
-pub struct Filter {
-    ids: Option<Vec<Uuid>>,
-    request_ids: Option<Vec<Uuid>>,
-    has_fitness: Option<bool>,
-}
-
-impl Default for Filter {
-    fn default() -> Self {
-        Self {
-            ids: None,
-            has_fitness: None,
-            request_ids: None,
-        }
+    pub(crate) async fn get_generation_count(&mut self, request_id: Uuid) -> Result<i32, Error> {
+        super::queries::get_generation_count(&mut *self.tx, request_id).await
     }
 }
 
-impl Filter {
-    pub fn with_fitness(mut self, has_fitness: bool) -> Self {
-        self.has_fitness = Some(has_fitness);
-        self
+impl<'tx> ToTx<'tx> for TxRepository<'tx> {
+    fn tx(self) -> PgTransaction<'tx> {
+        self.tx
     }
-
-    pub fn with_ids(mut self, ids: Vec<Uuid>) -> Self {
-        self.ids = Some(ids);
-        self
-    }
-
-    pub fn with_request_ids(mut self, request_ids: Vec<Uuid>) -> Self {
-        self.request_ids = Some(request_ids);
-        self
-    }
-}
-
-pub async fn count_genotypes_in_latest_iteration<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    filter: &Filter,
-) -> Result<i64, Error> {
-    // Return i64, not Genotype - we're counting!
-    let count = sqlx::query_scalar!(
-        // No need to specify i64, query_scalar! infers it
-        r#"
-            WITH latest_generations AS (
-                SELECT request_id, MAX(generation_id) as max_generation_id
-                FROM fx_durable_ga.genotypes
-                GROUP BY request_id
-            )
-            SELECT COUNT(*) "count!:i64"
-            FROM fx_durable_ga.genotypes g
-            JOIN latest_generations lg
-                ON g.request_id = lg.request_id
-                AND g.generation_id = lg.max_generation_id
-            WHERE (
-                $1::bool IS NULL OR
-                CASE
-                    WHEN $1 = true THEN g.fitness IS NOT NULL
-                    ELSE g.fitness IS NULL
-                END
-            )
-            AND (
-                $2::uuid[] IS NULL OR g.id = ANY($2)
-            )
-            AND (
-                $3::uuid[] IS NULL OR g.request_id = ANY($3)
-            );
-        "#,
-        filter.has_fitness,
-        filter.ids.as_deref(),
-        filter.request_ids.as_deref(),
-    )
-    .fetch_one(tx)
-    .await?;
-
-    Ok(count)
-}
-
-pub async fn search_genotypes_in_latest_generation<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    limit: i64,
-    filter: &Filter,
-) -> Result<Vec<Genotype>, Error> {
-    // Return i64, not Genotype - we're counting!
-    let genotypes = sqlx::query_as!(
-        Genotype,
-        r#"
-        WITH latest_generations AS (
-            SELECT request_id, MAX(generation_id) as max_generation_id
-            FROM fx_durable_ga.genotypes
-            GROUP BY request_id
-        )
-        SELECT
-            g.id,
-            g.generated_at,
-            g.type_name,
-            g.type_hash,
-            g.genome,
-            g.request_id,
-            g.fitness,
-            g.generation_id
-        FROM fx_durable_ga.genotypes g
-        JOIN latest_generations lg
-            ON g.request_id = lg.request_id
-            AND g.generation_id = lg.max_generation_id
-        WHERE (
-            $1::bool IS NULL OR
-            CASE
-                WHEN $1 = true THEN g.fitness IS NOT NULL
-                ELSE g.fitness IS NULL
-            END
-        )
-        AND (
-            $2::uuid[] IS NULL OR g.id = ANY($2)
-        )
-        AND (
-            $3::uuid[] IS NULL OR g.request_id = ANY($3)
-        )
-        ORDER BY g.fitness DESC NULLS LAST
-        LIMIT $4;
-        "#,
-        filter.has_fitness,
-        filter.ids.as_deref(),
-        filter.request_ids.as_deref(),
-        limit
-    )
-    .fetch_all(tx)
-    .await?;
-
-    Ok(genotypes)
-}
-
-pub async fn add_to_population<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    pairs: &[(Uuid, Uuid)],
-) -> Result<(), Error> {
-    // paris is (request_id, genotype_id)
-    todo!()
-}
-
-pub async fn remove_from_population<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    request_id: Uuid,
-    genotype_id: Uuid,
-) -> Result<(), Error> {
-    todo!()
-}
-
-pub async fn get_population_count<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    request_id: Uuid,
-) -> Result<i64, Error> {
-    todo!()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::repositories::genotypes::Filter;
     use chrono::SubsecRound;
 
     #[sqlx::test(migrations = "./migrations")]
@@ -583,7 +275,7 @@ mod tests {
         let genotype_id = genotype.id;
 
         repository.new_genotype(genotype).await?;
-        let selected = repository.get_genotype(genotype_id).await?;
+        let selected = repository.get_genotype(&genotype_id).await?;
 
         assert_eq!(genotype_id, selected.id);
         Ok(())
@@ -594,7 +286,7 @@ mod tests {
         let repository = Repository::new(pool);
         let non_existent_id = Uuid::now_v7();
 
-        let result = repository.get_genotype(non_existent_id).await;
+        let result = repository.get_genotype(&non_existent_id).await;
 
         assert!(result.is_err());
         Ok(())
@@ -608,7 +300,7 @@ mod tests {
 
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(&Filter::default())
+                .get_count_of_genotypes_in_latest_iteration(&Filter::default())
                 .await?,
             0
         );
@@ -629,7 +321,7 @@ mod tests {
 
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(&Filter::default())
+                .get_count_of_genotypes_in_latest_iteration(&Filter::default())
                 .await?,
             1
         );
@@ -652,19 +344,19 @@ mod tests {
 
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(&Filter::default())
+                .get_count_of_genotypes_in_latest_iteration(&Filter::default())
                 .await?,
             2
         );
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(&Filter::default().with_fitness(false))
+                .get_count_of_genotypes_in_latest_iteration(&Filter::default().with_fitness(false))
                 .await?,
             1
         );
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(&Filter::default().with_fitness(true))
+                .get_count_of_genotypes_in_latest_iteration(&Filter::default().with_fitness(true))
                 .await?,
             1
         );
@@ -685,7 +377,7 @@ mod tests {
 
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(
+                .get_count_of_genotypes_in_latest_iteration(
                     &Filter::default().with_request_ids(vec![req_id_1])
                 )
                 .await?,
@@ -693,7 +385,7 @@ mod tests {
         );
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(
+                .get_count_of_genotypes_in_latest_iteration(
                     &Filter::default().with_request_ids(vec![req_id_2])
                 )
                 .await?,
@@ -701,7 +393,7 @@ mod tests {
         );
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(
+                .get_count_of_genotypes_in_latest_iteration(
                     &Filter::default().with_request_ids(vec![req_id_1, req_id_2])
                 )
                 .await?,
@@ -709,7 +401,7 @@ mod tests {
         );
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(
+                .get_count_of_genotypes_in_latest_iteration(
                     &Filter::default()
                         .with_request_ids(vec![req_id_1, req_id_2])
                         .with_fitness(false)
@@ -719,7 +411,7 @@ mod tests {
         );
         assert_eq!(
             repository
-                .count_genotypes_in_latest_iteration(
+                .get_count_of_genotypes_in_latest_iteration(
                     &Filter::default()
                         .with_request_ids(vec![req_id_1, req_id_2])
                         .with_fitness(true)

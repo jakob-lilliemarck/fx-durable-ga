@@ -1,8 +1,8 @@
-use crate::repositories::chainable::{Chain, ToTx};
+use crate::repositories::chainable::{Chain, FromOther, ToTx, TxType};
 use futures::future::BoxFuture;
 use serde::{Deserialize, Serialize};
 use sqlx::{
-    PgExecutor, PgPool, PgTransaction,
+    PgPool, PgTransaction,
     types::chrono::{DateTime, Utc},
 };
 use uuid::Uuid;
@@ -17,12 +17,50 @@ pub enum Error {
     Tx(anyhow::Error),
 }
 
-pub struct Repository {
-    pool: PgPool,
+#[derive(sqlx::Type, Debug, Clone, PartialEq)]
+#[sqlx(type_name = "fx_durable_ga.fitness_goal", rename_all = "lowercase")]
+pub enum FitnessGoal {
+    Minimize,
+    Maximize,
 }
 
-pub struct TxRepository<'tx> {
-    tx: PgTransaction<'tx>,
+#[derive(Debug, Deserialize, Serialize)]
+#[cfg_attr(test, derive(Clone, PartialEq))]
+pub enum Strategy {
+    Rolling {
+        /// the maaximum number of evaluations to run before termination
+        max_evaluations: u32,
+        /// the maximum number of genotypes under evaluation ("active" genotypes)
+        population_size: u32,
+        /// the number of evaluations to wait before breeding new genotypes. larger pool = more diversity
+        selection_interval: u32,
+        /// the number of genotypes per tournament
+        tournament_size: u32,
+        /// the number of genotypes to fetch from the breeding bool during selection
+        sample_size: u32,
+    },
+    Generational {
+        max_generations: u32,
+        population_size: u32,
+    },
+}
+
+#[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
+pub struct Request {
+    pub(crate) id: Uuid,
+    pub(crate) requested_at: DateTime<Utc>,
+    pub(crate) type_name: String,
+    pub(crate) type_hash: i32,
+    pub(crate) goal: FitnessGoal,
+    pub(crate) threshold: f64,
+    pub(crate) strategy: Strategy,
+    pub(crate) temperature: f64,
+    pub(crate) mutation_rate: f64,
+}
+
+pub struct Repository {
+    pool: PgPool,
 }
 
 impl Repository {
@@ -31,38 +69,26 @@ impl Repository {
     }
 
     pub async fn new_request(&self, request: Request) -> Result<Request, Error> {
-        new_request(&self.pool, request).await
+        super::queries::new_request(&self.pool, request).await
     }
 
     pub async fn get_request(&self, id: Uuid) -> Result<Request, Error> {
-        get_request(&self.pool, id).await
+        super::queries::get_request(&self.pool, id).await
     }
 }
 
-impl<'tx> TxRepository<'tx> {
-    pub fn new(tx: PgTransaction<'tx>) -> Self {
-        Self { tx }
-    }
-
-    pub async fn new_request(&mut self, request: Request) -> Result<Request, Error> {
-        new_request(&mut *self.tx, request).await
-    }
-
-    pub async fn get_request(&mut self, id: Uuid) -> Result<Request, Error> {
-        get_request(&mut *self.tx, id).await
-    }
+impl<'tx> TxType<'tx> for Repository {
+    type TxType = TxRepository<'tx>;
+    type TxError = Error;
 }
 
-impl<'tx> ToTx<'tx> for TxRepository<'tx> {
-    fn tx(self) -> PgTransaction<'tx> {
-        self.tx
+impl<'tx> FromOther<'tx> for Repository {
+    fn from_other(&self, other: impl ToTx<'tx>) -> Self::TxType {
+        TxRepository { tx: other.tx() }
     }
 }
 
 impl<'tx> Chain<'tx> for Repository {
-    type TxType = TxRepository<'tx>;
-    type TxError = Error;
-
     fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
     where
         R: ToTx<'tx>,
@@ -88,60 +114,55 @@ impl<'tx> Chain<'tx> for Repository {
     }
 }
 
-#[derive(sqlx::Type, Debug, Clone, PartialEq)]
-#[sqlx(type_name = "fx_durable_ga.fitness_goal", rename_all = "lowercase")]
-pub enum FitnessGoal {
-    Minimize,
-    Maximize,
+pub struct TxRepository<'tx> {
+    tx: PgTransaction<'tx>,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(Clone, PartialEq))]
-pub enum Strategy {
-    Rolling {
-        max_evaluations: u32,
-        population_size: u32,
-        selection_interval: u32,
-    },
-    Generational {
-        max_generations: u32,
-        population_size: u32,
-    },
+impl<'tx> TxRepository<'tx> {
+    pub async fn new_request(&mut self, request: Request) -> Result<Request, Error> {
+        super::queries::new_request(&mut *self.tx, request).await
+    }
+
+    pub async fn get_request(&mut self, id: Uuid) -> Result<Request, Error> {
+        super::queries::get_request(&mut *self.tx, id).await
+    }
 }
 
-/// A request for an optimization
-#[derive(Debug)]
-struct DbRequest {
-    id: Uuid,
-    requested_at: DateTime<Utc>,
-    type_name: String,
-    type_hash: i32,
-    goal: FitnessGoal,
-    threshold: f64,
-    strategy: serde_json::Value,
+impl<'tx> ToTx<'tx> for TxRepository<'tx> {
+    fn tx(self) -> PgTransaction<'tx> {
+        self.tx
+    }
 }
 
-#[derive(Debug)]
-#[cfg_attr(test, derive(Clone))]
-pub struct Request {
-    pub(crate) id: Uuid,
-    pub(crate) requested_at: DateTime<Utc>,
-    pub(crate) type_name: String,
-    pub(crate) type_hash: i32,
-    pub(crate) goal: FitnessGoal,
-    pub(crate) threshold: f64,
-    pub(crate) strategy: Strategy,
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum RequestValidationError {
+    #[error("mutation_rate must be a value between 0.0 and 1.0, got: {0}")]
+    InvalidMutationRate(f64),
+    #[error("temperature must be a value between 0.0 and 1.0, got: {0}")]
+    InvalidTemperature(f64),
 }
 
 impl Request {
-    pub fn new(
+    pub(crate) fn new(
         type_name: &str,
         type_hash: i32,
         goal: FitnessGoal,
         threshold: f64,
         strategy: Strategy,
-    ) -> Self {
-        Self {
+        temperature: f64,
+        mutation_rate: f64,
+    ) -> Result<Self, RequestValidationError> {
+        // Validate temperature (0.0 to 1.0)
+        if !(0.0..=1.0).contains(&temperature) {
+            return Err(RequestValidationError::InvalidTemperature(temperature));
+        }
+
+        // Validate mutation rate (0.0 to 1.0)
+        if !(0.0..=1.0).contains(&mutation_rate) {
+            return Err(RequestValidationError::InvalidMutationRate(mutation_rate));
+        }
+
+        Ok(Self {
             id: Uuid::now_v7(),
             requested_at: Utc::now(),
             type_name: type_name.to_string(),
@@ -149,10 +170,12 @@ impl Request {
             goal,
             threshold,
             strategy,
-        }
+            temperature,
+            mutation_rate,
+        })
     }
 
-    pub fn population_size(&self) -> u32 {
+    pub(crate) fn population_size(&self) -> u32 {
         match self.strategy {
             Strategy::Generational {
                 population_size, ..
@@ -163,14 +186,14 @@ impl Request {
         }
     }
 
-    pub fn is_completed(&self, fitness: f64) -> bool {
+    pub(crate) fn is_completed(&self, fitness: f64) -> bool {
         match self.goal {
             FitnessGoal::Minimize => fitness <= self.threshold,
             FitnessGoal::Maximize => fitness >= self.threshold,
         }
     }
 
-    pub fn check_termination(&self, evaluations: i64) -> bool {
+    pub(crate) fn check_termination(&self, evaluations: i64) -> bool {
         match self.strategy {
             Strategy::Generational {
                 max_generations,
@@ -181,108 +204,6 @@ impl Request {
             } => evaluations as u32 >= max_evaluations,
         }
     }
-}
-
-impl TryFrom<Request> for DbRequest {
-    type Error = Error;
-
-    fn try_from(request: Request) -> Result<Self, Self::Error> {
-        let strategy_json = serde_json::to_value(request.strategy)?;
-
-        Ok(DbRequest {
-            id: request.id,
-            requested_at: request.requested_at,
-            type_name: request.type_name,
-            type_hash: request.type_hash,
-            goal: request.goal,
-            threshold: request.threshold,
-            strategy: strategy_json,
-        })
-    }
-}
-
-impl TryFrom<DbRequest> for Request {
-    type Error = Error;
-
-    fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
-        let strategy_json = serde_json::from_value(request.strategy)?;
-
-        Ok(Request {
-            id: request.id,
-            requested_at: request.requested_at,
-            type_name: request.type_name,
-            type_hash: request.type_hash,
-            goal: request.goal,
-            threshold: request.threshold,
-            strategy: strategy_json,
-        })
-    }
-}
-
-pub async fn new_request<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    request: Request,
-) -> Result<Request, Error> {
-    let db_request: DbRequest = request.try_into()?;
-    let db_request = sqlx::query_as!(
-        DbRequest,
-        r#"
-            INSERT INTO fx_durable_ga.requests (
-                id,
-                requested_at,
-                type_name,
-                type_hash,
-                goal,
-                threshold,
-                strategy
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING
-                id,
-                requested_at,
-                type_name,
-                type_hash,
-                goal "goal:FitnessGoal",
-                threshold,
-                strategy
-            "#,
-        db_request.id,
-        db_request.requested_at,
-        db_request.type_name,
-        db_request.type_hash,
-        db_request.goal as FitnessGoal,
-        db_request.threshold,
-        db_request.strategy
-    )
-    .fetch_one(tx)
-    .await?;
-
-    let request: Request = db_request.try_into()?;
-    Ok(request)
-}
-
-pub async fn get_request<'tx, E: PgExecutor<'tx>>(tx: E, id: Uuid) -> Result<Request, Error> {
-    let db_request = sqlx::query_as!(
-        DbRequest,
-        r#"
-        SELECT
-            id,
-            requested_at,
-            type_name,
-            type_hash,
-            goal "goal!:FitnessGoal",
-            threshold,
-            strategy
-        FROM fx_durable_ga.requests
-        WHERE id = $1
-        "#,
-        id
-    )
-    .fetch_one(tx)
-    .await?;
-
-    let request: Request = db_request.try_into()?;
-    Ok(request)
 }
 
 #[cfg(test)]
@@ -303,7 +224,9 @@ mod tests {
                 max_generations: 100,
                 population_size: 10,
             },
-        );
+            0.5,
+            0.1,
+        )?;
         let request_clone = request.clone();
 
         let inserted = repository.new_request(request).await?;
@@ -335,7 +258,9 @@ mod tests {
                 max_generations: 100,
                 population_size: 10,
             },
-        );
+            0.5,
+            0.1,
+        )?;
         let request_clone = request.clone();
 
         let _ = repository.new_request(request).await?;
@@ -359,7 +284,9 @@ mod tests {
                 max_generations: 100,
                 population_size: 10,
             },
-        );
+            0.5,
+            0.1,
+        )?;
         let request_id = request.id;
 
         let _ = repository.new_request(request).await?;
@@ -382,7 +309,9 @@ mod tests {
                 max_generations: 100,
                 population_size: 10,
             },
-        );
+            0.5,
+            0.1,
+        )?;
         let request_id = request.id;
 
         let selected = repository.get_request(request_id).await;

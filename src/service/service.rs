@@ -1,13 +1,19 @@
-use crate::repositories::chainable::{Chain, FromTxType};
-
+use crate::repositories::chainable::{Chain, FromOther, FromTx};
+use crate::repositories::genotypes::Genotype;
+use crate::repositories::populations;
 use crate::repositories::{
     genotypes,
     morphologies::{self, Morphology},
     requests::{self, Request},
 };
-use crate::service::events::{GenotypeEvaluated, GenotypeGenerated, OptimizationRequested};
+use crate::service::events::{
+    GenotypeEvaluated, GenotypeGenerated, OptimizationRequested, RequestCompleted,
+    RequestTerminated,
+};
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
+use rand::seq::SliceRandom;
+use rand::{Rng, rngs::ThreadRng};
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -19,10 +25,14 @@ pub enum Error {
     MorphologiesRepositoryError(#[from] morphologies::Error),
     #[error("GenotypesRepositoryError: {0}")]
     GenotypesRepositoryError(#[from] genotypes::Error),
+    #[error("PopulationsRepositoryError: {0}")]
+    PopulationsRepositoryError(#[from] populations::Error),
     #[error("UnknownType: type_name={type_name}, type_hash={type_hash}")]
     UnknownTypeError { type_hash: i32, type_name: String },
     #[error("EvaluationError: {0}")]
     EvaluationError(#[from] anyhow::Error),
+    #[error("NoValidParents")]
+    NoValidParents,
 }
 
 pub trait Encodeable {
@@ -61,6 +71,7 @@ pub struct Service<'a> {
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
+    populations: populations::Repository,
     evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
 }
 
@@ -68,6 +79,7 @@ pub struct ServiceBuilder<'a> {
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
+    populations: populations::Repository,
     evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'a>>,
 }
 
@@ -105,6 +117,7 @@ impl<'a> ServiceBuilder<'a> {
             requests: self.requests,
             morphologies: self.morphologies,
             genotypes: self.genotypes,
+            populations: self.populations,
             evaluators: self.evaluators,
         }
     }
@@ -115,11 +128,13 @@ impl<'a> Service<'a> {
         requests: requests::Repository,
         morphologies: morphologies::Repository,
         genotypes: genotypes::Repository,
+        populations: populations::Repository,
     ) -> ServiceBuilder<'a> {
         ServiceBuilder {
             requests,
             morphologies,
             genotypes,
+            populations,
             evaluators: HashMap::new(),
         }
     }
@@ -131,6 +146,8 @@ impl<'a> Service<'a> {
         goal: requests::FitnessGoal,
         threshold: f64,
         strategy: requests::Strategy,
+        temperature: f64,
+        mutation_rate: f64,
     ) -> Result<(), Error> {
         self.requests
             .chain(|mut tx_requests| {
@@ -138,12 +155,18 @@ impl<'a> Service<'a> {
                     // Create a new optimization request with the repository
                     let request = tx_requests
                         .new_request(Request::new(
-                            type_name, type_hash, goal, threshold, strategy,
-                        ))
+                            type_name,
+                            type_hash,
+                            goal,
+                            threshold,
+                            strategy,
+                            temperature,
+                            mutation_rate,
+                        )?)
                         .await?;
 
                     // Instantiate a publisher
-                    let mut publisher = fx_event_bus::Publisher::from_other(tx_requests);
+                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_requests);
 
                     // Publish an event within the same transaction
                     publisher
@@ -189,17 +212,20 @@ impl<'a> Service<'a> {
             events.push(event);
         }
 
+        let populations = self.populations.clone();
         self.genotypes
             .chain(|mut tx_genotypes| {
                 Box::pin(async move {
                     // Create the genotypes with the repository
                     tx_genotypes.new_genotypes(genotypes).await?;
 
+                    let mut tx_populations = populations.from_other(tx_genotypes);
+
                     // Add all to the active population of this request
-                    tx_genotypes.add_to_population(&population).await?;
+                    tx_populations.add_to_population(&population).await?;
 
                     // Instantiate a publisher
-                    let mut publisher = fx_event_bus::Publisher::from_other(tx_genotypes);
+                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_populations);
 
                     // Publish one event for each generated phenotype
                     publisher.publish_many(&events).await?;
@@ -219,7 +245,7 @@ impl<'a> Service<'a> {
         genotype_id: Uuid,
     ) -> Result<(), Error> {
         // Get the genotype from the database
-        let genotype = self.genotypes.get_genotype(genotype_id).await?;
+        let genotype = self.genotypes.get_genotype(&genotype_id).await?;
 
         // Get the evaluator to use for this type
         let evaluator =
@@ -233,19 +259,22 @@ impl<'a> Service<'a> {
         // Call the evaluation function. This is a long running function!
         let fitness = evaluator.fitness(&genotype.genome).await?;
 
+        let populations = self.populations.clone();
         self.genotypes
             .chain(|mut tx_genotypes| {
                 Box::pin(async move {
                     // Update the fitness of the genotype
                     tx_genotypes.set_fitness(genotype_id, fitness).await?;
 
+                    let mut tx_populations = populations.from_other(tx_genotypes);
+
                     // Remove the genotype from the activde population
-                    tx_genotypes
-                        .remove_from_population(request_id, genotype_id)
+                    tx_populations
+                        .remove_from_population(&request_id, &genotype_id)
                         .await?;
 
                     // Instantiate a publisher
-                    let mut publisher = fx_event_bus::Publisher::from_other(tx_genotypes);
+                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_populations);
 
                     // Publish an event
                     publisher
@@ -260,89 +289,237 @@ impl<'a> Service<'a> {
         Ok(())
     }
 
-    async fn maintain_generational(
+    /// Creates child genome by mixing genes from two parents
+    fn crossover(
         &self,
-        request: Request,
-        max_generations: u32,
-        population_size: u32,
+        a: &Genotype,
+        b: &Genotype,
+        rng: &mut ThreadRng,
+        request_id: Uuid,
+        generation_id: i32,
+    ) -> Genotype {
+        // Option 1: Simple uniform crossover (50/50 chance for each gene)
+        let genome: Vec<genotypes::Gene> = a
+            .genome
+            .iter()
+            .zip(b.genome.iter())
+            .map(|(&a, &b)| if rng.random_bool(0.5) { a } else { b })
+            .collect();
+
+        Genotype::new(&a.type_name, a.type_hash, genome, request_id, generation_id)
+    }
+
+    // NOTE: temperatur and rate should have been validated at the time of creating the request, we do not validate again at this point.
+    fn mutate(
+        &self,
+        genotype: &mut Genotype,
+        morphology: &Morphology,
+        rng: &mut ThreadRng,
+        temperature: f64,
+        rate: f64,
+    ) {
+        for (gene, bounds) in genotype
+            .genome
+            .iter_mut()
+            .zip(morphology.gene_bounds.iter())
+        {
+            // Should we mutate this gene?
+            if rng.random_range(0.0..1.0) < rate {
+                // Temperature controls mutation step: higher = larger jumps
+                let max_step = (1.0 + (bounds.divisor as f64 * temperature)) as i64;
+
+                // Choose direction and step size
+                let direction = if rng.random_bool(0.5) { 1 } else { -1 };
+                let step = rng.random_range(1..=max_step);
+
+                // Apply mutation and clamp
+                *gene = (*gene + direction * step).clamp(0, bounds.divisor as i64 - 1);
+            }
+        }
+    }
+
+    fn select_by_tournament(
+        &self,
+        rng: &mut ThreadRng,
+        num_pairs: usize,
+        tournament_size: usize,
+        mut candidates: Vec<Genotype>,
+    ) -> Result<Vec<(Genotype, Genotype)>, Error> {
+        let mut pairs = Vec::with_capacity(num_pairs);
+
+        for _ in 0..num_pairs {
+            // Shuffle once at the start of each iteration
+            candidates.shuffle(rng);
+
+            // Take first tournament_size elements for first parent
+            // Panics if fitness is None - but it is never expected to be
+            let parent1 = candidates[..tournament_size]
+                .iter()
+                .max_by(|a, b| a.must_fitness().partial_cmp(&b.must_fitness()).unwrap())
+                .ok_or(Error::NoValidParents)?;
+
+            // Take next tournament_size elements for second parent
+            let parent2 = candidates[tournament_size..(tournament_size * 2)]
+                .iter()
+                .max_by(|a, b| a.must_fitness().partial_cmp(&b.must_fitness()).unwrap())
+                .ok_or(Error::NoValidParents)?;
+
+            pairs.push((parent1.clone(), parent2.clone())); // No need to clone here anymore
+        }
+
+        Ok(pairs)
+    }
+
+    async fn breed_new_individuals(
+        &self,
+        request: &Request,
+        num_offspring: usize,
+        tournament_size: usize,
+        sample_size: usize,
+        next_generation_id: i32, // Same or incremented based on strategy
     ) -> Result<(), Error> {
-        let genotypes = self
+        // Get candidates for breeding
+        let candidates = self
             .genotypes
             .search_genotypes_in_latest_generation(
-                population_size as i64,
-                &genotypes::Filter::default().with_fitness(true),
+                sample_size as i64,
+                genotypes::Order::Random,
+                &genotypes::Filter::default()
+                    .with_fitness(true)
+                    .with_request_ids(vec![request.id]),
             )
             .await?;
 
-        if genotypes.len() < population_size as usize {
-            // population_size is not yet reached, return
-            return Ok(());
+        let mut rng = rand::rng();
+
+        // Select parents
+        let parent_pairs =
+            self.select_by_tournament(&mut rng, num_offspring, tournament_size, candidates)?;
+
+        // Get morphology for mutation bounds
+        let morphology = self.morphologies.get_morphology(request.type_hash).await?;
+
+        // Create and mutate new offspring
+        let mut new_genotypes = Vec::with_capacity(num_offspring);
+        let mut population_updates = Vec::with_capacity(num_offspring);
+        let mut events = Vec::with_capacity(num_offspring);
+
+        for (parent1, parent2) in parent_pairs {
+            let mut child =
+                self.crossover(&parent1, &parent2, &mut rng, request.id, next_generation_id);
+
+            self.mutate(
+                &mut child,
+                &morphology,
+                &mut rng,
+                request.temperature,
+                request.mutation_rate,
+            );
+
+            population_updates.push((request.id, child.id));
+            events.push(GenotypeGenerated::new(request.id, child.id));
+            new_genotypes.push(child);
         }
 
-        let generation_id = genotypes
-            .get(0)
-            .map(|g| g.generation_id)
-            .expect("genotypes len is equal or larger to population size");
+        // Update database
+        let populations = self.populations.clone();
+        self.genotypes
+            .chain(|mut tx_genotypes| {
+                Box::pin(async move {
+                    tx_genotypes.new_genotypes(new_genotypes).await?;
 
-        if max_generations < generation_id as u32 {
-            // FIXME!
-            //
-            // Perform selection and generate the next generation!
-            todo!()
-        }
+                    let mut tx_populations = populations.from_other(tx_genotypes);
 
-        // FIXME!
-        //
-        // Publish RequestTerminated::new(request.id)
-        todo!()
+                    tx_populations
+                        .add_to_population(&population_updates)
+                        .await?;
+
+                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_populations);
+                    publisher.publish_many(&events).await?;
+
+                    Ok((publisher, ()))
+                })
+            })
+            .await?;
+
+        Ok(())
     }
 
     async fn maintain_rolling(
         &self,
-        request: Request,
+        request: &Request,
         max_evaluations: u32,
         population_size: u32,
         selection_interval: u32,
+        tournament_size: u32,
+        sample_size: u32,
     ) -> Result<(), Error> {
-        // Get the count of completed evaluations in the latest generation
         let evaluations = self
             .genotypes
-            .count_genotypes_in_latest_iteration(
+            .get_count_of_genotypes_in_latest_iteration(
                 &genotypes::Filter::default()
                     .with_request_ids(vec![request.id])
                     .with_fitness(true),
             )
             .await?;
 
-        if (max_evaluations as i64) < evaluations {
-            // max_evaluations not yet reached, return
+        if (max_evaluations as i64) > evaluations {
             return Ok(());
         }
 
-        let population_count = self.genotypes.get_population_count(request.id).await?;
+        let population_count = self.populations.get_population_count(&request.id).await?;
         if population_count < (population_size - selection_interval) as i64 {
-            // FIXME!
-            //
-            // Perform selection and generate selection_interval number of new Genotypes!
-            todo!()
+            let current_gen = self.genotypes.get_generation_coun(request.id).await?;
+            self.breed_new_individuals(
+                request,
+                selection_interval as usize,
+                tournament_size as usize,
+                sample_size as usize,
+                current_gen,
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    async fn maintain_generational(
+        &self,
+        request: Request,
+        max_generations: u32,
+        population_size: u32,
+    ) -> Result<(), Error> {
+        let current_gen = self.genotypes.get_generation_coun(request.id).await?;
+
+        if max_generations < current_gen as u32 {
+            return Ok(());
         }
 
-        // FIXME!
-        //
-        // Publish RequestTerminated::new(request.id)
-        todo!()
+        let population_count = self.populations.get_population_count(&request.id).await?;
+        if population_count == population_size as i64 {
+            self.breed_new_individuals(
+                &request,
+                population_size as usize,
+                (population_size / 8).max(2) as usize, // Larger tournament size for generational
+                population_size as usize,              // Sample from whole population
+                current_gen + 1,                       // Increment generation
+            )
+            .await?;
+        }
+        Ok(())
     }
 
     // Shall be run in a job triggered by GenotypeEvaluated
     pub async fn maintain_population(&self, request_id: Uuid) -> Result<(), Error> {
         // Get the request
         let request = self.requests.get_request(request_id).await?;
+        let request_id = request.id;
 
         // Check for completion
         let top_performer = self
             .genotypes
             .search_genotypes_in_latest_generation(
                 1,
+                genotypes::Order::Fitness,
                 &genotypes::Filter::default()
                     .with_request_ids(vec![request.id])
                     .with_fitness(true),
@@ -354,14 +531,23 @@ impl<'a> Service<'a> {
             return Ok(());
         }
 
-        let fitness = top_performer[0]
-            .fitness()
-            .expect("Filtered out genotypes without fitness in query");
+        let fitness = top_performer[0].must_fitness();
 
         if request.is_completed(fitness) {
-            // FIXME!
-            //
             // Publish RequestCompleted::new(request_id)
+            self.genotypes
+                .chain(|tx_genotypes| {
+                    Box::pin(async move {
+                        // Create publisher
+                        let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+
+                        // Publish completion event
+                        publisher.publish(RequestCompleted::new(request.id)).await?;
+
+                        Ok((publisher, ()))
+                    })
+                })
+                .await?;
             return Ok(());
         }
 
@@ -370,24 +556,43 @@ impl<'a> Service<'a> {
                 max_generations,
                 population_size,
             } => {
-                return self
-                    .maintain_generational(request, max_generations, population_size)
-                    .await;
+                self.maintain_generational(request, max_generations, population_size)
+                    .await?;
             }
             requests::Strategy::Rolling {
                 max_evaluations,
                 population_size,
                 selection_interval,
+                tournament_size,
+                sample_size,
             } => {
-                return self
-                    .maintain_rolling(
-                        request,
-                        max_evaluations,
-                        population_size,
-                        selection_interval,
-                    )
-                    .await;
+                self.maintain_rolling(
+                    &request,
+                    max_evaluations,
+                    population_size,
+                    selection_interval,
+                    tournament_size,
+                    sample_size,
+                )
+                .await?;
             }
         }
+        // Use a compatible repository to open a transaction and publish a termination event
+        self.genotypes
+            .chain(|tx_genotypes| {
+                Box::pin(async move {
+                    // Create publisher
+                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+
+                    // Publish termination event
+                    publisher
+                        .publish(RequestTerminated::new(request_id))
+                        .await?;
+
+                    Ok((publisher, ()))
+                })
+            })
+            .await?;
+        Ok(())
     }
 }

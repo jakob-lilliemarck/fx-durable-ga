@@ -1,9 +1,8 @@
+use crate::repositories::genotypes;
 use chrono::{DateTime, Utc};
 use rand::{Rng, rngs::ThreadRng};
 use serde::{Deserialize, Serialize};
-use sqlx::{PgExecutor, PgPool, PgTransaction};
-
-use crate::repositories::genotypes;
+use sqlx::{PgExecutor, PgPool};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -19,10 +18,6 @@ pub struct Repository {
     pool: PgPool,
 }
 
-pub struct TxRepository<'tx> {
-    tx: PgTransaction<'tx>,
-}
-
 impl Repository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -34,20 +29,6 @@ impl Repository {
 
     pub async fn get_morphology(&self, type_hash: i32) -> Result<Morphology, Error> {
         get_morphology(&self.pool, type_hash).await
-    }
-}
-
-impl<'tx> TxRepository<'tx> {
-    pub fn new(tx: PgTransaction<'tx>) -> Self {
-        Self { tx }
-    }
-
-    pub async fn new_morphology(&mut self, morphology: Morphology) -> Result<Morphology, Error> {
-        new_morphology(&mut *self.tx, morphology).await
-    }
-
-    pub async fn get_morphology(&mut self, type_hash: i32) -> Result<Morphology, Error> {
-        get_morphology(&mut *self.tx, type_hash).await
     }
 }
 
@@ -77,9 +58,9 @@ impl GeneBoundError {
 #[derive(Debug, Serialize, Deserialize)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct GeneBounds {
-    lower: i32,
-    upper: i32,
-    divisor: i32,
+    pub(crate) lower: i32,
+    pub(crate) upper: i32,
+    pub(crate) divisor: i32,
 }
 
 impl GeneBounds {
@@ -106,10 +87,10 @@ impl GeneBounds {
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct Morphology {
-    revised_at: DateTime<Utc>,
-    type_name: String,
-    type_hash: i32,
-    gene_bounds: Vec<GeneBounds>,
+    pub(crate) revised_at: DateTime<Utc>,
+    pub(crate) type_name: String,
+    pub(crate) type_hash: i32,
+    pub(crate) gene_bounds: Vec<GeneBounds>,
 }
 
 impl Morphology {
