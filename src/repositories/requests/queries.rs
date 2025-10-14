@@ -1,64 +1,9 @@
-use super::{Error, FitnessGoal, Request};
-use chrono::{DateTime, Utc};
+use super::Error;
+use super::models::DbRequest;
+use crate::models::{FitnessGoal, Request};
 use sqlx::PgExecutor;
 use tracing::instrument;
 use uuid::Uuid;
-
-/// A request for an optimization
-#[derive(Debug)]
-struct DbRequest {
-    id: Uuid,
-    requested_at: DateTime<Utc>,
-    type_name: String,
-    type_hash: i32,
-    goal: FitnessGoal,
-    threshold: f64,
-    strategy: serde_json::Value,
-    temperature: f64,
-    mutation_rate: f64,
-}
-
-impl TryFrom<Request> for DbRequest {
-    type Error = Error;
-
-    #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
-    fn try_from(request: Request) -> Result<Self, Self::Error> {
-        let strategy_json = serde_json::to_value(request.strategy)?;
-
-        Ok(DbRequest {
-            id: request.id,
-            requested_at: request.requested_at,
-            type_name: request.type_name,
-            type_hash: request.type_hash,
-            goal: request.goal,
-            threshold: request.threshold,
-            strategy: strategy_json,
-            temperature: request.temperature,
-            mutation_rate: request.mutation_rate,
-        })
-    }
-}
-
-impl TryFrom<DbRequest> for Request {
-    type Error = Error;
-
-    #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
-    fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
-        let strategy_json = serde_json::from_value(request.strategy)?;
-
-        Ok(Request {
-            id: request.id,
-            requested_at: request.requested_at,
-            type_name: request.type_name,
-            type_hash: request.type_hash,
-            goal: request.goal,
-            threshold: request.threshold,
-            strategy: strategy_json,
-            temperature: request.temperature,
-            mutation_rate: request.mutation_rate,
-        })
-    }
-}
 
 #[instrument(level = "debug", skip(tx), fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash, goal = ?request.goal))]
 pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
@@ -109,10 +54,73 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
     Ok(request)
 }
 
+#[cfg(test)]
+mod new_request_tests {
+    use super::*;
+    use crate::models::Strategy;
+    use chrono::SubsecRound;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_inserts_a_new_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::Maximize,
+            0.9,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            0.5,
+            0.1,
+        )?;
+        let request_clone = request.clone();
+
+        let inserted = new_request(&pool, request).await?;
+
+        assert_eq!(request_clone.id, inserted.id);
+        assert_eq!(
+            request_clone.requested_at.trunc_subsecs(6),
+            inserted.requested_at
+        );
+        assert_eq!(request_clone.type_name, inserted.type_name);
+        assert_eq!(request_clone.type_hash, inserted.type_hash);
+        assert_eq!(request_clone.goal, inserted.goal);
+        assert_eq!(request_clone.threshold, inserted.threshold);
+        assert_eq!(request_clone.strategy, inserted.strategy);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::Maximize,
+            0.9,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            0.5,
+            0.1,
+        )?;
+        let request_clone = request.clone();
+
+        new_request(&pool, request).await?;
+        let inserted = new_request(&pool, request_clone).await;
+
+        assert!(inserted.is_err());
+
+        Ok(())
+    }
+}
+
 #[instrument(level = "debug", skip(tx), fields(request_id = %id))]
 pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
     tx: E,
-    id: Uuid,
+    id: &Uuid,
 ) -> Result<Request, Error> {
     let db_request = sqlx::query_as!(
         DbRequest,
@@ -137,4 +145,55 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
 
     let request: Request = db_request.try_into()?;
     Ok(request)
+}
+
+#[cfg(test)]
+mod get_request_tests {
+    use super::*;
+    use crate::models::Strategy;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_an_existing_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::Maximize,
+            0.9,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            0.5,
+            0.1,
+        )?;
+        let request_id = request.id;
+
+        new_request(&pool, request).await?;
+        let selected = get_request(&pool, &request_id).await?;
+
+        assert_eq!(request_id, selected.id);
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::Maximize,
+            0.9,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            0.5,
+            0.1,
+        )?;
+        let request_id = request.id;
+
+        let selected = get_request(&pool, &request_id).await;
+
+        assert!(selected.is_err());
+        Ok(())
+    }
 }

@@ -1,11 +1,8 @@
 use anyhow::Result;
 use fx_durable_ga::{
     bootstrap::bootstrap,
-    repositories::{
-        morphologies::GeneBounds,
-        requests::{FitnessGoal, Strategy},
-    },
-    service::{Encodeable, events::register_event_handlers, jobs::register_job_handlers},
+    models::{Encodeable, Evaluator, FitnessGoal, GeneBounds, Strategy},
+    service::{events::register_event_handlers, jobs::register_job_handlers},
 };
 use fx_mq_building_blocks::queries::Queries;
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -37,7 +34,7 @@ impl Encodeable for Cube {
 
 struct CubeEvaluator;
 
-impl fx_durable_ga::service::Evaluator<(i64, i64, i64)> for CubeEvaluator {
+impl Evaluator<(i64, i64, i64)> for CubeEvaluator {
     fn fitness<'a>(
         &self,
         phenotype: (i64, i64, i64),

@@ -3,7 +3,7 @@ use tracing::instrument;
 use uuid::Uuid;
 
 #[instrument(level = "debug", skip(tx), fields(individuals_count = individuals.len()))]
-pub async fn add_to_population<'tx, E: PgExecutor<'tx>>(
+pub(crate) async fn add_to_population<'tx, E: PgExecutor<'tx>>(
     tx: E,
     individuals: &[(Uuid, Uuid)], // (request_id, genotype_id)
 ) -> Result<(), super::Error> {
@@ -26,7 +26,7 @@ pub async fn add_to_population<'tx, E: PgExecutor<'tx>>(
 }
 
 #[instrument(level = "debug", skip(tx), fields(request_id = %request_id, genotype_id = %genotype_id))]
-pub async fn remove_from_population<'tx, E: PgExecutor<'tx>>(
+pub(crate) async fn remove_from_population<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request_id: &Uuid,
     genotype_id: &Uuid,
@@ -46,7 +46,7 @@ pub async fn remove_from_population<'tx, E: PgExecutor<'tx>>(
 }
 
 #[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
-pub async fn get_population_count<'tx, E: PgExecutor<'tx>>(
+pub(crate) async fn get_population_count<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request_id: &Uuid,
 ) -> Result<i64, super::Error> {

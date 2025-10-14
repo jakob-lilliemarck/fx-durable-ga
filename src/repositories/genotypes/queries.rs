@@ -1,52 +1,8 @@
-use std::fmt::Display;
-
+use crate::models::Genotype;
 use sqlx::PgExecutor;
+use std::fmt::Display;
 use tracing::instrument;
 use uuid::Uuid;
-
-use crate::repositories::genotypes::Genotype;
-
-#[instrument(level = "debug", skip(tx), fields(genotype_id = %genotype.id, type_name = %genotype.type_name, type_hash = genotype.type_hash, request_id = %genotype.request_id))]
-pub(crate) async fn new_genotype<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    genotype: Genotype,
-) -> Result<Genotype, super::Error> {
-    let genotype = sqlx::query_as!(
-        Genotype,
-        r#"
-            INSERT INTO fx_durable_ga.genotypes (
-                id,
-                generated_at,
-                type_name,
-                type_hash,
-                genome,
-                request_id,
-                generation_id
-            )
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING
-                id,
-                generated_at,
-                type_name,
-                type_hash,
-                genome,
-                request_id,
-                fitness,
-                generation_id;
-            "#,
-        genotype.id,
-        genotype.generated_at,
-        genotype.type_name,
-        genotype.type_hash,
-        &genotype.genome,
-        genotype.request_id,
-        genotype.generation_id
-    )
-    .fetch_one(tx)
-    .await?;
-
-    Ok(genotype)
-}
 
 #[instrument(level = "debug", skip(tx), fields(genotypes_count = genotypes.len()))]
 pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
@@ -102,6 +58,46 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
     Ok(genotypes)
 }
 
+#[cfg(test)]
+mod new_genotypes_tests {
+    use super::*;
+    use chrono::SubsecRound;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_inserts_a_new_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request_id = Uuid::now_v7();
+        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
+        let genotypes_clone = genotypes.clone();
+
+        let inserted = new_genotypes(&pool, genotypes).await?;
+
+        assert_eq!(genotypes_clone[0].id, inserted[0].id);
+        assert_eq!(
+            genotypes_clone[0].generated_at.trunc_subsecs(6),
+            inserted[0].generated_at
+        );
+        assert_eq!(genotypes_clone[0].type_name, inserted[0].type_name);
+        assert_eq!(genotypes_clone[0].type_hash, inserted[0].type_hash);
+        assert_eq!(genotypes_clone[0].genome, inserted[0].genome);
+        assert_eq!(genotypes_clone[0].request_id, inserted[0].request_id);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request_id = Uuid::now_v7();
+        let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id, 1);
+        let genotype_clone = genotype.clone();
+
+        new_genotypes(&pool, vec![genotype]).await?;
+        let result = new_genotypes(&pool, vec![genotype_clone]).await;
+
+        assert!(result.is_err());
+        Ok(())
+    }
+}
+
 #[instrument(level = "debug", skip(tx), fields(genotype_id = %id, fitness = fitness))]
 pub(crate) async fn set_fitness<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -122,6 +118,35 @@ pub(crate) async fn set_fitness<'tx, E: PgExecutor<'tx>>(
     .await?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod set_fitness_tests {
+    use super::*;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_updates_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request_id = Uuid::now_v7();
+        let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id, 1);
+
+        let inserted = new_genotypes(&pool, vec![genotype]).await?;
+        set_fitness(&pool, inserted[0].id, 0.9).await?;
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_errors_if_fitness_is_already_set(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request_id = Uuid::now_v7();
+        let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id, 1);
+
+        let inserted = new_genotypes(&pool, vec![genotype]).await?;
+        set_fitness(&pool, inserted[0].id, 0.9).await?;
+        let result = set_fitness(&pool, inserted[0].id, 0.8).await;
+
+        assert!(result.is_err());
+        Ok(())
+    }
 }
 
 #[instrument(level = "debug", skip(tx), fields(genotype_id = %id))]
@@ -152,6 +177,44 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
     Ok(genotype)
 }
 
+#[cfg(test)]
+mod get_genotype_tests {
+    use super::*;
+    use chrono::{SubsecRound, Utc};
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_an_existing_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let genotype = Genotype {
+            id: Uuid::now_v7(),
+            generated_at: Utc::now().trunc_subsecs(6),
+            type_name: "test".to_string(),
+            type_hash: 1,
+            genome: vec![1, 2, 3],
+            request_id: Uuid::now_v7(),
+            fitness: None,
+            generation_id: 1,
+        };
+        let genotype_id = genotype.id;
+
+        new_genotypes(&pool, vec![genotype]).await?;
+
+        let selected = get_genotype(&pool, &genotype_id).await?;
+
+        assert_eq!(genotype_id, selected.id);
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let non_existent_id = Uuid::now_v7();
+
+        let result = get_genotype(&pool, &non_existent_id).await;
+
+        assert!(result.is_err());
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub(crate) struct Filter {
     ids: Option<Vec<Uuid>>,
@@ -173,12 +236,6 @@ impl Filter {
     #[instrument(level = "debug", fields(has_fitness = has_fitness))]
     pub(crate) fn with_fitness(mut self, has_fitness: bool) -> Self {
         self.has_fitness = Some(has_fitness);
-        self
-    }
-
-    #[instrument(level = "debug", fields(ids_count = ids.len()))]
-    pub(crate) fn with_ids(mut self, ids: Vec<Uuid>) -> Self {
-        self.ids = Some(ids);
         self
     }
 
@@ -214,14 +271,10 @@ pub(crate) async fn count_genotypes_in_latest_iteration<'tx, E: PgExecutor<'tx>>
                 END
             )
             AND (
-                $2::uuid[] IS NULL OR g.id = ANY($2)
-            )
-            AND (
-                $3::uuid[] IS NULL OR g.request_id = ANY($3)
+                $2::uuid[] IS NULL OR g.request_id = ANY($2)
             );
         "#,
         filter.has_fitness,
-        filter.ids.as_deref(),
         filter.request_ids.as_deref(),
     )
     .fetch_one(tx)
@@ -230,9 +283,139 @@ pub(crate) async fn count_genotypes_in_latest_iteration<'tx, E: PgExecutor<'tx>>
     Ok(count)
 }
 
+#[cfg(test)]
+mod count_genotypes_in_latest_iteration_tests {
+    use super::*;
+    use crate::repositories::genotypes::Filter;
+    use chrono::{SubsecRound, Utc};
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_counts_some_genotypes(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let req_id_1 = Uuid::now_v7();
+        let req_id_2 = Uuid::now_v7();
+
+        assert_eq!(
+            count_genotypes_in_latest_iteration(&pool, &Filter::default()).await?,
+            0
+        );
+
+        new_genotypes(
+            &pool,
+            vec![Genotype {
+                id: Uuid::now_v7(),
+                generated_at: Utc::now().trunc_subsecs(6),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![1, 2, 3],
+                request_id: req_id_1,
+                fitness: None,
+                generation_id: 1,
+            }],
+        )
+        .await?;
+        assert_eq!(
+            count_genotypes_in_latest_iteration(&pool, &Filter::default()).await?,
+            1
+        );
+
+        // SECOND
+        let genotype_id_2 = Uuid::now_v7();
+        new_genotypes(
+            &pool,
+            vec![Genotype {
+                id: genotype_id_2,
+                generated_at: Utc::now().trunc_subsecs(6),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![1, 2, 3],
+                request_id: req_id_1,
+                fitness: None,
+                generation_id: 1,
+            }],
+        )
+        .await?;
+        set_fitness(&pool, genotype_id_2, 0.123).await?;
+
+        assert_eq!(
+            count_genotypes_in_latest_iteration(&pool, &Filter::default()).await?,
+            2
+        );
+        assert_eq!(
+            count_genotypes_in_latest_iteration(&pool, &Filter::default().with_fitness(false))
+                .await?,
+            1
+        );
+        assert_eq!(
+            count_genotypes_in_latest_iteration(&pool, &Filter::default().with_fitness(true))
+                .await?,
+            1
+        );
+
+        // THIRD
+        new_genotypes(
+            &pool,
+            vec![Genotype {
+                id: Uuid::now_v7(),
+                generated_at: Utc::now().trunc_subsecs(6),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![1, 2, 3],
+                request_id: req_id_2,
+                fitness: None,
+                generation_id: 1,
+            }],
+        )
+        .await?;
+        assert_eq!(
+            count_genotypes_in_latest_iteration(
+                &pool,
+                &Filter::default().with_request_ids(vec![req_id_1])
+            )
+            .await?,
+            2
+        );
+        assert_eq!(
+            count_genotypes_in_latest_iteration(
+                &pool,
+                &Filter::default().with_request_ids(vec![req_id_2])
+            )
+            .await?,
+            1
+        );
+        assert_eq!(
+            count_genotypes_in_latest_iteration(
+                &pool,
+                &Filter::default().with_request_ids(vec![req_id_1, req_id_2])
+            )
+            .await?,
+            3
+        );
+        assert_eq!(
+            count_genotypes_in_latest_iteration(
+                &pool,
+                &Filter::default()
+                    .with_request_ids(vec![req_id_1, req_id_2])
+                    .with_fitness(false)
+            )
+            .await?,
+            2
+        );
+        assert_eq!(
+            count_genotypes_in_latest_iteration(
+                &pool,
+                &Filter::default()
+                    .with_request_ids(vec![req_id_1, req_id_2])
+                    .with_fitness(true)
+            )
+            .await?,
+            1
+        );
+        Ok(())
+    }
+}
+
 pub(crate) enum Order {
     Fitness,
-    GeneratedAt,
     Random,
 }
 
@@ -240,7 +423,6 @@ impl Display for Order {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Order::Fitness => write!(f, "fitness"),
-            Order::GeneratedAt => write!(f, "generated_at"),
             Order::Random => write!(f, "random"),
         }
     }
@@ -291,10 +473,6 @@ pub(crate) async fn search_genotypes_in_latest_generation<'tx, E: PgExecutor<'tx
         ORDER BY
             CASE
                 WHEN $4 = 'fitness' THEN g.fitness
-                ELSE NULL
-            END DESC NULLS LAST,
-            CASE
-                WHEN $4 = 'generated_at' THEN g.generated_at
                 ELSE NULL
             END DESC NULLS LAST,
             CASE

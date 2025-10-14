@@ -1,4 +1,7 @@
+mod errors;
+mod models;
 mod queries;
 mod repository;
 
-pub use repository::{Error, GeneBoundError, GeneBounds, Morphology, Repository};
+pub use errors::Error;
+pub(crate) use repository::Repository;

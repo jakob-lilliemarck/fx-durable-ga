@@ -1,6 +1,9 @@
 use futures::future::BoxFuture;
 use sqlx::PgTransaction;
 
+// ============================================================
+// Implementations on the Repository
+// ============================================================
 pub trait TxType<'tx> {
     type TxType: ToTx<'tx>;
     type TxError;
@@ -21,7 +24,9 @@ pub trait FromOther<'tx>: TxType<'tx> {
     fn from_other(&self, other: impl ToTx<'tx>) -> Self::TxType;
 }
 
+// ============================================================
 // Implementations on the TxType
+// ============================================================
 pub trait ToTx<'tx>: Send + Sync {
     fn tx(self) -> PgTransaction<'tx>;
 }

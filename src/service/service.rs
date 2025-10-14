@@ -1,16 +1,13 @@
-use crate::repositories::chainable::{Chain, FromOther, FromTx};
-use crate::repositories::genotypes::Genotype;
-use crate::repositories::populations;
-use crate::repositories::{
-    genotypes,
-    morphologies::{self, Morphology},
-    requests::{self, Request},
+use crate::models::{
+    Encodeable, Evaluator, FitnessGoal, Gene, Genotype, Morphology, Request, Strategy,
 };
+use crate::repositories::chainable::{Chain, FromOther, FromTx};
+use crate::repositories::populations;
+use crate::repositories::{genotypes, morphologies, requests};
 use crate::service::events::{
     GenotypeEvaluatedEvent, GenotypeGenerated, OptimizationRequestedEvent, RequestCompletedEvent,
     RequestTerminatedEvent,
 };
-use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
 use rand::Rng;
 use rand::seq::SliceRandom;
@@ -36,21 +33,6 @@ pub enum Error {
     NoValidParents,
     #[error("PublishErrorTemp")]
     PublishErrorTemp, //FIXME
-}
-
-pub trait Encodeable {
-    const NAME: &str;
-    const HASH: i32 = fnv1a_hash_str_32(Self::NAME) as i32;
-
-    type Phenotype;
-
-    fn morphology() -> Vec<morphologies::GeneBounds>;
-    fn encode(&self) -> Vec<i64>;
-    fn decode(genes: &[i64]) -> Self::Phenotype;
-}
-
-pub trait Evaluator<P> {
-    fn fitness<'a>(&self, phenotype: P) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
 
 trait TypeErasedEvaluator: Send + Sync {
@@ -133,7 +115,7 @@ impl ServiceBuilder {
 }
 
 impl Service {
-    pub fn builder(
+    pub(crate) fn builder(
         requests: requests::Repository,
         morphologies: morphologies::Repository,
         genotypes: genotypes::Repository,
@@ -153,9 +135,9 @@ impl Service {
         &self,
         type_name: &str,
         type_hash: i32,
-        goal: requests::FitnessGoal,
+        goal: FitnessGoal,
         threshold: f64,
-        strategy: requests::Strategy,
+        strategy: Strategy,
         temperature: f64,
         mutation_rate: f64,
     ) -> Result<(), Error> {
@@ -215,7 +197,7 @@ impl Service {
         let mut population = Vec::with_capacity(request.population_size() as usize);
         let mut events = Vec::with_capacity(request.population_size() as usize);
         for _ in 0..request.population_size() {
-            let genotype = genotypes::Genotype::new(
+            let genotype = Genotype::new(
                 &request.type_name,
                 request.type_hash,
                 morphology.random(),
@@ -326,7 +308,7 @@ impl Service {
     ) -> Genotype {
         let mut rng = rand::rng();
         // Option 1: Simple uniform crossover (50/50 chance for each gene)
-        let genome: Vec<genotypes::Gene> = a
+        let genome: Vec<Gene> = a
             .genome
             .iter()
             .zip(b.genome.iter())
@@ -542,7 +524,7 @@ impl Service {
         }
 
         let population_count = self.populations.get_population_count(&request.id).await?;
-        
+
         // For generational strategy: breed when population is empty (all genotypes evaluated)
         // This happens after all genotypes in the current generation have been evaluated
         if population_count == 0 {
@@ -555,7 +537,7 @@ impl Service {
                         .with_fitness(true),
                 )
                 .await?;
-            
+
             // Only breed if we have a full generation of evaluated genotypes
             if evaluated_count >= population_size as i64 {
                 self.breed_new_individuals(
@@ -569,7 +551,7 @@ impl Service {
             }
         }
         // If population_count > 0, some genotypes are still being evaluated, so wait
-        
+
         Ok(())
     }
 
@@ -623,14 +605,14 @@ impl Service {
         }
 
         match request.strategy {
-            requests::Strategy::Generational {
+            Strategy::Generational {
                 max_generations,
                 population_size,
             } => {
                 self.maintain_generational(request, max_generations, population_size)
                     .await
             }
-            requests::Strategy::Rolling {
+            Strategy::Rolling {
                 max_evaluations,
                 population_size,
                 selection_interval,

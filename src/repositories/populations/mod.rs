@@ -1,4 +1,7 @@
+mod errors;
 mod queries;
 mod repository;
+mod repository_tx;
 
-pub use repository::{Error, Repository};
+pub use errors::Error;
+pub(crate) use repository::Repository;
