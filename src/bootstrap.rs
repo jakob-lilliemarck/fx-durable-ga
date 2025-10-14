@@ -11,10 +11,7 @@ pub async fn bootstrap(pool: PgPool) -> anyhow::Result<service::ServiceBuilder> 
     let morphologies = morphologies::Repository::new(pool.clone());
     let requests = requests::Repository::new(pool.clone());
 
-    Ok(service::Service::builder(
-        requests,
-        morphologies,
-        genotypes,
-        populations,
-    ))
+    let builder = service::Service::builder(requests, morphologies, genotypes, populations);
+
+    Ok(builder)
 }

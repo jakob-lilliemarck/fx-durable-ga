@@ -249,7 +249,10 @@ impl Handler<RequestTerminatedEvent> for RequestTerminatedHandler {
 // Registration
 // ============================================================
 
-pub fn register_handlers(queries: Arc<Queries>, registry: &mut fx_event_bus::EventHandlerRegistry) {
+pub fn register_event_handlers(
+    queries: Arc<Queries>,
+    registry: &mut fx_event_bus::EventHandlerRegistry,
+) {
     registry.with_handler(OptimizationRequestedHandler {
         queries: queries.clone(),
     });

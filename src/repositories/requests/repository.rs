@@ -203,7 +203,7 @@ impl Request {
     }
 
     #[instrument(level = "debug", fields(request_id = %self.id, evaluations = evaluations))]
-    pub(crate) fn check_termination(&self, evaluations: i64) -> bool {
+    pub fn check_termination(&self, evaluations: i64) -> bool {
         match self.strategy {
             Strategy::Generational {
                 max_generations,

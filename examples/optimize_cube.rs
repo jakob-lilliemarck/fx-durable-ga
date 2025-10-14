@@ -1,12 +1,11 @@
 use anyhow::Result;
-use dotenv::dotenv;
 use fx_durable_ga::{
     bootstrap::bootstrap,
     repositories::{
         morphologies::GeneBounds,
         requests::{FitnessGoal, Strategy},
     },
-    service::{Encodeable, events::register_handlers, jobs::register_job_handlers},
+    service::{Encodeable, events::register_event_handlers, jobs::register_job_handlers},
 };
 use fx_mq_building_blocks::queries::Queries;
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -24,8 +23,7 @@ impl Encodeable for Cube {
     type Phenotype = (i64, i64, i64);
 
     fn morphology() -> Vec<GeneBounds> {
-        // Create bounds for x, y, z coordinates (0-100 with 101 steps)
-        vec![GeneBounds::new(0, 100, 101).unwrap(); 3]
+        vec![GeneBounds::new(0, 1000, 1000).unwrap(); 3]
     }
 
     fn encode(&self) -> Vec<i64> {
@@ -64,8 +62,10 @@ impl fx_durable_ga::service::Evaluator<(i64, i64, i64)> for CubeEvaluator {
 async fn main() -> Result<()> {
     dotenv::from_filename(".env.local").ok();
 
-    // Initialize logging
-    tracing_subscriber::fmt::init();
+    // Initialize logging at DEBUG level
+    tracing_subscriber::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .init();
 
     // Get database URL from environment
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -86,12 +86,12 @@ async fn main() -> Result<()> {
 
     // setup event handling and spawn an event handling agent
     let mut registry = fx_event_bus::EventHandlerRegistry::new();
-    register_handlers(
+    register_event_handlers(
         Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME)),
         &mut registry,
     );
     let mut listener = fx_event_bus::Listener::new(pool.clone(), registry);
-    let events_handle = tokio::spawn(async move {
+    let _events_handle = tokio::spawn(async move {
         listener.listen(None).await?;
         Ok::<(), sqlx::Error>(())
     });
@@ -102,12 +102,12 @@ async fn main() -> Result<()> {
     let mut jobs_listener = fx_mq_jobs::Listener::new(
         pool.clone(),
         register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
-        4,
+        8,
         host_id,
         hold_for,
     )
     .await?;
-    let jobs_handle = tokio::spawn(async move {
+    let _jobs_handle = tokio::spawn(async move {
         jobs_listener.listen().await?;
         Ok::<(), anyhow::Error>(())
     });
@@ -121,14 +121,29 @@ async fn main() -> Result<()> {
             0.99, // Stop when we get very close to origin
             Strategy::Generational {
                 max_generations: 100,
-                population_size: 10,
+                population_size: 25,
             },
-            0.5, // temperature
+            0.3, // temperature
             0.1, // mutation_rate
         )
         .await?;
 
+    // Run for a maximum of 5 seconds
+    let timeout_duration = Duration::from_secs(30);
+    let start_time = std::time::Instant::now();
+
     loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // Check if we've exceeded the timeout
+        if start_time.elapsed() >= timeout_duration {
+            println!(
+                "Timeout reached after {} seconds. Stopping optimization.",
+                timeout_duration.as_secs()
+            );
+            break;
+        }
     }
+
+    Ok(())
 }

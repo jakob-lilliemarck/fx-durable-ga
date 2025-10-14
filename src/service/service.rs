@@ -195,7 +195,18 @@ impl Service {
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub async fn generate_initial_population(&self, request_id: Uuid) -> Result<(), Error> {
         // Get the optimization request
-        let request = self.requests.get_request(request_id).await?;
+        tracing::debug!(
+            "About to fetch request in generate_initial_population with ID: {}",
+            request_id
+        );
+        let request = self.requests.get_request(request_id).await.map_err(|e| {
+            tracing::error!(
+                "Failed to fetch request in generate_initial_population with ID {}: {:?}",
+                request_id,
+                e
+            );
+            e
+        })?;
 
         // Get the morphology of the type under optimization
         let morphology = self.morphologies.get_morphology(request.type_hash).await?;
@@ -252,7 +263,15 @@ impl Service {
         genotype_id: Uuid,
     ) -> Result<(), Error> {
         // Get the genotype from the database
-        let genotype = self.genotypes.get_genotype(&genotype_id).await?;
+        tracing::debug!("About to fetch genotype with ID: {}", genotype_id);
+        let genotype = self
+            .genotypes
+            .get_genotype(&genotype_id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to fetch genotype with ID {}: {:?}", genotype_id, e);
+                e
+            })?;
 
         // Get the evaluator to use for this type
         let evaluator =
@@ -485,7 +504,26 @@ impl Service {
                 current_gen,
             )
             .await?;
+
+            return Ok(());
         }
+
+        // Use a compatible repository to open a transaction and publish a termination event
+        self.genotypes
+            .chain(|tx_genotypes| {
+                Box::pin(async move {
+                    // Create publisher
+                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+
+                    // Publish termination event
+                    publisher
+                        .publish(RequestTerminatedEvent::new(request.id))
+                        .await?;
+
+                    Ok((publisher, ()))
+                })
+            })
+            .await?;
         Ok(())
     }
 
@@ -498,21 +536,40 @@ impl Service {
     ) -> Result<(), Error> {
         let current_gen = self.genotypes.get_generation_count(request.id).await?;
 
-        if max_generations < current_gen as u32 {
-            return Ok(());
+        // Check if we've reached the maximum number of generations
+        if max_generations <= current_gen as u32 {
+            return Ok(()); // Termination condition: max generations reached
         }
 
         let population_count = self.populations.get_population_count(&request.id).await?;
-        if population_count == population_size as i64 {
-            self.breed_new_individuals(
-                &request,
-                population_size as usize,
-                (population_size / 8).max(2) as usize, // Larger tournament size for generational
-                population_size as usize,              // Sample from whole population
-                current_gen + 1,                       // Increment generation
-            )
-            .await?;
+        
+        // For generational strategy: breed when population is empty (all genotypes evaluated)
+        // This happens after all genotypes in the current generation have been evaluated
+        if population_count == 0 {
+            // Ensure we have evaluated genotypes to breed from
+            let evaluated_count = self
+                .genotypes
+                .get_count_of_genotypes_in_latest_iteration(
+                    &genotypes::Filter::default()
+                        .with_request_ids(vec![request.id])
+                        .with_fitness(true),
+                )
+                .await?;
+            
+            // Only breed if we have a full generation of evaluated genotypes
+            if evaluated_count >= population_size as i64 {
+                self.breed_new_individuals(
+                    &request,
+                    population_size as usize,
+                    (population_size / 8).max(2) as usize, // Larger tournament size for generational
+                    population_size as usize,              // Sample from whole population
+                    current_gen + 1,                       // Increment generation
+                )
+                .await?;
+            }
         }
+        // If population_count > 0, some genotypes are still being evaluated, so wait
+        
         Ok(())
     }
 
@@ -520,8 +577,11 @@ impl Service {
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub async fn maintain_population(&self, request_id: Uuid) -> Result<(), Error> {
         // Get the request
-        let request = self.requests.get_request(request_id).await?;
-        let request_id = request.id;
+        tracing::debug!("About to fetch request with ID: {}", request_id);
+        let request = self.requests.get_request(request_id).await.map_err(|e| {
+            tracing::error!("Failed to fetch request with ID {}: {:?}", request_id, e);
+            e
+        })?;
 
         // Check for completion
         let top_performer = self
@@ -568,7 +628,7 @@ impl Service {
                 population_size,
             } => {
                 self.maintain_generational(request, max_generations, population_size)
-                    .await?;
+                    .await
             }
             requests::Strategy::Rolling {
                 max_evaluations,
@@ -585,25 +645,8 @@ impl Service {
                     tournament_size,
                     sample_size,
                 )
-                .await?;
+                .await
             }
         }
-        // Use a compatible repository to open a transaction and publish a termination event
-        self.genotypes
-            .chain(|tx_genotypes| {
-                Box::pin(async move {
-                    // Create publisher
-                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
-
-                    // Publish termination event
-                    publisher
-                        .publish(RequestTerminatedEvent::new(request_id))
-                        .await?;
-
-                    Ok((publisher, ()))
-                })
-            })
-            .await?;
-        Ok(())
     }
 }
