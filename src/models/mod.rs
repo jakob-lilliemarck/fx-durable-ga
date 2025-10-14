@@ -10,8 +10,9 @@ mod strategy;
 pub use encodeable::Encodeable;
 pub use evaluator::Evaluator;
 pub use gene_bounds::{GeneBoundError, GeneBounds};
-pub use genotype::{Gene, Genotype};
 pub use goal::FitnessGoal;
-pub use morphology::Morphology;
-pub use request::Request;
 pub use strategy::Strategy;
+
+pub(crate) use genotype::{Gene, Genotype};
+pub(crate) use morphology::Morphology;
+pub(crate) use request::Request;

@@ -7,7 +7,7 @@ pub type Gene = i64;
 
 #[derive(Debug, Clone, FromRow)]
 #[cfg_attr(test, derive(PartialEq))]
-pub struct Genotype {
+pub(crate) struct Genotype {
     pub(crate) id: Uuid,
     pub(crate) generated_at: DateTime<Utc>,
     pub(crate) type_name: String,

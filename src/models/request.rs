@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
-pub struct Request {
+pub(crate) struct Request {
     pub(crate) id: Uuid,
     pub(crate) requested_at: DateTime<Utc>,
     pub(crate) type_name: String,
