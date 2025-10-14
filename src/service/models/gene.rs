@@ -7,7 +7,7 @@ pub type Gene = i64;
 /// Defines valid value range and discretization for a Gene type
 #[derive(Debug, Clone)]
 pub struct GeneBounds {
-pub id: Uuid,
+    pub id: Uuid,
     pub start: i64,   // Start of range (inclusive)
     pub end: i64,     // End of range (inclusive)
     pub divisor: u32, // Number of discrete steps

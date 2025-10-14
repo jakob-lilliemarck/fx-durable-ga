@@ -2,6 +2,7 @@ use crate::repositories::chainable::{Chain, ToTx, TxType};
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use sqlx::{PgPool, PgTransaction, prelude::FromRow};
+use tracing::instrument;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -28,6 +29,7 @@ pub(crate) struct Genotype {
 }
 
 impl Genotype {
+    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, genome_length = genome.len(), request_id = %request_id, generation_id = generation_id))]
     pub(crate) fn new(
         type_name: &str,
         type_hash: i32,
@@ -48,6 +50,7 @@ impl Genotype {
     }
 
     /// Panics if the genotype does not have fitness
+    #[instrument(level = "debug", fields(id = %self.id, has_fitness = self.fitness.is_some()))]
     pub(crate) fn must_fitness(&self) -> f64 {
         self.fitness.expect("Genotype must have a fitness value")
     }
@@ -62,10 +65,12 @@ impl Repository {
         Self { pool }
     }
 
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %genotype.id, type_name = %genotype.type_name, type_hash = genotype.type_hash, request_id = %genotype.request_id))]
     pub(crate) async fn new_genotype(&self, genotype: Genotype) -> Result<Genotype, Error> {
         super::queries::new_genotype(&self.pool, genotype).await
     }
 
+    #[instrument(level = "debug", skip(self), fields(genotypes_count = genotypes.len()))]
     pub(crate) async fn new_genotypes(
         &self,
         genotypes: Vec<Genotype>,
@@ -73,14 +78,17 @@ impl Repository {
         super::queries::new_genotypes(&self.pool, genotypes).await
     }
 
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %id))]
     pub(crate) async fn get_genotype(&self, id: &Uuid) -> Result<Genotype, Error> {
         super::queries::get_genotype(&self.pool, id).await
     }
 
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %id, fitness = fitness))]
     pub(crate) async fn set_fitness(&self, id: Uuid, fitness: f64) -> Result<(), Error> {
         super::queries::set_fitness(&self.pool, id, fitness).await
     }
 
+    #[instrument(level = "debug", skip(self, filter))]
     pub(crate) async fn get_count_of_genotypes_in_latest_iteration(
         &self,
         filter: &super::queries::Filter,
@@ -88,6 +96,7 @@ impl Repository {
         super::queries::count_genotypes_in_latest_iteration(&self.pool, filter).await
     }
 
+    #[instrument(level = "debug", skip(self, filter), fields(limit = limit, order = %order))]
     pub(crate) async fn search_genotypes_in_latest_generation(
         &self,
         limit: i64,
@@ -98,7 +107,8 @@ impl Repository {
             .await
     }
 
-    pub(crate) async fn get_generation_coun(&self, request_id: Uuid) -> Result<i32, Error> {
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub(crate) async fn get_generation_count(&self, request_id: Uuid) -> Result<i32, Error> {
         super::queries::get_generation_count(&self.pool, request_id).await
     }
 }
@@ -139,10 +149,12 @@ pub struct TxRepository<'tx> {
 }
 
 impl<'tx> TxRepository<'tx> {
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %genotype.id, type_name = %genotype.type_name, type_hash = genotype.type_hash, request_id = %genotype.request_id))]
     pub(crate) async fn new_genotype(&mut self, genotype: Genotype) -> Result<Genotype, Error> {
         super::queries::new_genotype(&mut *self.tx, genotype).await
     }
 
+    #[instrument(level = "debug", skip(self), fields(genotypes_count = genotypes.len()))]
     pub(crate) async fn new_genotypes(
         &mut self,
         genotypes: Vec<Genotype>,
@@ -150,14 +162,17 @@ impl<'tx> TxRepository<'tx> {
         super::queries::new_genotypes(&mut *self.tx, genotypes).await
     }
 
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %id))]
     pub(crate) async fn get_genotype(&mut self, id: &Uuid) -> Result<Genotype, Error> {
         super::queries::get_genotype(&mut *self.tx, id).await
     }
 
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %id, fitness = fitness))]
     pub(crate) async fn set_fitness(&mut self, id: Uuid, fitness: f64) -> Result<(), Error> {
         super::queries::set_fitness(&mut *self.tx, id, fitness).await
     }
 
+    #[instrument(level = "debug", skip(self, filter))]
     pub(crate) async fn count_genotypes_in_latest_iteration(
         &mut self,
         filter: &super::queries::Filter,
@@ -165,6 +180,7 @@ impl<'tx> TxRepository<'tx> {
         super::queries::count_genotypes_in_latest_iteration(&mut *self.tx, filter).await
     }
 
+    #[instrument(level = "debug", skip(self, filter), fields(limit = limit, order = %order))]
     pub(crate) async fn search_genotypes_in_latest_generation(
         &mut self,
         limit: i64,
@@ -175,6 +191,7 @@ impl<'tx> TxRepository<'tx> {
             .await
     }
 
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) async fn get_generation_count(&mut self, request_id: Uuid) -> Result<i32, Error> {
         super::queries::get_generation_count(&mut *self.tx, request_id).await
     }

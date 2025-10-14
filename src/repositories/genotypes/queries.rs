@@ -1,10 +1,12 @@
 use std::fmt::Display;
 
 use sqlx::PgExecutor;
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::repositories::genotypes::Genotype;
 
+#[instrument(level = "debug", skip(tx), fields(genotype_id = %genotype.id, type_name = %genotype.type_name, type_hash = genotype.type_hash, request_id = %genotype.request_id))]
 pub(crate) async fn new_genotype<'tx, E: PgExecutor<'tx>>(
     tx: E,
     genotype: Genotype,
@@ -46,6 +48,7 @@ pub(crate) async fn new_genotype<'tx, E: PgExecutor<'tx>>(
     Ok(genotype)
 }
 
+#[instrument(level = "debug", skip(tx), fields(genotypes_count = genotypes.len()))]
 pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
     tx: E,
     genotypes: Vec<Genotype>,
@@ -99,6 +102,7 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
     Ok(genotypes)
 }
 
+#[instrument(level = "debug", skip(tx), fields(genotype_id = %id, fitness = fitness))]
 pub(crate) async fn set_fitness<'tx, E: PgExecutor<'tx>>(
     tx: E,
     id: Uuid,
@@ -120,6 +124,7 @@ pub(crate) async fn set_fitness<'tx, E: PgExecutor<'tx>>(
     Ok(())
 }
 
+#[instrument(level = "debug", skip(tx), fields(genotype_id = %id))]
 pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
     tx: E,
     id: &Uuid,
@@ -147,6 +152,7 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
     Ok(genotype)
 }
 
+#[derive(Debug)]
 pub(crate) struct Filter {
     ids: Option<Vec<Uuid>>,
     request_ids: Option<Vec<Uuid>>,
@@ -164,29 +170,31 @@ impl Default for Filter {
 }
 
 impl Filter {
+    #[instrument(level = "debug", fields(has_fitness = has_fitness))]
     pub(crate) fn with_fitness(mut self, has_fitness: bool) -> Self {
         self.has_fitness = Some(has_fitness);
         self
     }
 
+    #[instrument(level = "debug", fields(ids_count = ids.len()))]
     pub(crate) fn with_ids(mut self, ids: Vec<Uuid>) -> Self {
         self.ids = Some(ids);
         self
     }
 
+    #[instrument(level = "debug", fields(request_ids_count = request_ids.len()))]
     pub(crate) fn with_request_ids(mut self, request_ids: Vec<Uuid>) -> Self {
         self.request_ids = Some(request_ids);
         self
     }
 }
 
+#[instrument(level = "debug", skip(tx, filter))]
 pub(crate) async fn count_genotypes_in_latest_iteration<'tx, E: PgExecutor<'tx>>(
     tx: E,
     filter: &Filter,
 ) -> Result<i64, super::Error> {
-    // Return i64, not Genotype - we're counting!
     let count = sqlx::query_scalar!(
-        // No need to specify i64, query_scalar! infers it
         r#"
             WITH latest_generations AS (
                 SELECT request_id, MAX(generation_id) as max_generation_id
@@ -238,6 +246,7 @@ impl Display for Order {
     }
 }
 
+#[instrument(level = "debug", skip(tx, filter), fields(limit = limit, order = %order))]
 pub(crate) async fn search_genotypes_in_latest_generation<'tx, E: PgExecutor<'tx>>(
     tx: E,
     limit: i64,
@@ -306,6 +315,7 @@ pub(crate) async fn search_genotypes_in_latest_generation<'tx, E: PgExecutor<'tx
     Ok(genotypes)
 }
 
+#[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
 pub(crate) async fn get_generation_count<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request_id: Uuid,

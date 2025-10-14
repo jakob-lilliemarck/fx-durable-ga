@@ -464,7 +464,7 @@ impl Service {
 
         let population_count = self.populations.get_population_count(&request.id).await?;
         if population_count < (population_size - selection_interval) as i64 {
-            let current_gen = self.genotypes.get_generation_coun(request.id).await?;
+            let current_gen = self.genotypes.get_generation_count(request.id).await?;
             self.breed_new_individuals(
                 request,
                 selection_interval as usize,
@@ -483,7 +483,7 @@ impl Service {
         max_generations: u32,
         population_size: u32,
     ) -> Result<(), Error> {
-        let current_gen = self.genotypes.get_generation_coun(request.id).await?;
+        let current_gen = self.genotypes.get_generation_count(request.id).await?;
 
         if max_generations < current_gen as u32 {
             return Ok(());
