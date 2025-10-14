@@ -15,6 +15,7 @@ use futures::future::BoxFuture;
 use rand::Rng;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
+use tracing::instrument;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -65,6 +66,7 @@ impl<P, E> TypeErasedEvaluator for ErasedEvaluator<P, E>
 where
     E: Evaluator<P> + Send + Sync + 'static,
 {
+    #[instrument(level = "debug", skip(self, genes), fields(genome_length = genes.len()))]
     fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
         let phenotype = (self.decode)(genes);
         self.evaluator.fitness(phenotype)
@@ -92,6 +94,7 @@ impl ServiceBuilder {
     // NOTE:
     // This is a N+1, probably not so bad, it shouldn't be like this.
     // Its simple though, so I'll go with it for a first version
+    #[instrument(level = "debug", skip(self, evaluator), fields(type_name = T::NAME, type_hash = T::HASH))]
     pub async fn register<T, E>(mut self, evaluator: E) -> Result<Self, Error>
     where
         T: Encodeable + 'static,
@@ -117,6 +120,7 @@ impl ServiceBuilder {
         Ok(self)
     }
 
+    #[instrument(level = "debug", skip(self), fields(evaluators_count = self.evaluators.len()))]
     pub fn build(self) -> Service {
         Service {
             requests: self.requests,
@@ -144,6 +148,7 @@ impl Service {
         }
     }
 
+    #[instrument(level = "info", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, threshold = threshold, temperature = temperature, mutation_rate = mutation_rate))]
     pub async fn new_optimization_request(
         &self,
         type_name: &str,
@@ -187,6 +192,7 @@ impl Service {
     }
 
     // Shall be run in a job triggered by OptimizationRequested
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub async fn generate_initial_population(&self, request_id: Uuid) -> Result<(), Error> {
         // Get the optimization request
         let request = self.requests.get_request(request_id).await?;
@@ -239,6 +245,7 @@ impl Service {
     }
 
     // Shall be run in a job triggerd by GenotypeGenerated
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id, genotype_id = %genotype_id))]
     pub async fn evaluate_genotype(
         &self,
         request_id: Uuid,
@@ -290,6 +297,7 @@ impl Service {
     }
 
     /// Creates child genome by mixing genes from two parents
+    #[instrument(level = "debug", skip(self, a, b), fields(parent_a_id = %a.id, parent_b_id = %b.id, request_id = %request_id, generation_id = generation_id))]
     fn crossover(
         &self,
         a: &Genotype,
@@ -310,6 +318,7 @@ impl Service {
     }
 
     // NOTE: temperatur and rate should have been validated at the time of creating the request, we do not validate again at this point.
+    #[instrument(level = "debug", skip(self, genotype, morphology), fields(genotype_id = %genotype.id, temperature = temperature, rate = rate))]
     fn mutate(
         &self,
         genotype: &mut Genotype,
@@ -338,6 +347,7 @@ impl Service {
         }
     }
 
+    #[instrument(level = "debug", skip(self, candidates), fields(num_pairs = num_pairs, tournament_size = tournament_size, candidates_count = candidates.len()))]
     fn select_by_tournament(
         &self,
         num_pairs: usize,
@@ -370,6 +380,7 @@ impl Service {
         Ok(pairs)
     }
 
+    #[instrument(level = "debug", skip(self, request), fields(request_id = %request.id, num_offspring = num_offspring, tournament_size = tournament_size, sample_size = sample_size, next_generation_id = next_generation_id))]
     async fn breed_new_individuals(
         &self,
         request: &Request,
@@ -440,6 +451,7 @@ impl Service {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self, request), fields(request_id = %request.id, max_evaluations = max_evaluations, population_size = population_size, selection_interval = selection_interval, tournament_size = tournament_size, sample_size = sample_size))]
     async fn maintain_rolling(
         &self,
         request: &Request,
@@ -477,6 +489,7 @@ impl Service {
         Ok(())
     }
 
+    #[instrument(level = "debug", skip(self, request), fields(request_id = %request.id, max_generations = max_generations, population_size = population_size))]
     async fn maintain_generational(
         &self,
         request: Request,
@@ -504,6 +517,7 @@ impl Service {
     }
 
     // Shall be run in a job triggered by GenotypeEvaluated
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub async fn maintain_population(&self, request_id: Uuid) -> Result<(), Error> {
         // Get the request
         let request = self.requests.get_request(request_id).await?;

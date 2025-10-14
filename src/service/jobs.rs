@@ -1,8 +1,8 @@
-use std::{sync::Arc, time::Duration};
-
 use fx_mq_building_blocks::models::Message;
 use fx_mq_jobs::Handler;
 use serde::{Deserialize, Serialize};
+use std::{sync::Arc, time::Duration};
+use tracing::instrument;
 use uuid::Uuid;
 
 // ============================================================
@@ -25,6 +25,7 @@ impl Handler for GenerateInitialPopulationHandler {
     type Message = GenerateInitialPopulationMessage;
     type Error = super::Error;
 
+    #[instrument(level = "debug", skip(self, message), fields(request_id = %message.request_id))]
     fn handle<'a>(
         &'a self,
         message: Self::Message,
@@ -72,6 +73,7 @@ impl Handler for EvaluateGenotypeHandler {
     type Message = EvaluateGenotypeMessage;
     type Error = super::Error;
 
+    #[instrument(level = "debug", skip(self, message), fields(request_id = %message.request_id, genotype_id = %message.genotype_id))]
     fn handle<'a>(
         &'a self,
         message: Self::Message,
@@ -118,6 +120,7 @@ impl Handler for MaintainPopulationHandler {
     type Message = MaintainPopulationMessage;
     type Error = super::Error;
 
+    #[instrument(level = "debug", skip(self, message), fields(request_id = %message.request_id))]
     fn handle<'a>(
         &'a self,
         message: Self::Message,

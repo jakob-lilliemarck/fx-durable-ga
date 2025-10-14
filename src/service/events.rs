@@ -3,6 +3,7 @@ use fx_mq_building_blocks::queries::Queries;
 use serde::{Deserialize, Serialize};
 use sqlx::PgTransaction;
 use std::sync::Arc;
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::service::jobs::{
@@ -22,6 +23,7 @@ impl fx_event_bus::Event for OptimizationRequestedEvent {
 }
 
 impl OptimizationRequestedEvent {
+    #[instrument(level = "debug", fields(request_id = %request_id))]
     pub fn new(request_id: Uuid) -> Self {
         Self { request_id }
     }
@@ -34,6 +36,7 @@ pub struct OptimizationRequestedHandler {
 impl Handler<OptimizationRequestedEvent> for OptimizationRequestedHandler {
     type Error = super::Error;
 
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
     fn handle<'a>(
         &'a self,
         input: std::sync::Arc<OptimizationRequestedEvent>,
@@ -69,6 +72,7 @@ impl fx_event_bus::Event for GenotypeGenerated {
 }
 
 impl GenotypeGenerated {
+    #[instrument(level = "debug", fields(request_id = %request_id, genotype_id = %genotype_id))]
     pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
         Self {
             request_id,
@@ -84,6 +88,7 @@ pub struct GenotypeGeneratedHandlerEvent {
 impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
     type Error = super::Error;
 
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<GenotypeGenerated>,
@@ -120,6 +125,7 @@ impl fx_event_bus::Event for GenotypeEvaluatedEvent {
 }
 
 impl GenotypeEvaluatedEvent {
+    #[instrument(level = "debug", fields(request_id = %request_id, genotype_id = %genotype_id))]
     pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
         Self {
             request_id,
@@ -135,6 +141,7 @@ pub struct GenotypeEvaluatedHandler {
 impl Handler<GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
     type Error = super::Error;
 
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<GenotypeEvaluatedEvent>,
@@ -169,6 +176,7 @@ impl fx_event_bus::Event for RequestCompletedEvent {
 }
 
 impl RequestCompletedEvent {
+    #[instrument(level = "debug", fields(request_id = %request_id))]
     pub fn new(request_id: Uuid) -> Self {
         Self { request_id }
     }
@@ -179,6 +187,7 @@ pub struct RequestCompletedHandler;
 impl Handler<RequestCompletedEvent> for RequestCompletedHandler {
     type Error = super::Error;
 
+    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<RequestCompletedEvent>,
@@ -208,6 +217,7 @@ impl fx_event_bus::Event for RequestTerminatedEvent {
 }
 
 impl RequestTerminatedEvent {
+    #[instrument(level = "debug", fields(request_id = %request_id))]
     pub fn new(request_id: Uuid) -> Self {
         Self { request_id }
     }
@@ -218,6 +228,7 @@ pub struct RequestTerminatedHandler;
 impl Handler<RequestTerminatedEvent> for RequestTerminatedHandler {
     type Error = super::Error;
 
+    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<RequestTerminatedEvent>,
