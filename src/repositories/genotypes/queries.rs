@@ -217,7 +217,6 @@ mod get_genotype_tests {
 
 #[derive(Debug)]
 pub(crate) struct Filter {
-    ids: Option<Vec<Uuid>>,
     request_ids: Option<Vec<Uuid>>,
     has_fitness: Option<bool>,
 }
@@ -225,7 +224,6 @@ pub(crate) struct Filter {
 impl Default for Filter {
     fn default() -> Self {
         Self {
-            ids: None,
             has_fitness: None,
             request_ids: None,
         }
@@ -288,6 +286,26 @@ mod count_genotypes_in_latest_iteration_tests {
     use super::*;
     use crate::repositories::genotypes::Filter;
     use chrono::{SubsecRound, Utc};
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_counts_all_genotypes(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_counts_genotypes_with_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_counts_genotypes_without_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_counts_genotypes_of_requests(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_counts_some_genotypes(pool: sqlx::PgPool) -> anyhow::Result<()> {
@@ -465,24 +483,20 @@ pub(crate) async fn search_genotypes_in_latest_generation<'tx, E: PgExecutor<'tx
             END
         )
         AND (
-            $2::uuid[] IS NULL OR g.id = ANY($2)
-        )
-        AND (
-            $3::uuid[] IS NULL OR g.request_id = ANY($3)
+            $2::uuid[] IS NULL OR g.request_id = ANY($2)
         )
         ORDER BY
             CASE
-                WHEN $4 = 'fitness' THEN g.fitness
+                WHEN $3 = 'fitness' THEN g.fitness
                 ELSE NULL
             END DESC NULLS LAST,
             CASE
-                WHEN $4 = 'random' THEN RANDOM()
+                WHEN $3 = 'random' THEN RANDOM()
                 ELSE NULL
             END NULLS LAST
-        LIMIT $5;
+        LIMIT $4;
         "#,
         filter.has_fitness,
-        filter.ids.as_deref(),
         filter.request_ids.as_deref(),
         order.to_string(),
         limit
@@ -491,6 +505,39 @@ pub(crate) async fn search_genotypes_in_latest_generation<'tx, E: PgExecutor<'tx
     .await?;
 
     Ok(genotypes)
+}
+
+#[cfg(test)]
+mod search_genotypes_in_latest_generation_tests {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_all_genotypes_of_generation(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_with_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_without_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_of_requests(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_orders_by_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_orders_by_random(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
 }
 
 #[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
@@ -510,4 +557,14 @@ pub(crate) async fn get_generation_count<'tx, E: PgExecutor<'tx>>(
     .await?;
 
     Ok(count)
+}
+
+#[cfg(test)]
+mod get_generation_count_tests {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_the_number_of_generations_of_a_request(
+        _pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        todo!()
+    }
 }

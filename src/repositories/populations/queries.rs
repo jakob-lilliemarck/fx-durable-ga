@@ -25,6 +25,14 @@ pub(crate) async fn add_to_population<'tx, E: PgExecutor<'tx>>(
     Ok(())
 }
 
+#[cfg(test)]
+mod add_to_population_tests {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_adds_to_the_population(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+}
+
 #[instrument(level = "debug", skip(tx), fields(request_id = %request_id, genotype_id = %genotype_id))]
 pub(crate) async fn remove_from_population<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -45,6 +53,14 @@ pub(crate) async fn remove_from_population<'tx, E: PgExecutor<'tx>>(
     Ok(())
 }
 
+#[cfg(test)]
+mod remove_from_population_tests {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_removes_from_the_population(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
+}
+
 #[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
 pub(crate) async fn get_population_count<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -62,4 +78,12 @@ pub(crate) async fn get_population_count<'tx, E: PgExecutor<'tx>>(
     .await?;
 
     Ok(count)
+}
+
+#[cfg(test)]
+mod get_population_count_tests {
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_the_population_count(_pool: sqlx::PgPool) -> anyhow::Result<()> {
+        todo!()
+    }
 }
