@@ -1,6 +1,8 @@
 use sqlx::PgExecutor;
+use tracing::instrument;
 use uuid::Uuid;
 
+#[instrument(level = "debug", skip(tx), fields(individuals_count = individuals.len()))]
 pub async fn add_to_population<'tx, E: PgExecutor<'tx>>(
     tx: E,
     individuals: &[(Uuid, Uuid)], // (request_id, genotype_id)
@@ -23,6 +25,7 @@ pub async fn add_to_population<'tx, E: PgExecutor<'tx>>(
     Ok(())
 }
 
+#[instrument(level = "debug", skip(tx), fields(request_id = %request_id, genotype_id = %genotype_id))]
 pub async fn remove_from_population<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request_id: &Uuid,
@@ -42,6 +45,7 @@ pub async fn remove_from_population<'tx, E: PgExecutor<'tx>>(
     Ok(())
 }
 
+#[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
 pub async fn get_population_count<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request_id: &Uuid,

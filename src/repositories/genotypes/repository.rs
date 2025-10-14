@@ -119,6 +119,7 @@ impl<'tx> TxType<'tx> for Repository {
 }
 
 impl<'tx> Chain<'tx> for Repository {
+    #[instrument(level = "debug", skip(self, f))]
     fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
     where
         R: ToTx<'tx>,

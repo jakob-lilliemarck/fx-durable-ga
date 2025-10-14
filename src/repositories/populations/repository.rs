@@ -1,5 +1,7 @@
 use crate::repositories::chainable::{Chain, FromOther, FromTx, ToTx, TxType};
 use sqlx::{PgPool, PgTransaction};
+use std::future::Future;
+use tracing::instrument;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -20,6 +22,7 @@ impl Repository {
         Self { pool }
     }
 
+    #[instrument(level = "debug", skip(self), fields(individuals_count = individuals.len()))]
     pub(crate) fn add_to_population(
         &self,
         individuals: &[(Uuid, Uuid)],
@@ -27,6 +30,7 @@ impl Repository {
         super::queries::add_to_population(&self.pool, individuals)
     }
 
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id, genotype_id = %genotype_id))]
     pub(crate) fn remove_from_population(
         &self,
         request_id: &Uuid,
@@ -35,6 +39,7 @@ impl Repository {
         super::queries::remove_from_population(&self.pool, request_id, genotype_id)
     }
 
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) fn get_population_count(
         &self,
         request_id: &Uuid,
@@ -55,6 +60,7 @@ impl<'tx> FromOther<'tx> for Repository {
 }
 
 impl<'tx> Chain<'tx> for Repository {
+    #[instrument(level = "debug", skip(self, f))]
     fn chain<F, R, T>(&'tx self, f: F) -> futures::future::BoxFuture<'tx, Result<T, Self::TxError>>
     where
         R: ToTx<'tx>,
@@ -85,6 +91,7 @@ pub struct TxRepository<'tx> {
 }
 
 impl<'tx> TxRepository<'tx> {
+    #[instrument(level = "debug", skip(self), fields(individuals_count = individuals.len()))]
     pub(crate) fn add_to_population(
         &mut self,
         individuals: &[(Uuid, Uuid)],
@@ -92,6 +99,7 @@ impl<'tx> TxRepository<'tx> {
         super::queries::add_to_population(&mut *self.tx, individuals)
     }
 
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id, genotype_id = %genotype_id))]
     pub(crate) fn remove_from_population(
         &mut self,
         request_id: &Uuid,
@@ -100,6 +108,7 @@ impl<'tx> TxRepository<'tx> {
         super::queries::remove_from_population(&mut *self.tx, request_id, genotype_id)
     }
 
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) fn get_population_count(
         &mut self,
         request_id: &Uuid,
