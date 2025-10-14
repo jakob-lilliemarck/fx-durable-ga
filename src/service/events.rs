@@ -34,7 +34,7 @@ pub struct OptimizationRequestedHandler {
 }
 
 impl Handler<OptimizationRequestedEvent> for OptimizationRequestedHandler {
-    type Error = super::Error;
+    type Error = fx_mq_jobs::PublishError;
 
     #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
     fn handle<'a>(
@@ -45,15 +45,24 @@ impl Handler<OptimizationRequestedEvent> for OptimizationRequestedHandler {
     ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
         Box::pin(async move {
             let mut publisher = fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx, &self.queries);
-            let ret = publisher
+
+            let ret = match publisher
                 .publish(&GenerateInitialPopulationMessage {
                     request_id: input.request_id,
                 })
                 .await
-                .map(|_| ())
-                .map_err(|_| super::Error::PublishErrorTemp);
-            let tx: PgTransaction<'_> = publisher.into();
-            (tx, ret)
+            {
+                Err(err) => {
+                    tracing::error!(
+                        message = "Failed to publish GenerateInitialPopulation",
+                        request_id = input.request_id.to_string()
+                    );
+                    Err(err)
+                }
+                _ => Ok(()),
+            };
+
+            (publisher.into(), ret)
         })
     }
 }
@@ -86,7 +95,7 @@ pub struct GenotypeGeneratedHandlerEvent {
 }
 
 impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
-    type Error = super::Error;
+    type Error = fx_mq_jobs::PublishError;
 
     #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
@@ -97,16 +106,26 @@ impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
     ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
         Box::pin(async move {
             let mut publisher = fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx, &self.queries);
-            let ret = publisher
+
+            let ret = match publisher
                 .publish(&EvaluateGenotypeMessage {
                     request_id: input.request_id,
                     genotype_id: input.genotype_id,
                 })
                 .await
-                .map(|_| ())
-                .map_err(|_| super::Error::PublishErrorTemp);
-            let tx: PgTransaction<'_> = publisher.into();
-            (tx, ret)
+            {
+                Err(err) => {
+                    tracing::error!(
+                        message = "Failed to publish EvaluateGenotype",
+                        request_id = input.request_id.to_string(),
+                        genotype_id = input.genotype_id.to_string()
+                    );
+                    Err(err)
+                }
+                _ => Ok(()),
+            };
+
+            (publisher.into(), ret)
         })
     }
 }
@@ -139,7 +158,7 @@ pub struct GenotypeEvaluatedHandler {
 }
 
 impl Handler<GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
-    type Error = super::Error;
+    type Error = fx_mq_jobs::PublishError;
 
     #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
@@ -150,15 +169,24 @@ impl Handler<GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
     ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
         Box::pin(async move {
             let mut publisher = fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx, &self.queries);
-            let ret = publisher
+
+            let ret = match publisher
                 .publish(&MaintainPopulationMessage {
                     request_id: input.request_id,
                 })
                 .await
-                .map(|_| ())
-                .map_err(|_| super::Error::PublishErrorTemp);
-            let tx: PgTransaction<'_> = publisher.into();
-            (tx, ret)
+            {
+                Err(err) => {
+                    tracing::error!(
+                        message = "Failed to publish MaintainPopulation",
+                        request_id = input.request_id.to_string(),
+                    );
+                    Err(err)
+                }
+                _ => Ok(()),
+            };
+
+            (publisher.into(), ret)
         })
     }
 }

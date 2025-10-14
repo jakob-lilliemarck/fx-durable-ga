@@ -16,6 +16,4 @@ pub enum Error {
     EvaluationError(#[from] anyhow::Error),
     #[error("NoValidParents")]
     NoValidParents,
-    #[error("PublishErrorTemp")]
-    PublishErrorTemp, //FIXME
 }
