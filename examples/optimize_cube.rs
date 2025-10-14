@@ -2,7 +2,7 @@ use anyhow::Result;
 use fx_durable_ga::{
     bootstrap::bootstrap,
     models::{Encodeable, Evaluator, FitnessGoal, GeneBounds, Strategy},
-    service::{events::register_event_handlers, jobs::register_job_handlers},
+    service::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_building_blocks::queries::Queries;
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;

@@ -1,3 +1,5 @@
+use super::Error;
+use super::models::{ErasedEvaluator, TypeErasedEvaluator};
 use crate::models::{
     Encodeable, Evaluator, FitnessGoal, Gene, Genotype, Morphology, Request, Strategy,
 };
@@ -8,52 +10,11 @@ use crate::service::events::{
     GenotypeEvaluatedEvent, GenotypeGenerated, OptimizationRequestedEvent, RequestCompletedEvent,
     RequestTerminatedEvent,
 };
-use futures::future::BoxFuture;
 use rand::Rng;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
 use tracing::instrument;
 use uuid::Uuid;
-
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("RequestsRepositoryError: {0}")]
-    RequestsRepositoryError(#[from] requests::Error),
-    #[error("MorphologiesRepositoryError: {0}")]
-    MorphologiesRepositoryError(#[from] morphologies::Error),
-    #[error("GenotypesRepositoryError: {0}")]
-    GenotypesRepositoryError(#[from] genotypes::Error),
-    #[error("PopulationsRepositoryError: {0}")]
-    PopulationsRepositoryError(#[from] populations::Error),
-    #[error("UnknownType: type_name={type_name}, type_hash={type_hash}")]
-    UnknownTypeError { type_hash: i32, type_name: String },
-    #[error("EvaluationError: {0}")]
-    EvaluationError(#[from] anyhow::Error),
-    #[error("NoValidParents")]
-    NoValidParents,
-    #[error("PublishErrorTemp")]
-    PublishErrorTemp, //FIXME
-}
-
-trait TypeErasedEvaluator: Send + Sync {
-    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
-}
-
-struct ErasedEvaluator<P, E: Evaluator<P>> {
-    evaluator: E,
-    decode: fn(&[i64]) -> P,
-}
-
-impl<P, E> TypeErasedEvaluator for ErasedEvaluator<P, E>
-where
-    E: Evaluator<P> + Send + Sync + 'static,
-{
-    #[instrument(level = "debug", skip(self, genes), fields(genome_length = genes.len()))]
-    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
-        let phenotype = (self.decode)(genes);
-        self.evaluator.fitness(phenotype)
-    }
-}
 
 // optimization service
 pub struct Service {
@@ -91,10 +52,7 @@ impl ServiceBuilder {
         }
 
         // Erase the type
-        let erased = ErasedEvaluator {
-            evaluator,
-            decode: T::decode,
-        };
+        let erased = ErasedEvaluator::new(evaluator, T::decode);
 
         // Insert it
         self.evaluators.insert(T::HASH, Box::new(erased));
