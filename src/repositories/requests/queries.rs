@@ -1,6 +1,7 @@
 use super::{Error, FitnessGoal, Request};
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
+use tracing::instrument;
 use uuid::Uuid;
 
 /// A request for an optimization
@@ -20,6 +21,7 @@ struct DbRequest {
 impl TryFrom<Request> for DbRequest {
     type Error = Error;
 
+    #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let strategy_json = serde_json::to_value(request.strategy)?;
 
@@ -40,6 +42,7 @@ impl TryFrom<Request> for DbRequest {
 impl TryFrom<DbRequest> for Request {
     type Error = Error;
 
+    #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
     fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
         let strategy_json = serde_json::from_value(request.strategy)?;
 
@@ -57,6 +60,7 @@ impl TryFrom<DbRequest> for Request {
     }
 }
 
+#[instrument(level = "debug", skip(tx), fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash, goal = ?request.goal))]
 pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request: Request,
@@ -105,6 +109,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
     Ok(request)
 }
 
+#[instrument(level = "debug", skip(tx), fields(request_id = %id))]
 pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
     tx: E,
     id: Uuid,

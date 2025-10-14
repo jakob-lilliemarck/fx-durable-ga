@@ -5,6 +5,7 @@ use sqlx::{
     PgPool, PgTransaction,
     types::chrono::{DateTime, Utc},
 };
+use tracing::instrument;
 use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
@@ -68,10 +69,12 @@ impl Repository {
         Self { pool }
     }
 
+    #[instrument(level = "debug", skip(self), fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash, goal = ?request.goal))]
     pub async fn new_request(&self, request: Request) -> Result<Request, Error> {
         super::queries::new_request(&self.pool, request).await
     }
 
+    #[instrument(level = "debug", skip(self), fields(request_id = %id))]
     pub async fn get_request(&self, id: Uuid) -> Result<Request, Error> {
         super::queries::get_request(&self.pool, id).await
     }
@@ -89,6 +92,7 @@ impl<'tx> FromOther<'tx> for Repository {
 }
 
 impl<'tx> Chain<'tx> for Repository {
+    #[instrument(level = "debug", skip(self, f))]
     fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
     where
         R: ToTx<'tx>,
@@ -119,10 +123,12 @@ pub struct TxRepository<'tx> {
 }
 
 impl<'tx> TxRepository<'tx> {
+    #[instrument(level = "debug", skip(self), fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash, goal = ?request.goal))]
     pub async fn new_request(&mut self, request: Request) -> Result<Request, Error> {
         super::queries::new_request(&mut *self.tx, request).await
     }
 
+    #[instrument(level = "debug", skip(self), fields(request_id = %id))]
     pub async fn get_request(&mut self, id: Uuid) -> Result<Request, Error> {
         super::queries::get_request(&mut *self.tx, id).await
     }
@@ -143,6 +149,7 @@ pub(crate) enum RequestValidationError {
 }
 
 impl Request {
+    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal, threshold = threshold, temperature = temperature, mutation_rate = mutation_rate))]
     pub(crate) fn new(
         type_name: &str,
         type_hash: i32,
@@ -175,6 +182,7 @@ impl Request {
         })
     }
 
+    #[instrument(level = "debug", fields(request_id = %self.id))]
     pub(crate) fn population_size(&self) -> u32 {
         match self.strategy {
             Strategy::Generational {
@@ -186,6 +194,7 @@ impl Request {
         }
     }
 
+    #[instrument(level = "debug", fields(request_id = %self.id, fitness = fitness, goal = ?self.goal, threshold = self.threshold))]
     pub(crate) fn is_completed(&self, fitness: f64) -> bool {
         match self.goal {
             FitnessGoal::Minimize => fitness <= self.threshold,
@@ -193,6 +202,7 @@ impl Request {
         }
     }
 
+    #[instrument(level = "debug", fields(request_id = %self.id, evaluations = evaluations))]
     pub(crate) fn check_termination(&self, evaluations: i64) -> bool {
         match self.strategy {
             Strategy::Generational {
