@@ -1,7 +1,7 @@
 use super::Error;
 use super::models::{ErasedEvaluator, TypeErasedEvaluator};
 use crate::models::{
-    Encodeable, Evaluator, FitnessGoal, Gene, Genotype, Morphology, Mutagen, Request, Strategy,
+    Crossover, Encodeable, Evaluator, FitnessGoal, Genotype, Morphology, Mutagen, Request, Strategy,
 };
 use crate::repositories::chainable::{Chain, FromOther, FromTx};
 use crate::repositories::populations;
@@ -10,7 +10,6 @@ use crate::service::events::{
     GenotypeEvaluatedEvent, GenotypeGenerated, OptimizationRequestedEvent, RequestCompletedEvent,
     RequestTerminatedEvent,
 };
-use rand::Rng;
 use rand::seq::SliceRandom;
 use std::collections::HashMap;
 use tracing::instrument;
@@ -100,6 +99,7 @@ impl Service {
         mutation_rate: f64,
     ) -> Result<(), Error> {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
+        let crossover = Crossover::uniform(0.5)?;
 
         self.requests
             .chain(|mut tx_requests| {
@@ -107,7 +107,7 @@ impl Service {
                     // Create a new optimization request with the repository
                     let request = tx_requests
                         .new_request(Request::new(
-                            type_name, type_hash, goal, threshold, strategy, mutagen,
+                            type_name, type_hash, goal, threshold, strategy, mutagen, crossover,
                         )?)
                         .await?;
 
@@ -147,6 +147,11 @@ impl Service {
         // Get the morphology of the type under optimization
         let morphology = self.morphologies.get_morphology(request.type_hash).await?;
 
+        // FIXME: DUPLICATE GENOMES PREVENTION
+        // Currently using random genome generation which can create duplicate genotypes.
+        // Should implement duplicate checking and regeneration to ensure genetic diversity.
+        // Consider using HashSet<Vec<Gene>> to track generated genomes and retry on duplicates.
+        
         let mut genotypes = Vec::with_capacity(request.population_size() as usize);
         let mut population = Vec::with_capacity(request.population_size() as usize);
         let mut events = Vec::with_capacity(request.population_size() as usize);
@@ -251,27 +256,6 @@ impl Service {
         Ok(())
     }
 
-    /// Creates child genome by mixing genes from two parents
-    #[instrument(level = "debug", skip(self, a, b), fields(parent_a_id = %a.id, parent_b_id = %b.id, request_id = %request_id, generation_id = generation_id))]
-    fn crossover(
-        &self,
-        a: &Genotype,
-        b: &Genotype,
-        request_id: Uuid,
-        generation_id: i32,
-    ) -> Genotype {
-        let mut rng = rand::rng();
-        // Option 1: Simple uniform crossover (50/50 chance for each gene)
-        let genome: Vec<Gene> = a
-            .genome
-            .iter()
-            .zip(b.genome.iter())
-            .map(|(&a, &b)| if rng.random_bool(0.5) { a } else { b })
-            .collect();
-
-        Genotype::new(&a.type_name, a.type_hash, genome, request_id, generation_id)
-    }
-
     #[instrument(level = "debug", skip(self, candidates), fields(num_pairs = num_pairs, tournament_size = tournament_size, candidates_count = candidates.len()))]
     fn select_by_tournament(
         &self,
@@ -332,13 +316,25 @@ impl Service {
         // Get morphology for mutation bounds
         let morphology = self.morphologies.get_morphology(request.type_hash).await?;
 
+        // FIXME: DUPLICATE GENOMES PREVENTION  
+        // Crossover + mutation can produce duplicate genotypes, especially with low mutation rates.
+        // Should implement duplicate checking against existing genotypes in the population.
+        // Consider using database query or HashSet to detect and regenerate duplicates.
+        
         // Create and mutate new offspring
         let mut new_genotypes = Vec::with_capacity(num_offspring);
         let mut population_updates = Vec::with_capacity(num_offspring);
         let mut events = Vec::with_capacity(num_offspring);
 
         for (parent1, parent2) in parent_pairs {
-            let mut child = self.crossover(&parent1, &parent2, request.id, next_generation_id);
+            let mut rng = rand::rng();
+            let mut child = Genotype::new(
+                &request.type_name,
+                request.type_hash,
+                request.crossover.apply(&mut rng, &parent1, &parent2),
+                request.id,
+                next_generation_id,
+            );
 
             let mut rng = rand::rng();
             // FIXME:
@@ -450,6 +446,12 @@ impl Service {
 
         let population_count = self.populations.get_population_count(&request.id).await?;
 
+        // FIXME: RACE CONDITION BUG!
+        // Multiple workers can execute this concurrently when processing GenotypeEvaluated events.
+        // Each worker sees population_count=0 and evaluated_count>=population_size, so they all
+        // start breeding simultaneously, creating N×population_size genotypes instead of just population_size.
+        // Solution: Add idempotency check or database locking to ensure only one worker breeds per generation.
+        //
         // For generational strategy: breed when population is empty (all genotypes evaluated)
         // This happens after all genotypes in the current generation have been evaluated
         if population_count == 0 {

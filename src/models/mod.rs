@@ -9,6 +9,7 @@ mod mutagen;
 mod request;
 mod strategy;
 
+pub use crossover::{Crossover, ProbabilityOutOfRange};
 pub use encodeable::Encodeable;
 pub use evaluator::Evaluator;
 pub use gene_bounds::{GeneBoundError, GeneBounds};

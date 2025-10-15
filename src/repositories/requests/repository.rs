@@ -1,6 +1,6 @@
 use super::Error;
 use super::repository_tx::TxRepository;
-use crate::models::{FitnessGoal, Mutagen, Request, Strategy};
+use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Strategy};
 use crate::repositories::chainable::{Chain, FromOther, ToTx, TxType};
 use futures::future::BoxFuture;
 use sqlx::{PgPool, PgTransaction, types::chrono::Utc};
@@ -74,6 +74,7 @@ impl Request {
         threshold: f64,
         strategy: Strategy,
         mutagen: Mutagen,
+        crossover: Crossover,
     ) -> Result<Self, RequestValidationError> {
         Ok(Self {
             id: Uuid::now_v7(),
@@ -84,6 +85,7 @@ impl Request {
             threshold,
             strategy,
             mutagen,
+            crossover,
         })
     }
 

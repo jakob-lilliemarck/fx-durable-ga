@@ -1,4 +1,4 @@
-use crate::models::mutagen::Mutagen;
+use crate::models::{Crossover, mutagen::Mutagen};
 
 use super::{FitnessGoal, Strategy};
 use chrono::{DateTime, Utc};
@@ -15,4 +15,5 @@ pub(crate) struct Request {
     pub(crate) threshold: f64,
     pub(crate) strategy: Strategy,
     pub(crate) mutagen: Mutagen,
+    pub(crate) crossover: Crossover,
 }

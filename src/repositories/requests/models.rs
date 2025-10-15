@@ -14,6 +14,7 @@ pub(super) struct DbRequest {
     pub(super) threshold: f64,
     pub(super) strategy: serde_json::Value,
     pub(super) mutagen: serde_json::Value,
+    pub(super) crossover: serde_json::Value,
 }
 
 impl TryFrom<Request> for DbRequest {
@@ -23,6 +24,7 @@ impl TryFrom<Request> for DbRequest {
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let strategy_json = serde_json::to_value(request.strategy)?;
         let mutagen_json = serde_json::to_value(request.mutagen)?;
+        let crossover_json = serde_json::to_value(request.crossover)?;
 
         Ok(DbRequest {
             id: request.id,
@@ -33,6 +35,7 @@ impl TryFrom<Request> for DbRequest {
             threshold: request.threshold,
             strategy: strategy_json,
             mutagen: mutagen_json,
+            crossover: crossover_json,
         })
     }
 }
@@ -44,6 +47,7 @@ impl TryFrom<DbRequest> for Request {
     fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
         let strategy = serde_json::from_value(request.strategy)?;
         let mutagen = serde_json::from_value(request.mutagen)?;
+        let crossover = serde_json::from_value(request.crossover)?;
 
         Ok(Request {
             id: request.id,
@@ -54,6 +58,7 @@ impl TryFrom<DbRequest> for Request {
             threshold: request.threshold,
             strategy,
             mutagen,
+            crossover,
         })
     }
 }
