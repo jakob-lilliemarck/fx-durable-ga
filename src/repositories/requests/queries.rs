@@ -1,6 +1,6 @@
 use super::Error;
 use super::models::DbRequest;
-use crate::models::{FitnessGoal, Request};
+use crate::models::Request;
 use sqlx::PgExecutor;
 use tracing::instrument;
 use uuid::Uuid;
@@ -20,19 +20,17 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 type_name,
                 type_hash,
                 goal,
-                threshold,
                 strategy,
                 mutagen,
                 crossover
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING
                 id,
                 requested_at,
                 type_name,
                 type_hash,
-                goal "goal:FitnessGoal",
-                threshold,
+                goal,
                 strategy,
                 mutagen,
                 crossover
@@ -41,8 +39,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
         db_request.requested_at,
         db_request.type_name,
         db_request.type_hash,
-        db_request.goal as FitnessGoal,
-        db_request.threshold,
+        db_request.goal,
         db_request.strategy,
         db_request.mutagen,
         db_request.crossover
@@ -57,6 +54,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_request_tests {
     use super::*;
+    use crate::models::FitnessGoal;
     use crate::models::{Crossover, Mutagen, Strategy};
     use chrono::SubsecRound;
 
@@ -64,12 +62,12 @@ mod new_request_tests {
     async fn it_inserts_a_new_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
+        let goal = FitnessGoal::maximize(0.9)?;
 
         let request = Request::new(
             "test",
             1,
-            FitnessGoal::Maximize,
-            0.9,
+            goal,
             Strategy::Generational {
                 max_generations: 100,
                 population_size: 10,
@@ -89,7 +87,6 @@ mod new_request_tests {
         assert_eq!(request_clone.type_name, inserted.type_name);
         assert_eq!(request_clone.type_hash, inserted.type_hash);
         assert_eq!(request_clone.goal, inserted.goal);
-        assert_eq!(request_clone.threshold, inserted.threshold);
         assert_eq!(request_clone.strategy, inserted.strategy);
 
         Ok(())
@@ -99,12 +96,12 @@ mod new_request_tests {
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
+        let goal = FitnessGoal::maximize(0.9)?;
 
         let request = Request::new(
             "test",
             1,
-            FitnessGoal::Maximize,
-            0.9,
+            goal,
             Strategy::Generational {
                 max_generations: 100,
                 population_size: 10,
@@ -136,8 +133,7 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
             requested_at,
             type_name,
             type_hash,
-            goal "goal!:FitnessGoal",
-            threshold,
+            goal,
             strategy,
             mutagen,
             crossover
@@ -156,18 +152,19 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_request_tests {
     use super::*;
+    use crate::models::FitnessGoal;
     use crate::models::{Crossover, Mutagen, Strategy};
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_an_existing_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
+        let goal = FitnessGoal::maximize(0.9)?;
 
         let request = Request::new(
             "test",
             1,
-            FitnessGoal::Maximize,
-            0.9,
+            goal,
             Strategy::Generational {
                 max_generations: 100,
                 population_size: 10,
@@ -188,12 +185,12 @@ mod get_request_tests {
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
+        let goal = FitnessGoal::maximize(0.9)?;
 
         let request = Request::new(
             "test",
             1,
-            FitnessGoal::Maximize,
-            0.9,
+            goal,
             Strategy::Generational {
                 max_generations: 100,
                 population_size: 10,

@@ -87,13 +87,12 @@ impl Service {
         }
     }
 
-    #[instrument(level = "info", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, threshold = threshold, temperature = temperature, mutation_rate = mutation_rate))]
+    #[instrument(level = "info", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, temperature = temperature, mutation_rate = mutation_rate))]
     pub async fn new_optimization_request(
         &self,
         type_name: &str,
         type_hash: i32,
         goal: FitnessGoal,
-        threshold: f64,
         strategy: Strategy,
         temperature: f64,
         mutation_rate: f64,
@@ -107,7 +106,7 @@ impl Service {
                     // Create a new optimization request with the repository
                     let request = tx_requests
                         .new_request(Request::new(
-                            type_name, type_hash, goal, threshold, strategy, mutagen, crossover,
+                            type_name, type_hash, goal, strategy, mutagen, crossover,
                         )?)
                         .await?;
 
@@ -151,7 +150,7 @@ impl Service {
         // Currently using random genome generation which can create duplicate genotypes.
         // Should implement duplicate checking and regeneration to ensure genetic diversity.
         // Consider using HashSet<Vec<Gene>> to track generated genomes and retry on duplicates.
-        
+
         let mut genotypes = Vec::with_capacity(request.population_size() as usize);
         let mut population = Vec::with_capacity(request.population_size() as usize);
         let mut events = Vec::with_capacity(request.population_size() as usize);
@@ -316,11 +315,11 @@ impl Service {
         // Get morphology for mutation bounds
         let morphology = self.morphologies.get_morphology(request.type_hash).await?;
 
-        // FIXME: DUPLICATE GENOMES PREVENTION  
+        // FIXME: DUPLICATE GENOMES PREVENTION
         // Crossover + mutation can produce duplicate genotypes, especially with low mutation rates.
         // Should implement duplicate checking against existing genotypes in the population.
         // Consider using database query or HashSet to detect and regenerate duplicates.
-        
+
         // Create and mutate new offspring
         let mut new_genotypes = Vec::with_capacity(num_offspring);
         let mut population_updates = Vec::with_capacity(num_offspring);

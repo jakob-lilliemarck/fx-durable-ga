@@ -114,8 +114,7 @@ async fn main() -> Result<()> {
         .new_optimization_request(
             Cube::NAME,
             Cube::HASH,
-            FitnessGoal::Maximize,
-            0.99, // Stop when we get very close to origin
+            FitnessGoal::maximize(0.99)?,
             Strategy::Generational {
                 max_generations: 100,
                 population_size: 25,

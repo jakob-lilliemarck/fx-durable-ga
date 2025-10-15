@@ -20,3 +20,12 @@ pub enum Strategy {
         population_size: u32,
     },
 }
+
+impl Strategy {
+    pub fn generational(max_generations: u32, population_size: u32) -> Self {
+        Self::Generational {
+            max_generations,
+            population_size,
+        }
+    }
+}
