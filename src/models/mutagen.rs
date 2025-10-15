@@ -1,0 +1,224 @@
+use crate::models::{Genotype, Morphology};
+use rand::Rng;
+use serde::{Deserialize, Serialize};
+
+fn decay_linear(value: f64, progress: f64, multiplier: f64) -> f64 {
+    value * (1.0 - progress * multiplier).max(0.0)
+}
+
+fn decay_exponential(value: f64, progress: f64, multiplier: f64, exponent: i32) -> f64 {
+    value * (1.0 - progress * multiplier).max(0.0).powi(exponent)
+}
+
+// ============================================================
+// Decay
+// ============================================================
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Decay {
+    Constant,
+    Linear { multiplier: f64 },
+    Exponential { multiplier: f64, exponent: i32 },
+}
+
+impl Decay {
+    fn apply(&self, value: f64, progress: f64) -> f64 {
+        match self {
+            Decay::Constant => value,
+            Decay::Linear { multiplier } => decay_linear(value, progress, *multiplier),
+            Decay::Exponential {
+                multiplier,
+                exponent,
+            } => decay_exponential(value, progress, *multiplier, *exponent),
+        }
+    }
+}
+
+// ============================================================
+// Temperature
+// ============================================================
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Temperature {
+    value: f64,
+    decay: Decay,
+}
+
+impl Temperature {
+    pub fn new(value: f64, decay: Decay) -> Self {
+        Self { value, decay }
+    }
+
+    fn get(&self, progress: f64) -> f64 {
+        self.decay.apply(self.value, progress)
+    }
+}
+
+// ============================================================
+// MutationRate
+// ============================================================
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MutationRate {
+    value: f64,
+    decay: Decay,
+}
+
+impl MutationRate {
+    pub fn new(value: f64, decay: Decay) -> Self {
+        Self { value, decay }
+    }
+
+    fn get(&self, progress: f64) -> f64 {
+        self.decay.apply(self.value, progress)
+    }
+}
+
+// ============================================================
+// Mutagen
+// ============================================================
+#[derive(Debug, Serialize, Deserialize)]
+pub struct Mutagen {
+    mutation_rate: MutationRate,
+    temperature: Temperature,
+}
+
+impl Mutagen {
+    pub fn new(temperature: Temperature, mutation_rate: MutationRate) -> Self {
+        Self {
+            temperature,
+            mutation_rate,
+        }
+    }
+
+    pub fn mutate<R: Rng>(
+        &self,
+        rng: &mut R,
+        genotype: &mut Genotype,
+        morphology: &Morphology,
+        progress: f64,
+    ) {
+        let temperature = self.temperature.get(progress);
+        let mutation_rate = self.mutation_rate.get(progress);
+
+        for (gene, bounds) in genotype
+            .genome
+            .iter_mut()
+            .zip(morphology.gene_bounds.iter())
+        {
+            // Should we mutate this gene?
+            if rng.random_range(0.0..1.0) < mutation_rate {
+                // Temperature controls mutation step: higher = larger jumps
+                let max_step = (1.0 + (bounds.divisor as f64 * temperature)) as i64;
+
+                // Choose direction and step size
+                let direction = if rng.random_bool(0.5) { 1 } else { -1 };
+                let step = rng.random_range(1..=max_step);
+
+                // Apply mutation and clamp
+                *gene = (*gene + direction * step).clamp(0, bounds.divisor as i64 - 1);
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::GeneBounds;
+    use rand::{SeedableRng, rngs::StdRng};
+    use uuid::Uuid;
+
+    #[test]
+    fn it_computes_linear_decay() {
+        assert_eq!(decay_linear(100.0, 0.0, 1.0), 100.0); // No progress
+        assert_eq!(decay_linear(100.0, 0.5, 1.0), 50.0); // Half progress
+        assert_eq!(decay_linear(100.0, 1.0, 1.0), 0.0); // Full progress
+        assert_eq!(decay_linear(100.0, 1.5, 1.0), 0.0); // Over-progress (clamped)
+    }
+
+    #[test]
+    fn it_computes_exponential_decay() {
+        assert_eq!(decay_exponential(100.0, 0.0, 1.0, 2), 100.0); // No progress
+        assert_eq!(decay_exponential(100.0, 0.5, 1.0, 2), 25.0); // Quadratic
+        assert_eq!(decay_exponential(100.0, 1.0, 1.0, 2), 0.0); // Full progress
+    }
+
+    fn get_test_genotype() -> Genotype {
+        Genotype::new(
+            "TestType",
+            123,
+            vec![5, 2], // Starting genes
+            Uuid::now_v7(),
+            1,
+        )
+    }
+
+    fn get_test_morphology() -> Morphology {
+        Morphology::new(
+            "TestType",
+            123,
+            vec![
+                GeneBounds::new(0, 9, 10).unwrap(), // Gene can be 0-9 (divisor=10)
+                GeneBounds::new(0, 4, 5).unwrap(),  // Gene can be 0-4 (divisor=5)
+            ],
+        )
+    }
+
+    #[test]
+    fn it_mutates() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let morphology = get_test_morphology();
+        let mut genotype = get_test_genotype();
+
+        // Create test data
+        let mutagen = Mutagen::new(
+            Temperature::new(0.1, Decay::Constant), // Low temp = small steps
+            MutationRate::new(1.0, Decay::Constant), // 100% mutation rate
+        );
+
+        let original_genome = genotype.genome.clone();
+
+        // Mutate with 100% rate - should change something
+        mutagen.mutate(&mut rng, &mut genotype, &morphology, 0.0);
+
+        // With 100% mutation rate and seeded RNG, genome should change
+        assert_ne!(genotype.genome, original_genome);
+
+        // Verify genes stay within bounds
+        assert!(genotype.genome[0] >= 0 && genotype.genome[0] < 10);
+        assert!(genotype.genome[1] >= 0 && genotype.genome[1] < 5);
+    }
+
+    #[test]
+    fn it_respects_zero_mutation_rate() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let morphology = get_test_morphology();
+        let mut genotype = get_test_genotype();
+
+        let mutagen = Mutagen::new(
+            Temperature::new(1.0, Decay::Constant),
+            MutationRate::new(0.0, Decay::Constant), // 0% mutation rate
+        );
+
+        let original_genome = genotype.genome.clone();
+
+        mutagen.mutate(&mut rng, &mut genotype, &morphology, 0.0);
+
+        // Should be unchanged with 0% mutation rate
+        assert_eq!(genotype.genome, original_genome);
+    }
+
+    #[test]
+    fn it_applies_progress_to_decay() {
+        let mutagen = Mutagen::new(
+            Temperature::new(1.0, Decay::Linear { multiplier: 1.0 }),
+            MutationRate::new(0.8, Decay::Constant),
+        );
+
+        // Test that temperature decays with progress
+        assert_eq!(mutagen.temperature.get(0.0), 1.0);
+        assert_eq!(mutagen.temperature.get(0.5), 0.5);
+        assert_eq!(mutagen.temperature.get(1.0), 0.0);
+
+        // Test that constant rate doesn't decay
+        assert_eq!(mutagen.mutation_rate.get(0.5), 0.8);
+    }
+}

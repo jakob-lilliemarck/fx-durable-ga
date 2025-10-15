@@ -4,6 +4,7 @@ mod gene_bounds;
 mod genotype;
 mod goal;
 mod morphology;
+mod mutagen;
 mod request;
 mod strategy;
 

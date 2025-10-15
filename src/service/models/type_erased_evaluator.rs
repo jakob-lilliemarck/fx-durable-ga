@@ -2,17 +2,17 @@ use crate::models::Evaluator;
 use futures::future::BoxFuture;
 use tracing::instrument;
 
-pub(super) trait TypeErasedEvaluator: Send + Sync {
+pub(crate) trait TypeErasedEvaluator: Send + Sync {
     fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
 
-pub(super) struct ErasedEvaluator<P, E: Evaluator<P>> {
+pub(crate) struct ErasedEvaluator<P, E: Evaluator<P>> {
     evaluator: E,
     decode: fn(&[i64]) -> P,
 }
 
 impl<P, E: Evaluator<P>> ErasedEvaluator<P, E> {
-    pub(super) fn new(evaluator: E, decode: fn(&[i64]) -> P) -> Self {
+    pub(crate) fn new(evaluator: E, decode: fn(&[i64]) -> P) -> Self {
         Self { evaluator, decode }
     }
 }
