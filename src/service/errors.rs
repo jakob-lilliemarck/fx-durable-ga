@@ -1,4 +1,7 @@
-use crate::repositories::{genotypes, morphologies, populations, requests};
+use crate::{
+    models::MutagenError,
+    repositories::{genotypes, morphologies, populations, requests},
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -16,4 +19,6 @@ pub enum Error {
     EvaluationError(#[from] anyhow::Error),
     #[error("NoValidParents")]
     NoValidParents,
+    #[error("Mutagen: {0}")]
+    Mutagen(#[from] MutagenError),
 }

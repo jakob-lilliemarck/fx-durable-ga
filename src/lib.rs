@@ -1,5 +1,3 @@
-mod builder;
-
 pub mod bootstrap;
 pub mod migrations;
 pub mod models;

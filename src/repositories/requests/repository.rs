@@ -1,6 +1,6 @@
 use super::Error;
 use super::repository_tx::TxRepository;
-use crate::models::{FitnessGoal, Request, Strategy};
+use crate::models::{FitnessGoal, Mutagen, Request, Strategy};
 use crate::repositories::chainable::{Chain, FromOther, ToTx, TxType};
 use futures::future::BoxFuture;
 use sqlx::{PgPool, PgTransaction, types::chrono::Utc};
@@ -63,34 +63,18 @@ impl<'tx> Chain<'tx> for Repository {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum RequestValidationError {
-    #[error("mutation_rate must be a value between 0.0 and 1.0, got: {0}")]
-    InvalidMutationRate(f64),
-    #[error("temperature must be a value between 0.0 and 1.0, got: {0}")]
-    InvalidTemperature(f64),
-}
+pub enum RequestValidationError {}
 
 impl Request {
-    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal, threshold = threshold, temperature = temperature, mutation_rate = mutation_rate))]
+    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal, threshold = threshold, mutagen = ?mutagen))]
     pub(crate) fn new(
         type_name: &str,
         type_hash: i32,
         goal: FitnessGoal,
         threshold: f64,
         strategy: Strategy,
-        temperature: f64,
-        mutation_rate: f64,
+        mutagen: Mutagen,
     ) -> Result<Self, RequestValidationError> {
-        // Validate temperature (0.0 to 1.0)
-        if !(0.0..=1.0).contains(&temperature) {
-            return Err(RequestValidationError::InvalidTemperature(temperature));
-        }
-
-        // Validate mutation rate (0.0 to 1.0)
-        if !(0.0..=1.0).contains(&mutation_rate) {
-            return Err(RequestValidationError::InvalidMutationRate(mutation_rate));
-        }
-
         Ok(Self {
             id: Uuid::now_v7(),
             requested_at: Utc::now(),
@@ -99,8 +83,7 @@ impl Request {
             goal,
             threshold,
             strategy,
-            temperature,
-            mutation_rate,
+            mutagen,
         })
     }
 

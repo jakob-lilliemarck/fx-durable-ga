@@ -1,7 +1,7 @@
 use super::Error;
 use super::models::{ErasedEvaluator, TypeErasedEvaluator};
 use crate::models::{
-    Encodeable, Evaluator, FitnessGoal, Gene, Genotype, Morphology, Request, Strategy,
+    Encodeable, Evaluator, FitnessGoal, Gene, Genotype, Morphology, Mutagen, Request, Strategy,
 };
 use crate::repositories::chainable::{Chain, FromOther, FromTx};
 use crate::repositories::populations;
@@ -99,19 +99,15 @@ impl Service {
         temperature: f64,
         mutation_rate: f64,
     ) -> Result<(), Error> {
+        let mutagen = Mutagen::constant(0.5, 0.1)?;
+
         self.requests
             .chain(|mut tx_requests| {
                 Box::pin(async move {
                     // Create a new optimization request with the repository
                     let request = tx_requests
                         .new_request(Request::new(
-                            type_name,
-                            type_hash,
-                            goal,
-                            threshold,
-                            strategy,
-                            temperature,
-                            mutation_rate,
+                            type_name, type_hash, goal, threshold, strategy, mutagen,
                         )?)
                         .await?;
 
@@ -276,36 +272,6 @@ impl Service {
         Genotype::new(&a.type_name, a.type_hash, genome, request_id, generation_id)
     }
 
-    // NOTE: temperatur and rate should have been validated at the time of creating the request, we do not validate again at this point.
-    #[instrument(level = "debug", skip(self, genotype, morphology), fields(genotype_id = %genotype.id, temperature = temperature, rate = rate))]
-    fn mutate(
-        &self,
-        genotype: &mut Genotype,
-        morphology: &Morphology,
-        temperature: f64,
-        rate: f64,
-    ) {
-        let mut rng = rand::rng();
-        for (gene, bounds) in genotype
-            .genome
-            .iter_mut()
-            .zip(morphology.gene_bounds.iter())
-        {
-            // Should we mutate this gene?
-            if rng.random_range(0.0..1.0) < rate {
-                // Temperature controls mutation step: higher = larger jumps
-                let max_step = (1.0 + (bounds.divisor as f64 * temperature)) as i64;
-
-                // Choose direction and step size
-                let direction = if rng.random_bool(0.5) { 1 } else { -1 };
-                let step = rng.random_range(1..=max_step);
-
-                // Apply mutation and clamp
-                *gene = (*gene + direction * step).clamp(0, bounds.divisor as i64 - 1);
-            }
-        }
-    }
-
     #[instrument(level = "debug", skip(self, candidates), fields(num_pairs = num_pairs, tournament_size = tournament_size, candidates_count = candidates.len()))]
     fn select_by_tournament(
         &self,
@@ -374,12 +340,13 @@ impl Service {
         for (parent1, parent2) in parent_pairs {
             let mut child = self.crossover(&parent1, &parent2, request.id, next_generation_id);
 
-            self.mutate(
-                &mut child,
-                &morphology,
-                request.temperature,
-                request.mutation_rate,
-            );
+            let mut rng = rand::rng();
+            // FIXME:
+            // 0.0 refers to the optimization progress. We must compute the progress. 0.0 represents full mutation strength, while 1.0 indicates zero mutation.
+            // We shall provide a decreasing value as we progress towards an optimum - that should focus our efforts to the areas of interest that we have found
+            request
+                .mutagen
+                .mutate(&mut rng, &mut child, &morphology, 0.0);
 
             population_updates.push((request.id, child.id));
             events.push(GenotypeGenerated::new(request.id, child.id));

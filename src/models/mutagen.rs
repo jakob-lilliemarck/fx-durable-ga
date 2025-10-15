@@ -13,7 +13,7 @@ fn decay_exponential(value: f64, progress: f64, multiplier: f64, exponent: i32) 
 // ============================================================
 // Decay
 // ============================================================
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Decay {
     Constant,
     Linear { multiplier: f64 },
@@ -36,15 +36,38 @@ impl Decay {
 // ============================================================
 // Temperature
 // ============================================================
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Temperature {
     value: f64,
     decay: Decay,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("temperature must be between 0.0 and 1.0, got: {0}")]
+pub struct TemperatureOutOfRange(f64);
+
 impl Temperature {
-    pub fn new(value: f64, decay: Decay) -> Self {
-        Self { value, decay }
+    pub fn new(value: f64, decay: Decay) -> Result<Self, TemperatureOutOfRange> {
+        let value = Self::validate(value)?;
+
+        Ok(Self { value, decay })
+    }
+
+    pub fn constant(value: f64) -> Result<Self, TemperatureOutOfRange> {
+        let value = Self::validate(value)?;
+
+        Ok(Self {
+            value,
+            decay: Decay::Constant,
+        })
+    }
+
+    fn validate(value: f64) -> Result<f64, TemperatureOutOfRange> {
+        if !(0.0..=1.0).contains(&value) {
+            return Err(TemperatureOutOfRange(value));
+        }
+
+        Ok(value)
     }
 
     fn get(&self, progress: f64) -> f64 {
@@ -55,15 +78,38 @@ impl Temperature {
 // ============================================================
 // MutationRate
 // ============================================================
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MutationRate {
     value: f64,
     decay: Decay,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("mutation_rate must be between 0.0 and 1.0, got: {0}")]
+pub struct MutationRateOutOfRange(f64);
+
 impl MutationRate {
-    pub fn new(value: f64, decay: Decay) -> Self {
-        Self { value, decay }
+    pub fn new(value: f64, decay: Decay) -> Result<Self, MutationRateOutOfRange> {
+        let value = Self::validate(value)?;
+
+        Ok(Self { value, decay })
+    }
+
+    pub fn constant(value: f64) -> Result<Self, MutationRateOutOfRange> {
+        let value = Self::validate(value)?;
+
+        Ok(Self {
+            value,
+            decay: Decay::Constant,
+        })
+    }
+
+    fn validate(value: f64) -> Result<f64, MutationRateOutOfRange> {
+        if !(0.0..=1.0).contains(&value) {
+            return Err(MutationRateOutOfRange(value));
+        }
+
+        Ok(value)
     }
 
     fn get(&self, progress: f64) -> f64 {
@@ -74,10 +120,18 @@ impl MutationRate {
 // ============================================================
 // Mutagen
 // ============================================================
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mutagen {
     mutation_rate: MutationRate,
     temperature: Temperature,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MutagenError {
+    #[error("Mutation rate error: {0}")]
+    MutationRate(#[from] MutationRateOutOfRange),
+    #[error("Temperature error: {0}")]
+    Temperature(#[from] TemperatureOutOfRange),
 }
 
 impl Mutagen {
@@ -88,7 +142,20 @@ impl Mutagen {
         }
     }
 
-    pub fn mutate<R: Rng>(
+    pub fn constant(
+        temperature_value: f64,
+        mutation_rate_value: f64,
+    ) -> Result<Self, MutagenError> {
+        let temperature = Temperature::constant(temperature_value)?;
+        let mutation_rate = MutationRate::constant(mutation_rate_value)?;
+
+        Ok(Self {
+            temperature,
+            mutation_rate,
+        })
+    }
+
+    pub(crate) fn mutate<R: Rng>(
         &self,
         rng: &mut R,
         genotype: &mut Genotype,
@@ -170,8 +237,8 @@ mod tests {
 
         // Create test data
         let mutagen = Mutagen::new(
-            Temperature::new(0.1, Decay::Constant), // Low temp = small steps
-            MutationRate::new(1.0, Decay::Constant), // 100% mutation rate
+            Temperature::new(0.1, Decay::Constant).expect("temperature is in range"), // Low temp = small steps
+            MutationRate::new(1.0, Decay::Constant).expect("mutation_rate is in range"), // 100% mutation rate
         );
 
         let original_genome = genotype.genome.clone();
@@ -194,8 +261,8 @@ mod tests {
         let mut genotype = get_test_genotype();
 
         let mutagen = Mutagen::new(
-            Temperature::new(1.0, Decay::Constant),
-            MutationRate::new(0.0, Decay::Constant), // 0% mutation rate
+            Temperature::new(1.0, Decay::Constant).expect("temperature is in range"),
+            MutationRate::new(0.0, Decay::Constant).expect("mutation_rate is in range"), // 0% mutation rate
         );
 
         let original_genome = genotype.genome.clone();
@@ -209,8 +276,9 @@ mod tests {
     #[test]
     fn it_applies_progress_to_decay() {
         let mutagen = Mutagen::new(
-            Temperature::new(1.0, Decay::Linear { multiplier: 1.0 }),
-            MutationRate::new(0.8, Decay::Constant),
+            Temperature::new(1.0, Decay::Linear { multiplier: 1.0 })
+                .expect("temperature is in range"),
+            MutationRate::new(0.8, Decay::Constant).expect("mutation_range is in range"),
         );
 
         // Test that temperature decays with progress

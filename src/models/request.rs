@@ -1,3 +1,5 @@
+use crate::models::mutagen::Mutagen;
+
 use super::{FitnessGoal, Strategy};
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
@@ -12,6 +14,5 @@ pub(crate) struct Request {
     pub(crate) goal: FitnessGoal,
     pub(crate) threshold: f64,
     pub(crate) strategy: Strategy,
-    pub(crate) temperature: f64,
-    pub(crate) mutation_rate: f64,
+    pub(crate) mutagen: Mutagen,
 }

@@ -12,6 +12,7 @@ pub use encodeable::Encodeable;
 pub use evaluator::Evaluator;
 pub use gene_bounds::{GeneBoundError, GeneBounds};
 pub use goal::FitnessGoal;
+pub use mutagen::{Decay, Mutagen, MutagenError, MutationRate, Temperature};
 pub use strategy::Strategy;
 
 pub(crate) use genotype::{Gene, Genotype};

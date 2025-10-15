@@ -10,6 +10,5 @@ CREATE TABLE fx_durable_ga.requests (
     goal fx_durable_ga.fitness_goal NOT NULL,
     threshold DOUBLE PRECISION NOT NULL,
     strategy JSONB NOT NULL,
-    temperature DOUBLE PRECISION NOT NULL,
-    mutation_rate DOUBLE PRECISION NOT NULL
+    mutagen JSONB NOT NULL
 );

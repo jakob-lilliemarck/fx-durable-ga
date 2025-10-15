@@ -22,10 +22,9 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 goal,
                 threshold,
                 strategy,
-                temperature,
-                mutation_rate
+                mutagen
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING
                 id,
                 requested_at,
@@ -34,8 +33,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 goal "goal:FitnessGoal",
                 threshold,
                 strategy,
-                temperature,
-                mutation_rate
+                mutagen
             "#,
         db_request.id,
         db_request.requested_at,
@@ -44,8 +42,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
         db_request.goal as FitnessGoal,
         db_request.threshold,
         db_request.strategy,
-        db_request.temperature,
-        db_request.mutation_rate
+        db_request.mutagen
     )
     .fetch_one(tx)
     .await?;
@@ -57,11 +54,13 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_request_tests {
     use super::*;
-    use crate::models::Strategy;
+    use crate::models::{Mutagen, Strategy};
     use chrono::SubsecRound;
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_inserts_a_new_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let mutagen = Mutagen::constant(0.5, 0.1)?;
+
         let request = Request::new(
             "test",
             1,
@@ -71,8 +70,7 @@ mod new_request_tests {
                 max_generations: 100,
                 population_size: 10,
             },
-            0.5,
-            0.1,
+            mutagen,
         )?;
         let request_clone = request.clone();
 
@@ -94,6 +92,8 @@ mod new_request_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let mutagen = Mutagen::constant(0.5, 0.1)?;
+
         let request = Request::new(
             "test",
             1,
@@ -103,8 +103,7 @@ mod new_request_tests {
                 max_generations: 100,
                 population_size: 10,
             },
-            0.5,
-            0.1,
+            mutagen,
         )?;
         let request_clone = request.clone();
 
@@ -133,8 +132,7 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
             goal "goal!:FitnessGoal",
             threshold,
             strategy,
-            temperature,
-            mutation_rate
+            mutagen
         FROM fx_durable_ga.requests
         WHERE id = $1
         "#,
@@ -150,10 +148,12 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_request_tests {
     use super::*;
-    use crate::models::Strategy;
+    use crate::models::{Mutagen, Strategy};
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_an_existing_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let mutagen = Mutagen::constant(0.5, 0.1)?;
+
         let request = Request::new(
             "test",
             1,
@@ -163,8 +163,7 @@ mod get_request_tests {
                 max_generations: 100,
                 population_size: 10,
             },
-            0.5,
-            0.1,
+            mutagen,
         )?;
         let request_id = request.id;
 
@@ -177,6 +176,8 @@ mod get_request_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let mutagen = Mutagen::constant(0.5, 0.1)?;
+
         let request = Request::new(
             "test",
             1,
@@ -186,8 +187,7 @@ mod get_request_tests {
                 max_generations: 100,
                 population_size: 10,
             },
-            0.5,
-            0.1,
+            mutagen,
         )?;
         let request_id = request.id;
 

@@ -13,8 +13,7 @@ pub(super) struct DbRequest {
     pub(super) goal: FitnessGoal,
     pub(super) threshold: f64,
     pub(super) strategy: serde_json::Value,
-    pub(super) temperature: f64,
-    pub(super) mutation_rate: f64,
+    pub(super) mutagen: serde_json::Value,
 }
 
 impl TryFrom<Request> for DbRequest {
@@ -23,6 +22,7 @@ impl TryFrom<Request> for DbRequest {
     #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let strategy_json = serde_json::to_value(request.strategy)?;
+        let mutagen_json = serde_json::to_value(request.mutagen)?;
 
         Ok(DbRequest {
             id: request.id,
@@ -32,8 +32,7 @@ impl TryFrom<Request> for DbRequest {
             goal: request.goal,
             threshold: request.threshold,
             strategy: strategy_json,
-            temperature: request.temperature,
-            mutation_rate: request.mutation_rate,
+            mutagen: mutagen_json,
         })
     }
 }
@@ -43,7 +42,8 @@ impl TryFrom<DbRequest> for Request {
 
     #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
     fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
-        let strategy_json = serde_json::from_value(request.strategy)?;
+        let strategy = serde_json::from_value(request.strategy)?;
+        let mutagen = serde_json::from_value(request.mutagen)?;
 
         Ok(Request {
             id: request.id,
@@ -52,9 +52,8 @@ impl TryFrom<DbRequest> for Request {
             type_hash: request.type_hash,
             goal: request.goal,
             threshold: request.threshold,
-            strategy: strategy_json,
-            temperature: request.temperature,
-            mutation_rate: request.mutation_rate,
+            strategy,
+            mutagen,
         })
     }
 }
