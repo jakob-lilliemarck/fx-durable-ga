@@ -1,5 +1,12 @@
 use serde::{Deserialize, Serialize};
 
+/// Genetic algorithm evolution strategies.
+///
+/// IMPORTANT: Both strategies increment generation IDs for each breeding batch.
+/// This ensures atomic generation creation and prevents race conditions when
+/// multiple workers try to breed simultaneously. Rolling strategies create
+/// "micro-generations" where each batch gets a unique generation ID, rather
+/// than keeping all offspring in generation 1.
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub enum Strategy {

@@ -14,17 +14,25 @@ impl<'tx> TxRepository<'tx> {
         Self { tx }
     }
 
-    #[instrument(level = "debug", skip(self), fields(genotypes_count = genotypes.len()))]
-    pub(crate) async fn new_genotypes(
-        &mut self,
-        genotypes: Vec<Genotype>,
-    ) -> Result<Vec<Genotype>, Error> {
-        super::queries::new_genotypes(&mut *self.tx, genotypes).await
-    }
-
     #[instrument(level = "debug", skip(self), fields(genotype_id = %id, fitness = fitness))]
     pub(crate) async fn set_fitness(&mut self, id: Uuid, fitness: f64) -> Result<(), Error> {
         super::queries::set_fitness(&mut *self.tx, id, fitness).await
+    }
+
+    #[instrument(level = "debug", skip(self, genotypes), fields(request_id = %request_id, generation_id = generation_id, genotypes_count = genotypes.len()))]
+    pub(crate) async fn create_generation_if_empty(
+        &mut self,
+        request_id: Uuid,
+        generation_id: i32,
+        genotypes: Vec<Genotype>,
+    ) -> Result<Vec<Genotype>, Error> {
+        super::queries::create_generation_if_empty(
+            &mut *self.tx,
+            request_id,
+            generation_id,
+            genotypes,
+        )
+        .await
     }
 }
 

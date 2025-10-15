@@ -5,7 +5,8 @@ use tracing::instrument;
 use uuid::Uuid;
 
 #[instrument(level = "debug", skip(tx), fields(genotypes_count = genotypes.len()))]
-pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
+#[cfg(test)]
+async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
     tx: E,
     genotypes: Vec<Genotype>,
 ) -> Result<Vec<Genotype>, super::Error> {
@@ -566,5 +567,248 @@ mod get_generation_count_tests {
         _pool: sqlx::PgPool,
     ) -> anyhow::Result<()> {
         todo!()
+    }
+}
+
+const CREATE_GENERATION_IF_EMPTY_SQL: &str = r#"
+    WITH generation_lock AS (
+        SELECT id
+        FROM fx_durable_ga.requests
+        WHERE id = $1
+        FOR UPDATE SKIP LOCKED
+    )
+    INSERT INTO fx_durable_ga.genotypes (
+        id,
+        generated_at,
+        type_name,
+        type_hash,
+        genome,
+        request_id,
+        generation_id
+    )
+    SELECT
+        id,
+        generated_at,
+        type_name,
+        type_hash,
+        genome,
+        request_id,
+        generation_id
+    FROM (VALUES {values}) AS new_genotypes(
+        id,
+        generated_at,
+        type_name,
+        type_hash,
+        genome,
+        request_id,
+        generation_id
+    )
+    WHERE
+        EXISTS(SELECT 1 FROM generation_lock)
+        AND NOT EXISTS(
+            SELECT 1 FROM fx_durable_ga.genotypes
+            WHERE request_id = $2 AND generation_id = $3
+        )
+    RETURNING
+        id,
+        generated_at,
+        type_name,
+        type_hash,
+        genome,
+        request_id,
+        generation_id,
+        fitness;
+"#;
+
+#[instrument(level = "debug", skip(tx, genotypes), fields(request_id = %request_id, generation_id = generation_id, genotypes_count = genotypes.len()))]
+pub(crate) async fn create_generation_if_empty<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    request_id: Uuid,
+    generation_id: i32,
+    genotypes: Vec<Genotype>,
+) -> Result<Vec<Genotype>, super::Error> {
+    if genotypes.is_empty() {
+        return Ok(vec![]);
+    }
+
+    // Build the VALUES clause
+    let values_clause = genotypes
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let base = i * 7 + 4; // Start after the 3 fixed parameters
+            format!(
+                "(${}, ${}, ${}, ${}, ${}, ${}, ${})",
+                base,
+                base + 1,
+                base + 2,
+                base + 3,
+                base + 4,
+                base + 5,
+                base + 6
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let sql = CREATE_GENERATION_IF_EMPTY_SQL.replace("{values}", &values_clause);
+
+    let mut query = sqlx::query_as::<_, Genotype>(&sql)
+        .bind(request_id)
+        .bind(request_id)
+        .bind(generation_id);
+
+    // Bind all genotype values
+    for g in &genotypes {
+        query = query
+            .bind(g.id)
+            .bind(g.generated_at)
+            .bind(&g.type_name)
+            .bind(g.type_hash)
+            .bind(&g.genome)
+            .bind(g.request_id)
+            .bind(g.generation_id);
+    }
+
+    let inserted_genotypes = query.fetch_all(tx).await?;
+    Ok(inserted_genotypes)
+}
+
+#[cfg(test)]
+mod create_generation_if_empty_tests {
+    use super::*;
+    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Strategy};
+    use crate::repositories::requests::queries::new_request;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_creates_generation_when_empty(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Create a request first - the locking mechanism requires the request to exist
+        // because it uses "SELECT id FROM fx_durable_ga.requests WHERE id = $1 FOR UPDATE SKIP LOCKED"
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        // Create genotypes for generation 1
+        let genotypes = vec![
+            Genotype::new("test", 1, vec![1, 2, 3], request_id, 1),
+            Genotype::new("test", 1, vec![4, 5, 6], request_id, 1),
+        ];
+
+        let result = create_generation_if_empty(&pool, request_id, 1, genotypes).await?;
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(result[0].request_id, request_id);
+        assert_eq!(result[0].generation_id, 1);
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_returns_empty_when_generation_exists(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        // First call - should succeed
+        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
+        let first_result = create_generation_if_empty(&pool, request_id, 1, genotypes).await?;
+        assert_eq!(first_result.len(), 1);
+
+        // Second call - should return empty because generation exists
+        let more_genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6], request_id, 1)];
+        let second_result =
+            create_generation_if_empty(&pool, request_id, 1, more_genotypes).await?;
+        assert_eq!(second_result.len(), 0);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_returns_empty_for_empty_input(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        // Empty genotypes should return empty immediately
+        let result = create_generation_if_empty(&pool, request_id, 1, vec![]).await?;
+        assert_eq!(result.len(), 0);
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_handles_concurrent_creation(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        use std::sync::Arc;
+        use tokio::task;
+
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let pool = Arc::new(pool);
+
+        // Spawn two concurrent tasks trying to create the same generation
+        let pool1 = pool.clone();
+        let task1 = task::spawn(async move {
+            let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
+            create_generation_if_empty(&*pool1, request_id, 1, genotypes).await
+        });
+
+        let pool2 = pool.clone();
+        let task2 = task::spawn(async move {
+            let genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6], request_id, 1)];
+            create_generation_if_empty(&*pool2, request_id, 1, genotypes).await
+        });
+
+        let (result1, result2) = tokio::try_join!(task1, task2)?;
+        let result1 = result1?;
+        let result2 = result2?;
+
+        // Exactly one should succeed, one should return empty
+        let total_inserted = result1.len() + result2.len();
+        assert_eq!(total_inserted, 1);
+
+        Ok(())
     }
 }

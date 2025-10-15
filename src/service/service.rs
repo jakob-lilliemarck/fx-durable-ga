@@ -173,21 +173,31 @@ impl Service {
         self.genotypes
             .chain(|mut tx_genotypes| {
                 Box::pin(async move {
-                    // Create the genotypes with the repository
-                    tx_genotypes.new_genotypes(genotypes).await?;
+                    // Create the initial generation atomically (prevents race conditions)
+                    let inserted_genotypes = tx_genotypes
+                        .create_generation_if_empty(request.id, 1, genotypes)
+                        .await?;
 
-                    let mut tx_populations = populations.from_other(tx_genotypes);
+                    // Only proceed if genotypes were actually inserted (no race condition)
+                    if !inserted_genotypes.is_empty() {
+                        let mut tx_populations = populations.from_other(tx_genotypes);
 
-                    // Add all to the active population of this request
-                    tx_populations.add_to_population(&population).await?;
+                        // Add all to the active population of this request
+                        tx_populations.add_to_population(&population).await?;
 
-                    // Instantiate a publisher
-                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_populations);
+                        // Instantiate a publisher
+                        let mut publisher = fx_event_bus::Publisher::from_tx(tx_populations);
 
-                    // Publish one event for each generated phenotype
-                    publisher.publish_many(&events).await?;
+                        // Publish one event for each generated phenotype
+                        publisher.publish_many(&events).await?;
 
-                    Ok((publisher, request))
+                        Ok((publisher, request))
+                    } else {
+                        // Race condition occurred - another worker created the generation
+                        // Create a dummy publisher to satisfy the return type
+                        let publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+                        Ok((publisher, request))
+                    }
                 })
             })
             .await?;
@@ -353,18 +363,28 @@ impl Service {
         self.genotypes
             .chain(|mut tx_genotypes| {
                 Box::pin(async move {
-                    tx_genotypes.new_genotypes(new_genotypes).await?;
-
-                    let mut tx_populations = populations.from_other(tx_genotypes);
-
-                    tx_populations
-                        .add_to_population(&population_updates)
+                    let inserted_genotypes = tx_genotypes
+                        .create_generation_if_empty(request.id, next_generation_id, new_genotypes)
                         .await?;
 
-                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_populations);
-                    publisher.publish_many(&events).await?;
+                    // Only proceed if genotypes were actually inserted (no race condition)
+                    if !inserted_genotypes.is_empty() {
+                        let mut tx_populations = populations.from_other(tx_genotypes);
 
-                    Ok((publisher, ()))
+                        tx_populations
+                            .add_to_population(&population_updates)
+                            .await?;
+
+                        let mut publisher = fx_event_bus::Publisher::from_tx(tx_populations);
+                        publisher.publish_many(&events).await?;
+
+                        Ok((publisher, ()))
+                    } else {
+                        // Race condition occurred - another worker created the generation
+                        // Create a dummy publisher to satisfy the return type
+                        let publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+                        Ok((publisher, ()))
+                    }
                 })
             })
             .await?;
@@ -403,7 +423,7 @@ impl Service {
                 selection_interval as usize,
                 tournament_size as usize,
                 sample_size as usize,
-                current_gen,
+                current_gen + 1, // Increment generation for rolling strategies too
             )
             .await?;
 
