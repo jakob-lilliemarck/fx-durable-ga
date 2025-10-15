@@ -1,3 +1,4 @@
+mod crossover;
 mod encodeable;
 mod evaluator;
 mod gene_bounds;
