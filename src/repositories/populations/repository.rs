@@ -1,6 +1,9 @@
 use super::Error;
 use super::repository_tx::TxRepository;
-use crate::repositories::chainable::{Chain, FromOther, ToTx, TxType};
+use crate::{
+    models::Population,
+    repositories::chainable::{Chain, FromOther, ToTx, TxType},
+};
 use sqlx::{PgPool, PgTransaction};
 use std::future::Future;
 use tracing::instrument;
@@ -17,11 +20,20 @@ impl Repository {
     }
 
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
-    pub(crate) fn get_population_count(
+    pub(crate) fn get_population(
         &self,
         request_id: &Uuid,
-    ) -> impl Future<Output = Result<i64, Error>> {
-        super::queries::get_population_count(&self.pool, request_id)
+    ) -> impl Future<Output = Result<Population, Error>> {
+        super::queries::get_population(&self.pool, request_id)
+    }
+
+    #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
+    pub(crate) fn search_individuals(
+        &self,
+        filter: &super::queries::Filter,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<(Uuid, Option<f64>)>, Error>> {
+        super::queries::search_individuals(&self.pool, filter, limit)
     }
 }
 

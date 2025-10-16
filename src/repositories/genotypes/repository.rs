@@ -20,28 +20,9 @@ impl Repository {
         super::queries::get_genotype(&self.pool, id).await
     }
 
-    #[instrument(level = "debug", skip(self, filter))]
-    pub(crate) async fn get_count_of_genotypes_in_latest_iteration(
-        &self,
-        filter: &super::queries::Filter,
-    ) -> Result<i64, Error> {
-        super::queries::count_genotypes_in_latest_iteration(&self.pool, filter).await
-    }
-
-    #[instrument(level = "debug", skip(self, filter), fields(limit = limit, order = %order))]
-    pub(crate) async fn search_genotypes_in_latest_generation(
-        &self,
-        limit: i64,
-        order: super::queries::Order,
-        filter: &super::queries::Filter,
-    ) -> Result<Vec<Genotype>, Error> {
-        super::queries::search_genotypes_in_latest_generation(&self.pool, limit, order, filter)
-            .await
-    }
-
-    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
-    pub(crate) async fn get_generation_count(&self, request_id: Uuid) -> Result<i32, Error> {
-        super::queries::get_generation_count(&self.pool, request_id).await
+    #[instrument(level = "debug", skip(self), fields(genotype_id = ?ids))]
+    pub(crate) async fn get_genotypes(&self, ids: &[Uuid]) -> Result<Vec<Genotype>, Error> {
+        super::queries::get_genotypes(&self.pool, ids).await
     }
 }
 

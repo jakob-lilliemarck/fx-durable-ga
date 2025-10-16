@@ -191,7 +191,6 @@ mod tests {
     use super::*;
     use crate::models::GeneBounds;
     use rand::{SeedableRng, rngs::StdRng};
-    use uuid::Uuid;
 
     #[test]
     fn it_computes_linear_decay() {
@@ -209,13 +208,7 @@ mod tests {
     }
 
     fn get_test_genotype() -> Genotype {
-        Genotype::new(
-            "TestType",
-            123,
-            vec![5, 2], // Starting genes
-            Uuid::now_v7(),
-            1,
-        )
+        Genotype::new("TestType", 123, vec![5, 2])
     }
 
     fn get_test_morphology() -> Morphology {

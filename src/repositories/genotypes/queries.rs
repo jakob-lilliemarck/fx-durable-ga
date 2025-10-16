@@ -1,6 +1,5 @@
 use crate::models::Genotype;
 use sqlx::PgExecutor;
-use std::fmt::Display;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -16,9 +15,7 @@ async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             generated_at,
             type_name,
             type_hash,
-            genome,
-            request_id,
-            generation_id
+            genome
         ) VALUES ",
     );
 
@@ -43,13 +40,9 @@ async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             .push_bind(g.type_hash)
             .push(", ")
             .push_bind(g.genome)
-            .push(", ")
-            .push_bind(g.request_id)
-            .push(", ")
-            .push_bind(g.generation_id)
             .push(")");
     }
-    query_builder.push(" RETURNING id, generated_at, type_name, type_hash, genome, request_id, generation_id, fitness");
+    query_builder.push(" RETURNING id, generated_at, type_name, type_hash, genome");
 
     let genotypes = query_builder
         .build_query_as::<Genotype>()
@@ -66,8 +59,7 @@ mod new_genotypes_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_inserts_a_new_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let request_id = Uuid::now_v7();
-        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
+        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3])];
         let genotypes_clone = genotypes.clone();
 
         let inserted = new_genotypes(&pool, genotypes).await?;
@@ -80,70 +72,17 @@ mod new_genotypes_tests {
         assert_eq!(genotypes_clone[0].type_name, inserted[0].type_name);
         assert_eq!(genotypes_clone[0].type_hash, inserted[0].type_hash);
         assert_eq!(genotypes_clone[0].genome, inserted[0].genome);
-        assert_eq!(genotypes_clone[0].request_id, inserted[0].request_id);
 
         Ok(())
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let request_id = Uuid::now_v7();
-        let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id, 1);
+        let genotype = Genotype::new("test", 1, vec![1, 2, 3]);
         let genotype_clone = genotype.clone();
 
         new_genotypes(&pool, vec![genotype]).await?;
         let result = new_genotypes(&pool, vec![genotype_clone]).await;
-
-        assert!(result.is_err());
-        Ok(())
-    }
-}
-
-#[instrument(level = "debug", skip(tx), fields(genotype_id = %id, fitness = fitness))]
-pub(crate) async fn set_fitness<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    id: Uuid,
-    fitness: f64,
-) -> Result<(), super::Error> {
-    sqlx::query!(
-        r#"
-            UPDATE fx_durable_ga.genotypes
-            SET fitness = $2
-            WHERE id = $1 AND fitness IS NULL
-            RETURNING id;
-        "#,
-        id,
-        fitness
-    )
-    .fetch_one(tx)
-    .await?;
-
-    Ok(())
-}
-
-#[cfg(test)]
-mod set_fitness_tests {
-    use super::*;
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_updates_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let request_id = Uuid::now_v7();
-        let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id, 1);
-
-        let inserted = new_genotypes(&pool, vec![genotype]).await?;
-        set_fitness(&pool, inserted[0].id, 0.9).await?;
-
-        Ok(())
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_errors_if_fitness_is_already_set(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let request_id = Uuid::now_v7();
-        let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id, 1);
-
-        let inserted = new_genotypes(&pool, vec![genotype]).await?;
-        set_fitness(&pool, inserted[0].id, 0.9).await?;
-        let result = set_fitness(&pool, inserted[0].id, 0.8).await;
 
         assert!(result.is_err());
         Ok(())
@@ -163,10 +102,7 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
                 generated_at,
                 type_name,
                 type_hash,
-                genome,
-                request_id,
-                fitness,
-                generation_id
+                genome
             FROM fx_durable_ga.genotypes
             WHERE id = $1;
         "#,
@@ -191,9 +127,6 @@ mod get_genotype_tests {
             type_name: "test".to_string(),
             type_hash: 1,
             genome: vec![1, 2, 3],
-            request_id: Uuid::now_v7(),
-            fitness: None,
-            generation_id: 1,
         };
         let genotype_id = genotype.id;
 
@@ -216,358 +149,30 @@ mod get_genotype_tests {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct Filter {
-    request_ids: Option<Vec<Uuid>>,
-    has_fitness: Option<bool>,
-}
-
-impl Default for Filter {
-    fn default() -> Self {
-        Self {
-            has_fitness: None,
-            request_ids: None,
-        }
-    }
-}
-
-impl Filter {
-    #[instrument(level = "debug", fields(has_fitness = has_fitness))]
-    pub(crate) fn with_fitness(mut self, has_fitness: bool) -> Self {
-        self.has_fitness = Some(has_fitness);
-        self
-    }
-
-    #[instrument(level = "debug", fields(request_ids_count = request_ids.len()))]
-    pub(crate) fn with_request_ids(mut self, request_ids: Vec<Uuid>) -> Self {
-        self.request_ids = Some(request_ids);
-        self
-    }
-}
-
-#[instrument(level = "debug", skip(tx, filter))]
-pub(crate) async fn count_genotypes_in_latest_iteration<'tx, E: PgExecutor<'tx>>(
+#[instrument(level = "debug", skip(tx), fields(genotype_id = ?ids))]
+pub(crate) async fn get_genotypes<'tx, E: PgExecutor<'tx>>(
     tx: E,
-    filter: &Filter,
-) -> Result<i64, super::Error> {
-    let count = sqlx::query_scalar!(
-        r#"
-            WITH latest_generations AS (
-                SELECT request_id, MAX(generation_id) as max_generation_id
-                FROM fx_durable_ga.genotypes
-                GROUP BY request_id
-            )
-            SELECT COUNT(*) "count!:i64"
-            FROM fx_durable_ga.genotypes g
-            JOIN latest_generations lg
-                ON g.request_id = lg.request_id
-                AND g.generation_id = lg.max_generation_id
-            WHERE (
-                $1::bool IS NULL OR
-                CASE
-                    WHEN $1 = true THEN g.fitness IS NOT NULL
-                    ELSE g.fitness IS NULL
-                END
-            )
-            AND (
-                $2::uuid[] IS NULL OR g.request_id = ANY($2)
-            );
-        "#,
-        filter.has_fitness,
-        filter.request_ids.as_deref(),
-    )
-    .fetch_one(tx)
-    .await?;
-
-    Ok(count)
-}
-
-#[cfg(test)]
-mod count_genotypes_in_latest_iteration_tests {
-    use super::*;
-    use crate::repositories::genotypes::Filter;
-    use chrono::{SubsecRound, Utc};
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_counts_all_genotypes(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_counts_genotypes_with_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_counts_genotypes_without_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_counts_genotypes_of_requests(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_counts_some_genotypes(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let req_id_1 = Uuid::now_v7();
-        let req_id_2 = Uuid::now_v7();
-
-        assert_eq!(
-            count_genotypes_in_latest_iteration(&pool, &Filter::default()).await?,
-            0
-        );
-
-        new_genotypes(
-            &pool,
-            vec![Genotype {
-                id: Uuid::now_v7(),
-                generated_at: Utc::now().trunc_subsecs(6),
-                type_name: "test".to_string(),
-                type_hash: 1,
-                genome: vec![1, 2, 3],
-                request_id: req_id_1,
-                fitness: None,
-                generation_id: 1,
-            }],
-        )
-        .await?;
-        assert_eq!(
-            count_genotypes_in_latest_iteration(&pool, &Filter::default()).await?,
-            1
-        );
-
-        // SECOND
-        let genotype_id_2 = Uuid::now_v7();
-        new_genotypes(
-            &pool,
-            vec![Genotype {
-                id: genotype_id_2,
-                generated_at: Utc::now().trunc_subsecs(6),
-                type_name: "test".to_string(),
-                type_hash: 1,
-                genome: vec![1, 2, 3],
-                request_id: req_id_1,
-                fitness: None,
-                generation_id: 1,
-            }],
-        )
-        .await?;
-        set_fitness(&pool, genotype_id_2, 0.123).await?;
-
-        assert_eq!(
-            count_genotypes_in_latest_iteration(&pool, &Filter::default()).await?,
-            2
-        );
-        assert_eq!(
-            count_genotypes_in_latest_iteration(&pool, &Filter::default().with_fitness(false))
-                .await?,
-            1
-        );
-        assert_eq!(
-            count_genotypes_in_latest_iteration(&pool, &Filter::default().with_fitness(true))
-                .await?,
-            1
-        );
-
-        // THIRD
-        new_genotypes(
-            &pool,
-            vec![Genotype {
-                id: Uuid::now_v7(),
-                generated_at: Utc::now().trunc_subsecs(6),
-                type_name: "test".to_string(),
-                type_hash: 1,
-                genome: vec![1, 2, 3],
-                request_id: req_id_2,
-                fitness: None,
-                generation_id: 1,
-            }],
-        )
-        .await?;
-        assert_eq!(
-            count_genotypes_in_latest_iteration(
-                &pool,
-                &Filter::default().with_request_ids(vec![req_id_1])
-            )
-            .await?,
-            2
-        );
-        assert_eq!(
-            count_genotypes_in_latest_iteration(
-                &pool,
-                &Filter::default().with_request_ids(vec![req_id_2])
-            )
-            .await?,
-            1
-        );
-        assert_eq!(
-            count_genotypes_in_latest_iteration(
-                &pool,
-                &Filter::default().with_request_ids(vec![req_id_1, req_id_2])
-            )
-            .await?,
-            3
-        );
-        assert_eq!(
-            count_genotypes_in_latest_iteration(
-                &pool,
-                &Filter::default()
-                    .with_request_ids(vec![req_id_1, req_id_2])
-                    .with_fitness(false)
-            )
-            .await?,
-            2
-        );
-        assert_eq!(
-            count_genotypes_in_latest_iteration(
-                &pool,
-                &Filter::default()
-                    .with_request_ids(vec![req_id_1, req_id_2])
-                    .with_fitness(true)
-            )
-            .await?,
-            1
-        );
-        Ok(())
-    }
-}
-
-pub(crate) enum Order {
-    Fitness,
-    Random,
-}
-
-impl Display for Order {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Order::Fitness => write!(f, "fitness"),
-            Order::Random => write!(f, "random"),
-        }
-    }
-}
-
-#[instrument(level = "debug", skip(tx, filter), fields(limit = limit, order = %order))]
-pub(crate) async fn search_genotypes_in_latest_generation<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    limit: i64,
-    order: Order,
-    filter: &Filter,
+    ids: &[Uuid],
 ) -> Result<Vec<Genotype>, super::Error> {
-    // Return i64, not Genotype - we're counting!
-    let genotypes = sqlx::query_as!(
+    let genotype = sqlx::query_as!(
         Genotype,
         r#"
-        WITH latest_generations AS (
-            SELECT request_id, MAX(generation_id) as max_generation_id
+            SELECT
+                id,
+                generated_at,
+                type_name,
+                type_hash,
+                genome
             FROM fx_durable_ga.genotypes
-            GROUP BY request_id
-        )
-        SELECT
-            g.id,
-            g.generated_at,
-            g.type_name,
-            g.type_hash,
-            g.genome,
-            g.request_id,
-            g.fitness,
-            g.generation_id
-        FROM fx_durable_ga.genotypes g
-        JOIN latest_generations lg
-            ON g.request_id = lg.request_id
-            AND g.generation_id = lg.max_generation_id
-        WHERE (
-            $1::bool IS NULL OR
-            CASE
-                WHEN $1 = true THEN g.fitness IS NOT NULL
-                ELSE g.fitness IS NULL
-            END
-        )
-        AND (
-            $2::uuid[] IS NULL OR g.request_id = ANY($2)
-        )
-        ORDER BY
-            CASE
-                WHEN $3 = 'fitness' THEN g.fitness
-                ELSE NULL
-            END DESC NULLS LAST,
-            CASE
-                WHEN $3 = 'random' THEN RANDOM()
-                ELSE NULL
-            END NULLS LAST
-        LIMIT $4;
+            WHERE id = ANY($1)
+            ORDER BY id;
         "#,
-        filter.has_fitness,
-        filter.request_ids.as_deref(),
-        order.to_string(),
-        limit
+        ids
     )
     .fetch_all(tx)
     .await?;
 
-    Ok(genotypes)
-}
-
-#[cfg(test)]
-mod search_genotypes_in_latest_generation_tests {
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_gets_all_genotypes_of_generation(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_gets_genotypes_with_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_gets_genotypes_without_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_gets_genotypes_of_requests(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_orders_by_fitness(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_orders_by_random(_pool: sqlx::PgPool) -> anyhow::Result<()> {
-        todo!()
-    }
-}
-
-#[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
-pub(crate) async fn get_generation_count<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    request_id: Uuid,
-) -> Result<i32, super::Error> {
-    let count = sqlx::query_scalar!(
-        r#"
-            SELECT COALESCE(MAX(generation_id), 0) "generation_id!:i32"
-            FROM fx_durable_ga.genotypes
-            WHERE request_id = $1
-        "#,
-        request_id
-    )
-    .fetch_one(tx)
-    .await?;
-
-    Ok(count)
-}
-
-#[cfg(test)]
-mod get_generation_count_tests {
-    #[sqlx::test(migrations = "./migrations")]
-    async fn it_gets_the_number_of_generations_of_a_request(
-        _pool: sqlx::PgPool,
-    ) -> anyhow::Result<()> {
-        todo!()
-    }
+    Ok(genotype)
 }
 
 const CREATE_GENERATION_IF_EMPTY_SQL: &str = r#"
@@ -582,42 +187,33 @@ const CREATE_GENERATION_IF_EMPTY_SQL: &str = r#"
         generated_at,
         type_name,
         type_hash,
-        genome,
-        request_id,
-        generation_id
+        genome
     )
     SELECT
         id,
         generated_at,
         type_name,
         type_hash,
-        genome,
-        request_id,
-        generation_id
+        genome
     FROM (VALUES {values}) AS new_genotypes(
         id,
         generated_at,
         type_name,
         type_hash,
-        genome,
-        request_id,
-        generation_id
+        genome
     )
     WHERE
         EXISTS(SELECT 1 FROM generation_lock)
         AND NOT EXISTS(
-            SELECT 1 FROM fx_durable_ga.genotypes
-            WHERE request_id = $2 AND generation_id = $3
+            SELECT 1 FROM fx_durable_ga.individuals
+            WHERE request_id = $1 AND generation_id = $2
         )
     RETURNING
         id,
         generated_at,
         type_name,
         type_hash,
-        genome,
-        request_id,
-        generation_id,
-        fitness;
+        genome;
 "#;
 
 #[instrument(level = "debug", skip(tx, genotypes), fields(request_id = %request_id, generation_id = generation_id, genotypes_count = genotypes.len()))]
@@ -636,16 +232,14 @@ pub(crate) async fn create_generation_if_empty<'tx, E: PgExecutor<'tx>>(
         .iter()
         .enumerate()
         .map(|(i, _)| {
-            let base = i * 7 + 4; // Start after the 3 fixed parameters
+            let base = i * 5 + 3; // Start after the 2 fixed parameters (request_id used twice, generation_id once)
             format!(
-                "(${}, ${}, ${}, ${}, ${}, ${}, ${})",
+                "(${}, ${}, ${}, ${}, ${})",
                 base,
                 base + 1,
                 base + 2,
                 base + 3,
-                base + 4,
-                base + 5,
-                base + 6
+                base + 4
             )
         })
         .collect::<Vec<_>>()
@@ -654,7 +248,6 @@ pub(crate) async fn create_generation_if_empty<'tx, E: PgExecutor<'tx>>(
     let sql = CREATE_GENERATION_IF_EMPTY_SQL.replace("{values}", &values_clause);
 
     let mut query = sqlx::query_as::<_, Genotype>(&sql)
-        .bind(request_id)
         .bind(request_id)
         .bind(generation_id);
 
@@ -666,8 +259,6 @@ pub(crate) async fn create_generation_if_empty<'tx, E: PgExecutor<'tx>>(
             .bind(&g.type_name)
             .bind(g.type_hash)
             .bind(&g.genome)
-            .bind(g.request_id)
-            .bind(g.generation_id);
     }
 
     let inserted_genotypes = query.fetch_all(tx).await?;
@@ -700,20 +291,21 @@ mod create_generation_if_empty_tests {
 
         // Create genotypes for generation 1
         let genotypes = vec![
-            Genotype::new("test", 1, vec![1, 2, 3], request_id, 1),
-            Genotype::new("test", 1, vec![4, 5, 6], request_id, 1),
+            Genotype::new("test", 1, vec![1, 2, 3]),
+            Genotype::new("test", 1, vec![4, 5, 6]),
         ];
 
         let result = create_generation_if_empty(&pool, request_id, 1, genotypes).await?;
 
         assert_eq!(result.len(), 2);
-        assert_eq!(result[0].request_id, request_id);
-        assert_eq!(result[0].generation_id, 1);
         Ok(())
     }
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_returns_empty_when_generation_exists(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        use crate::models::Individual;
+        use crate::repositories::populations::queries::add_to_population;
+
         // Create a request first
         let request = Request::new(
             "test",
@@ -730,12 +322,17 @@ mod create_generation_if_empty_tests {
         new_request(&pool, request).await?;
 
         // First call - should succeed
-        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
+        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3])];
+        let genotype_id = genotypes[0].id;
         let first_result = create_generation_if_empty(&pool, request_id, 1, genotypes).await?;
         assert_eq!(first_result.len(), 1);
 
-        // Second call - should return empty because generation exists
-        let more_genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6], request_id, 1)];
+        // Add the genotype as an individual to generation 1
+        let individuals = vec![Individual::new(genotype_id, request_id, 1)];
+        add_to_population(&pool, &individuals).await?;
+
+        // Second call - should return empty because generation 1 now has individuals
+        let more_genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6])];
         let second_result =
             create_generation_if_empty(&pool, request_id, 1, more_genotypes).await?;
         assert_eq!(second_result.len(), 0);
@@ -770,6 +367,8 @@ mod create_generation_if_empty_tests {
     async fn it_handles_concurrent_creation(pool: sqlx::PgPool) -> anyhow::Result<()> {
         use std::sync::Arc;
         use tokio::task;
+        use crate::models::Individual;
+        use crate::repositories::populations::queries::add_to_population;
 
         // Create a request first
         let request = Request::new(
@@ -786,18 +385,28 @@ mod create_generation_if_empty_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
+        // Create first genotype and add as individual to establish generation 1
+        let initial_genotypes = vec![Genotype::new("test", 1, vec![0, 0, 0])];
+        let genotype_id = initial_genotypes[0].id;
+        let first_result = create_generation_if_empty(&pool, request_id, 1, initial_genotypes).await?;
+        assert_eq!(first_result.len(), 1);
+        
+        let individuals = vec![Individual::new(genotype_id, request_id, 1)];
+        add_to_population(&pool, &individuals).await?;
+
         let pool = Arc::new(pool);
 
-        // Spawn two concurrent tasks trying to create the same generation
+        // Now spawn two concurrent tasks trying to create more genotypes for the same generation
+        // Both should return empty since generation 1 already has individuals
         let pool1 = pool.clone();
         let task1 = task::spawn(async move {
-            let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
+            let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3])];
             create_generation_if_empty(&*pool1, request_id, 1, genotypes).await
         });
 
         let pool2 = pool.clone();
         let task2 = task::spawn(async move {
-            let genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6], request_id, 1)];
+            let genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6])];
             create_generation_if_empty(&*pool2, request_id, 1, genotypes).await
         });
 
@@ -805,9 +414,9 @@ mod create_generation_if_empty_tests {
         let result1 = result1?;
         let result2 = result2?;
 
-        // Exactly one should succeed, one should return empty
+        // Both should return empty since generation 1 already exists
         let total_inserted = result1.len() + result2.len();
-        assert_eq!(total_inserted, 1);
+        assert_eq!(total_inserted, 0);
 
         Ok(())
     }
