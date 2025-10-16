@@ -42,5 +42,5 @@ dotenv = "0.15.0"
 tracing-subscriber = { version = "0.3.19", features = ["json"] }
 
 [[example]]
-name = "optimize_cube"
+name = "cube"
 path = "examples/optimize_cube.rs"

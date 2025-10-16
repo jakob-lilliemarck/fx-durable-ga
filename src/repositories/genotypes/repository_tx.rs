@@ -1,5 +1,5 @@
 use super::Error;
-use crate::models::Genotype;
+use crate::models::{Fitness, Genotype};
 use crate::repositories::chainable::ToTx;
 use sqlx::PgTransaction;
 use tracing::instrument;
@@ -28,6 +28,14 @@ impl<'tx> TxRepository<'tx> {
             genotypes,
         )
         .await
+    }
+
+    #[instrument(level = "debug", skip(self), fields(fitness = ?fitness))]
+    pub(crate) fn record_fitness(
+        &mut self,
+        fitness: &Fitness,
+    ) -> impl Future<Output = Result<Fitness, Error>> {
+        super::queries::record_fitness(&mut *self.tx, fitness)
     }
 }
 

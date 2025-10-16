@@ -1,5 +1,5 @@
 use super::{Error, TxRepository};
-use crate::models::Genotype;
+use crate::models::{Genotype, Population};
 use crate::repositories::chainable::{Chain, ToTx, TxType};
 use futures::future::BoxFuture;
 use sqlx::{PgPool, PgTransaction};
@@ -20,9 +20,21 @@ impl Repository {
         super::queries::get_genotype(&self.pool, id).await
     }
 
-    #[instrument(level = "debug", skip(self), fields(genotype_id = ?ids))]
-    pub(crate) async fn get_genotypes(&self, ids: &[Uuid]) -> Result<Vec<Genotype>, Error> {
-        super::queries::get_genotypes(&self.pool, ids).await
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub(crate) fn get_population(
+        &self,
+        request_id: &Uuid,
+    ) -> impl Future<Output = Result<Population, Error>> {
+        super::queries::get_population(&self.pool, request_id)
+    }
+
+    #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
+    pub(crate) fn search_genotypes(
+        &self,
+        filter: &super::queries::Filter,
+        limit: i64,
+    ) -> impl Future<Output = Result<Vec<(Genotype, Option<f64>)>, Error>> {
+        super::queries::search_genotypes(&self.pool, filter, limit)
     }
 }
 

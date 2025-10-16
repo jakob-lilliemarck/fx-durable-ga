@@ -23,6 +23,6 @@ In assessing this I have some observations:
 
 3. Both queries get population count - that we will probably still have to query for, but we should not need to call the query in two separate methods.
 
-4. both methods interact with breed_new_individuals, but pass different numbers. breeding, or "selection" should also not happen in the body of service methods, but in a model like src/models/mutagen.rs or src/models/crossover.rs. Services shall orchestrate repository calls and logic, but the actual decision-making should happen in the models. - We may want to introduce something like a "Breeder"
+4. both methods interact with breed_new_genotypes, but pass different numbers. breeding, or "selection" should also not happen in the body of service methods, but in a model like src/models/mutagen.rs or src/models/crossover.rs. Services shall orchestrate repository calls and logic, but the actual decision-making should happen in the models. - We may want to introduce something like a "Breeder"
 
 Please assess the code-base and help me debate how to refactor this in a readable, nice and efficient way.

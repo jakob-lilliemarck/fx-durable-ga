@@ -35,7 +35,6 @@ truncate_schema_tables() {
 # fx_durable_ga schema tables
 FX_DURABLE_GA_TABLES=(
     "fitness"
-    "individuals"
     "genotypes"
     "requests"
     "morphologies"

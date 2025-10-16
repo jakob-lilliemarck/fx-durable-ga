@@ -5,7 +5,6 @@ mod fitness;
 mod gene_bounds;
 mod genotype;
 mod goal;
-mod individual;
 mod morphology;
 mod mutagen;
 mod population;
@@ -22,7 +21,6 @@ pub use strategy::Strategy;
 
 pub(crate) use fitness::Fitness;
 pub(crate) use genotype::{Gene, Genotype};
-pub(crate) use individual::Individual;
 pub(crate) use morphology::Morphology;
 pub(crate) use population::Population;
 pub(crate) use request::Request;

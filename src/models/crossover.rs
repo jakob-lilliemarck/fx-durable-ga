@@ -67,9 +67,10 @@ impl Crossover {
 mod tests {
     use super::*;
     use rand::{SeedableRng, rngs::StdRng};
+    use uuid::Uuid;
 
     fn create_test_genotype(genome: Vec<Gene>) -> Genotype {
-        Genotype::new("TestType", 123, genome)
+        Genotype::new("TestType", 123, genome, Uuid::now_v7(), 1)
     }
 
     #[test]

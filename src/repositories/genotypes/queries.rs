@@ -1,11 +1,12 @@
-use crate::models::Genotype;
+use crate::models::{Fitness, Genotype, Population};
 use sqlx::PgExecutor;
+use std::fmt::Display;
 use tracing::instrument;
 use uuid::Uuid;
 
 #[instrument(level = "debug", skip(tx), fields(genotypes_count = genotypes.len()))]
 #[cfg(test)]
-async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
+pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
     tx: E,
     genotypes: Vec<Genotype>,
 ) -> Result<Vec<Genotype>, super::Error> {
@@ -15,7 +16,9 @@ async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             generated_at,
             type_name,
             type_hash,
-            genome
+            genome,
+            request_id,
+            generation_id
         ) VALUES ",
     );
 
@@ -40,9 +43,15 @@ async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             .push_bind(g.type_hash)
             .push(", ")
             .push_bind(g.genome)
+            .push(", ")
+            .push_bind(g.request_id)
+            .push(", ")
+            .push_bind(g.generation_id)
             .push(")");
     }
-    query_builder.push(" RETURNING id, generated_at, type_name, type_hash, genome");
+    query_builder.push(
+        " RETURNING id, generated_at, type_name, type_hash, genome, request_id, generation_id",
+    );
 
     let genotypes = query_builder
         .build_query_as::<Genotype>()
@@ -55,11 +64,28 @@ async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_genotypes_tests {
     use super::*;
+    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Strategy};
+    use crate::repositories::requests::queries::new_request;
     use chrono::SubsecRound;
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_inserts_a_new_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3])];
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
         let genotypes_clone = genotypes.clone();
 
         let inserted = new_genotypes(&pool, genotypes).await?;
@@ -78,7 +104,22 @@ mod new_genotypes_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let genotype = Genotype::new("test", 1, vec![1, 2, 3]);
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let genotype = Genotype::new("test", 1, vec![1, 2, 3], request_id, 1);
         let genotype_clone = genotype.clone();
 
         new_genotypes(&pool, vec![genotype]).await?;
@@ -102,7 +143,9 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
                 generated_at,
                 type_name,
                 type_hash,
-                genome
+                genome,
+                request_id,
+                generation_id
             FROM fx_durable_ga.genotypes
             WHERE id = $1;
         "#,
@@ -117,16 +160,35 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_genotype_tests {
     use super::*;
+    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Strategy};
+    use crate::repositories::requests::queries::new_request;
     use chrono::{SubsecRound, Utc};
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_an_existing_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
         let genotype = Genotype {
             id: Uuid::now_v7(),
             generated_at: Utc::now().trunc_subsecs(6),
             type_name: "test".to_string(),
             type_hash: 1,
             genome: vec![1, 2, 3],
+            request_id,
+            generation_id: 1,
         };
         let genotype_id = genotype.id;
 
@@ -149,32 +211,6 @@ mod get_genotype_tests {
     }
 }
 
-#[instrument(level = "debug", skip(tx), fields(genotype_id = ?ids))]
-pub(crate) async fn get_genotypes<'tx, E: PgExecutor<'tx>>(
-    tx: E,
-    ids: &[Uuid],
-) -> Result<Vec<Genotype>, super::Error> {
-    let genotype = sqlx::query_as!(
-        Genotype,
-        r#"
-            SELECT
-                id,
-                generated_at,
-                type_name,
-                type_hash,
-                genome
-            FROM fx_durable_ga.genotypes
-            WHERE id = ANY($1)
-            ORDER BY id;
-        "#,
-        ids
-    )
-    .fetch_all(tx)
-    .await?;
-
-    Ok(genotype)
-}
-
 const CREATE_GENERATION_IF_EMPTY_SQL: &str = r#"
     WITH generation_lock AS (
         SELECT id
@@ -187,25 +223,31 @@ const CREATE_GENERATION_IF_EMPTY_SQL: &str = r#"
         generated_at,
         type_name,
         type_hash,
-        genome
+        genome,
+        request_id,
+        generation_id
     )
     SELECT
         id,
         generated_at,
         type_name,
         type_hash,
-        genome
+        genome,
+        request_id,
+        generation_id
     FROM (VALUES {values}) AS new_genotypes(
         id,
         generated_at,
         type_name,
         type_hash,
-        genome
+        genome,
+        request_id,
+        generation_id
     )
     WHERE
         EXISTS(SELECT 1 FROM generation_lock)
         AND NOT EXISTS(
-            SELECT 1 FROM fx_durable_ga.individuals
+            SELECT 1 FROM fx_durable_ga.genotypes
             WHERE request_id = $1 AND generation_id = $2
         )
     RETURNING
@@ -213,7 +255,9 @@ const CREATE_GENERATION_IF_EMPTY_SQL: &str = r#"
         generated_at,
         type_name,
         type_hash,
-        genome;
+        genome,
+        request_id,
+        generation_id;
 "#;
 
 #[instrument(level = "debug", skip(tx, genotypes), fields(request_id = %request_id, generation_id = generation_id, genotypes_count = genotypes.len()))]
@@ -232,14 +276,16 @@ pub(crate) async fn create_generation_if_empty<'tx, E: PgExecutor<'tx>>(
         .iter()
         .enumerate()
         .map(|(i, _)| {
-            let base = i * 5 + 3; // Start after the 2 fixed parameters (request_id used twice, generation_id once)
+            let base = i * 7 + 3; // Start after the 2 fixed parameters, 7 fields per genotype
             format!(
-                "(${}, ${}, ${}, ${}, ${})",
+                "(${}, ${}, ${}, ${}, ${}, ${}, ${})",
                 base,
                 base + 1,
                 base + 2,
                 base + 3,
-                base + 4
+                base + 4,
+                base + 5,
+                base + 6
             )
         })
         .collect::<Vec<_>>()
@@ -259,6 +305,8 @@ pub(crate) async fn create_generation_if_empty<'tx, E: PgExecutor<'tx>>(
             .bind(&g.type_name)
             .bind(g.type_hash)
             .bind(&g.genome)
+            .bind(g.request_id)
+            .bind(g.generation_id)
     }
 
     let inserted_genotypes = query.fetch_all(tx).await?;
@@ -291,8 +339,8 @@ mod create_generation_if_empty_tests {
 
         // Create genotypes for generation 1
         let genotypes = vec![
-            Genotype::new("test", 1, vec![1, 2, 3]),
-            Genotype::new("test", 1, vec![4, 5, 6]),
+            Genotype::new("test", 1, vec![1, 2, 3], request_id, 1),
+            Genotype::new("test", 1, vec![4, 5, 6], request_id, 1),
         ];
 
         let result = create_generation_if_empty(&pool, request_id, 1, genotypes).await?;
@@ -303,9 +351,6 @@ mod create_generation_if_empty_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_returns_empty_when_generation_exists(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        use crate::models::Individual;
-        use crate::repositories::populations::queries::add_to_population;
-
         // Create a request first
         let request = Request::new(
             "test",
@@ -322,17 +367,12 @@ mod create_generation_if_empty_tests {
         new_request(&pool, request).await?;
 
         // First call - should succeed
-        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3])];
-        let genotype_id = genotypes[0].id;
+        let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
         let first_result = create_generation_if_empty(&pool, request_id, 1, genotypes).await?;
         assert_eq!(first_result.len(), 1);
 
-        // Add the genotype as an individual to generation 1
-        let individuals = vec![Individual::new(genotype_id, request_id, 1)];
-        add_to_population(&pool, &individuals).await?;
-
-        // Second call - should return empty because generation 1 now has individuals
-        let more_genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6])];
+        // Second call - should return empty because generation 1 now has genotypes
+        let more_genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6], request_id, 1)];
         let second_result =
             create_generation_if_empty(&pool, request_id, 1, more_genotypes).await?;
         assert_eq!(second_result.len(), 0);
@@ -367,8 +407,6 @@ mod create_generation_if_empty_tests {
     async fn it_handles_concurrent_creation(pool: sqlx::PgPool) -> anyhow::Result<()> {
         use std::sync::Arc;
         use tokio::task;
-        use crate::models::Individual;
-        use crate::repositories::populations::queries::add_to_population;
 
         // Create a request first
         let request = Request::new(
@@ -385,28 +423,25 @@ mod create_generation_if_empty_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        // Create first genotype and add as individual to establish generation 1
-        let initial_genotypes = vec![Genotype::new("test", 1, vec![0, 0, 0])];
-        let genotype_id = initial_genotypes[0].id;
-        let first_result = create_generation_if_empty(&pool, request_id, 1, initial_genotypes).await?;
+        // Create first genotype to establish generation 1
+        let initial_genotypes = vec![Genotype::new("test", 1, vec![0, 0, 0], request_id, 1)];
+        let first_result =
+            create_generation_if_empty(&pool, request_id, 1, initial_genotypes).await?;
         assert_eq!(first_result.len(), 1);
-        
-        let individuals = vec![Individual::new(genotype_id, request_id, 1)];
-        add_to_population(&pool, &individuals).await?;
 
         let pool = Arc::new(pool);
 
         // Now spawn two concurrent tasks trying to create more genotypes for the same generation
-        // Both should return empty since generation 1 already has individuals
+        // Both should return empty since generation 1 already has genotypes
         let pool1 = pool.clone();
         let task1 = task::spawn(async move {
-            let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3])];
+            let genotypes = vec![Genotype::new("test", 1, vec![1, 2, 3], request_id, 1)];
             create_generation_if_empty(&*pool1, request_id, 1, genotypes).await
         });
 
         let pool2 = pool.clone();
         let task2 = task::spawn(async move {
-            let genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6])];
+            let genotypes = vec![Genotype::new("test", 1, vec![4, 5, 6], request_id, 1)];
             create_generation_if_empty(&*pool2, request_id, 1, genotypes).await
         });
 
@@ -417,6 +452,714 @@ mod create_generation_if_empty_tests {
         // Both should return empty since generation 1 already exists
         let total_inserted = result1.len() + result2.len();
         assert_eq!(total_inserted, 0);
+
+        Ok(())
+    }
+}
+
+#[instrument(level = "debug", skip(tx), fields(fitness = ?fitness))]
+pub(crate) async fn record_fitness<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    fitness: &Fitness,
+) -> Result<Fitness, super::Error> {
+    let inserted = sqlx::query_as!(
+        Fitness,
+        r#"
+        INSERT INTO fx_durable_ga.fitness (genotype_id, fitness, evaluated_at)
+        VALUES ($1, $2, $3)
+        RETURNING genotype_id, fitness, evaluated_at
+        "#,
+        fitness.genotype_id,
+        fitness.fitness,
+        fitness.evaluated_at
+    )
+    .fetch_one(tx)
+    .await?;
+
+    Ok(inserted) // ← Return the inserted record
+}
+
+#[cfg(test)]
+mod record_fitness_tests {
+    use super::record_fitness;
+    use crate::models::{Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Request, Strategy};
+    use crate::repositories::genotypes::new_genotypes;
+    use crate::repositories::requests::queries::new_request;
+    use chrono::SubsecRound;
+    use uuid::Uuid;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_records_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let genotype_id = Uuid::now_v7();
+
+        // Create a genotype
+        let genotype = Genotype {
+            id: genotype_id,
+            generated_at: chrono::Utc::now(),
+            type_name: "test".to_string(),
+            type_hash: 1,
+            genome: vec![1, 2, 3],
+            request_id,
+            generation_id: 1,
+        };
+        new_genotypes(&pool, vec![genotype]).await?;
+
+        let fitness = Fitness::new(genotype_id, 0.543);
+        let recorded = record_fitness(&pool, &fitness).await?;
+
+        assert_eq!(recorded.genotype_id, fitness.genotype_id);
+        assert_eq!(recorded.fitness, fitness.fitness);
+        assert_eq!(recorded.evaluated_at, fitness.evaluated_at.trunc_subsecs(6));
+        Ok(())
+    }
+}
+
+#[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
+pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    request_id: &Uuid,
+) -> Result<Population, super::Error> {
+    let state = sqlx::query_as!(
+        Population,
+        r#"
+        SELECT
+            request_id "request_id!:Uuid",
+            evaluated_genotypes "evaluated_genotypes!:i64",
+            live_genotypes "live_genotypes!:i64",
+            current_generation "current_generation!:i32",
+            best_fitness "best_fitness"
+        FROM fx_durable_ga.populations
+        WHERE request_id = $1
+        "#,
+        request_id
+    )
+    .fetch_optional(tx)
+    .await?;
+
+    // Handle case where request has no genotypes yet
+    Ok(state.unwrap_or(Population {
+        request_id: *request_id,
+        evaluated_genotypes: 0,
+        live_genotypes: 0,
+        current_generation: 0,
+        best_fitness: None,
+    }))
+}
+
+#[cfg(test)]
+mod get_population_tests {
+    use super::{get_population, record_fitness};
+    use crate::models::{
+        Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Population, Request, Strategy,
+    };
+    use crate::repositories::genotypes::new_genotypes;
+    use crate::repositories::requests::queries::new_request;
+    use uuid::Uuid;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_a_population(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+        let mut genotypes = Vec::with_capacity(3);
+        for i in 1..=3 {
+            genotypes.push(Genotype {
+                id: Uuid::now_v7(),
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![1, 2, 3],
+                request_id,
+                generation_id: i as i32,
+            });
+        }
+        new_genotypes(&pool, genotypes).await?;
+
+        let population = get_population(&pool, &request_id).await?;
+        assert_eq!(
+            population,
+            Population {
+                request_id,
+                evaluated_genotypes: 0,
+                live_genotypes: 3,
+                current_generation: 3,
+                best_fitness: None
+            }
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_handles_empty_population(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request_id = Uuid::now_v7();
+
+        let population = get_population(&pool, &request_id).await?;
+
+        assert_eq!(
+            population,
+            Population {
+                request_id,
+                evaluated_genotypes: 0,
+                live_genotypes: 0,
+                current_generation: 0,
+                best_fitness: None
+            }
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_population_with_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Create a request first
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        // Create genotypes
+        let a_id = Uuid::now_v7();
+        let b_id = Uuid::now_v7();
+        let c_id = Uuid::now_v7();
+
+        let genotypes = vec![
+            Genotype {
+                id: a_id,
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![1, 2, 3],
+                request_id,
+                generation_id: 1,
+            },
+            Genotype {
+                id: b_id,
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![4, 5, 6],
+                request_id,
+                generation_id: 1,
+            },
+            Genotype {
+                id: c_id,
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![7, 8, 9],
+                request_id,
+                generation_id: 1,
+            },
+        ];
+
+        new_genotypes(&pool, genotypes).await?;
+
+        // Record fitness values
+        record_fitness(&pool, &Fitness::new(a_id, 0.50)).await?;
+        record_fitness(&pool, &Fitness::new(b_id, 0.99)).await?;
+        record_fitness(&pool, &Fitness::new(c_id, 0.01)).await?;
+
+        let population = get_population(&pool, &request_id).await?;
+
+        assert_eq!(
+            population,
+            Population {
+                request_id,
+                evaluated_genotypes: 3,
+                live_genotypes: 0,
+                current_generation: 1,
+                best_fitness: Some(0.99)
+            }
+        );
+
+        Ok(())
+    }
+}
+
+#[derive(Debug)]
+enum SortOrder {
+    Asc,
+    Desc,
+}
+
+impl Display for SortOrder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Asc => write!(f, "asc"),
+            Self::Desc => write!(f, "desc"),
+        }
+    }
+}
+
+#[derive(Debug)]
+enum Order {
+    Random,
+    Fitness(SortOrder),
+}
+
+impl Display for Order {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Random => write!(f, "random"),
+            Self::Fitness(order) => write!(f, "fitness_{}", order),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Filter {
+    request_id: Option<Uuid>,
+    generation_id: Option<i32>,
+    has_fitness: Option<bool>,
+    order: Option<Order>,
+}
+
+impl Default for Filter {
+    fn default() -> Self {
+        Filter {
+            request_id: None,
+            generation_id: None,
+            has_fitness: None,
+            order: None,
+        }
+    }
+}
+
+impl Filter {
+    pub(crate) fn with_request_id(mut self, request_id: Uuid) -> Self {
+        self.request_id = Some(request_id);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_generation_id(mut self, generation_id: i32) -> Self {
+        self.generation_id = Some(generation_id);
+        self
+    }
+
+    pub(crate) fn with_fitness(mut self, has_fitness: bool) -> Self {
+        self.has_fitness = Some(has_fitness);
+        self
+    }
+
+    pub(crate) fn with_order_random(mut self) -> Self {
+        self.order = Some(Order::Random);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_order_fitness_asc(mut self) -> Self {
+        self.order = Some(Order::Fitness(SortOrder::Asc));
+        self
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn with_order_fitness_desc(mut self) -> Self {
+        self.order = Some(Order::Fitness(SortOrder::Desc));
+        self
+    }
+}
+
+#[instrument(level = "debug", skip(tx), fields(filter = ?filter))]
+pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    filter: &Filter,
+    limit: i64,
+) -> Result<Vec<(Genotype, Option<f64>)>, super::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT
+            g.id "id!:Uuid",
+            g.generated_at "generated_at!",
+            g.type_name "type_name!",
+            g.type_hash "type_hash!",
+            g.genome "genome!",
+            g.request_id "request_id!:Uuid",
+            g.generation_id "generation_id!",
+            f.fitness "fitness:Option<f64>"
+        FROM fx_durable_ga.genotypes g
+        LEFT JOIN fx_durable_ga.fitness f ON g.id = f.genotype_id
+        WHERE (
+            $1::uuid IS NULL OR g.request_id = $1
+        )
+        AND (
+            $2::int IS NULL OR g.generation_id = $2
+        )
+        AND (
+            $3::bool IS NULL OR
+            CASE
+                WHEN $3 = true THEN f.fitness IS NOT NULL
+                ELSE f.fitness IS NULL
+            END
+        )
+        ORDER BY
+            CASE
+                WHEN $4 = 'fitness_desc' THEN f.fitness
+                ELSE NULL
+            END DESC NULLS LAST,
+            CASE
+                WHEN $4 = 'fitness_asc' THEN f.fitness
+                ELSE NULL
+            END ASC NULLS LAST,
+            CASE
+                WHEN $4 = 'random' THEN RANDOM()
+                ELSE NULL
+            END NULLS LAST,
+            g.id ASC
+        LIMIT $5;
+        "#,
+        filter.request_id,
+        filter.generation_id,
+        filter.has_fitness,
+        filter.order.as_ref().map(|o| o.to_string()),
+        limit
+    )
+    .fetch_all(tx)
+    .await?;
+
+    let genotypes_with_fitness = rows
+        .into_iter()
+        .map(|row| {
+            let genotype = Genotype {
+                id: row.id,
+                generated_at: row.generated_at,
+                type_name: row.type_name,
+                type_hash: row.type_hash,
+                genome: row.genome,
+                request_id: row.request_id,
+                generation_id: row.generation_id,
+            };
+            (genotype, row.fitness)
+        })
+        .collect();
+
+    Ok(genotypes_with_fitness)
+}
+
+#[cfg(test)]
+mod search_genotypes_tests {
+    use super::{Filter, record_fitness, search_genotypes};
+    use crate::models::{Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Request, Strategy};
+    use crate::repositories::genotypes::new_genotypes;
+    use crate::repositories::requests::queries::new_request;
+    use uuid::Uuid;
+
+    async fn seed(pool: &sqlx::PgPool) -> anyhow::Result<(Uuid, Uuid)> {
+        // Create requests first
+        let request_1 = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+        let request_2 = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Strategy::Generational {
+                max_generations: 100,
+                population_size: 10,
+            },
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+        )?;
+
+        let request_id_1 = request_1.id;
+        let request_id_2 = request_2.id;
+
+        new_request(pool, request_1).await?;
+        new_request(pool, request_2).await?;
+
+        let genotype_id_1 = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let genotype_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let genotype_id_3 = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
+        let genotype_id_4 = Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap();
+        let genotype_id_5 = Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap();
+
+        let genotypes = vec![
+            Genotype {
+                id: genotype_id_1,
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![1, 2, 3],
+                request_id: request_id_1,
+                generation_id: 1,
+            },
+            Genotype {
+                id: genotype_id_2,
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![4, 5, 6],
+                request_id: request_id_1,
+                generation_id: 2,
+            },
+            Genotype {
+                id: genotype_id_3,
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![7, 8, 9],
+                request_id: request_id_2,
+                generation_id: 1,
+            },
+            Genotype {
+                id: genotype_id_4,
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![10, 11, 12],
+                request_id: request_id_2,
+                generation_id: 1,
+            },
+            Genotype {
+                id: genotype_id_5,
+                generated_at: chrono::Utc::now(),
+                type_name: "test".to_string(),
+                type_hash: 1,
+                genome: vec![13, 14, 15],
+                request_id: request_id_2,
+                generation_id: 2,
+            },
+        ];
+
+        new_genotypes(pool, genotypes).await?;
+
+        record_fitness(pool, &Fitness::new(genotype_id_1, 0.11)).await?;
+        // genotype_id_2 has not fitness
+        record_fitness(pool, &Fitness::new(genotype_id_3, 0.12)).await?;
+        record_fitness(pool, &Fitness::new(genotype_id_4, 0.42)).await?;
+        // genotype_id_5 has not fitness
+        Ok((request_id_1, request_id_2))
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_with_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let (request_id_1, _) = seed(&pool).await?;
+
+        let found =
+            search_genotypes(&pool, &Filter::default().with_request_id(request_id_1), 5).await?;
+
+        let actual: Vec<(Uuid, Option<f64>)> = found
+            .iter()
+            .map(|(genotype, fitness)| (genotype.id, *fitness))
+            .collect();
+        assert_eq!(
+            vec![
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                    Some(0.11)
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+                    None
+                )
+            ],
+            actual
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_with_generation_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        seed(&pool).await?;
+
+        let found = search_genotypes(&pool, &Filter::default().with_generation_id(2), 5).await?;
+
+        let actual: Vec<(Uuid, Option<f64>)> = found
+            .iter()
+            .map(|(genotype, fitness)| (genotype.id, *fitness))
+            .collect();
+        assert_eq!(
+            vec![
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+                    None
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
+                    None
+                )
+            ],
+            actual
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_with_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        seed(&pool).await?;
+
+        let found = search_genotypes(&pool, &Filter::default().with_fitness(true), 5).await?;
+
+        let actual: Vec<(Uuid, Option<f64>)> = found
+            .iter()
+            .map(|(genotype, fitness)| (genotype.id, *fitness))
+            .collect();
+        assert_eq!(
+            vec![
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                    Some(0.11)
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
+                    Some(0.12)
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
+                    Some(0.42)
+                )
+            ],
+            actual
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_with_fitness_desc(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        seed(&pool).await?;
+
+        let found = search_genotypes(
+            &pool,
+            &Filter::default()
+                .with_fitness(true)
+                .with_order_fitness_desc(),
+            5,
+        )
+        .await?;
+
+        let actual: Vec<(Uuid, Option<f64>)> = found
+            .iter()
+            .map(|(genotype, fitness)| (genotype.id, *fitness))
+            .collect();
+        assert_eq!(
+            vec![
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
+                    Some(0.42)
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
+                    Some(0.12)
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                    Some(0.11)
+                ),
+            ],
+            actual
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_with_fitness_asc(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        seed(&pool).await?;
+
+        let found = search_genotypes(
+            &pool,
+            &Filter::default()
+                .with_fitness(true)
+                .with_order_fitness_asc(),
+            5,
+        )
+        .await?;
+
+        let actual: Vec<(Uuid, Option<f64>)> = found
+            .iter()
+            .map(|(genotype, fitness)| (genotype.id, *fitness))
+            .collect();
+        assert_eq!(
+            vec![
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                    Some(0.11)
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
+                    Some(0.12)
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
+                    Some(0.42)
+                ),
+            ],
+            actual
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_without_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        seed(&pool).await?;
+
+        let found = search_genotypes(&pool, &Filter::default().with_fitness(false), 5).await?;
+
+        let actual: Vec<(Uuid, Option<f64>)> = found
+            .iter()
+            .map(|(genotype, fitness)| (genotype.id, *fitness))
+            .collect();
+        assert_eq!(
+            vec![
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
+                    None
+                ),
+                (
+                    Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
+                    None
+                )
+            ],
+            actual
+        );
 
         Ok(())
     }
