@@ -173,14 +173,14 @@ impl Mutagen {
             // Should we mutate this gene?
             if rng.random_range(0.0..1.0) < mutation_rate {
                 // Temperature controls mutation step: higher = larger jumps
-                let max_step = (1.0 + (bounds.divisor as f64 * temperature)) as i64;
+                let max_step = (1.0 + (bounds.steps() as f64 * temperature)) as i64;
 
                 // Choose direction and step size
                 let direction = if rng.random_bool(0.5) { 1 } else { -1 };
                 let step = rng.random_range(1..=max_step);
 
                 // Apply mutation and clamp
-                *gene = (*gene + direction * step).clamp(0, bounds.divisor as i64 - 1);
+                *gene = (*gene + direction * step).clamp(0, bounds.steps() as i64 - 1);
             }
         }
     }
@@ -217,8 +217,8 @@ mod tests {
             "TestType",
             123,
             vec![
-                GeneBounds::new(0, 9, 10).unwrap(), // Gene can be 0-9 (divisor=10)
-                GeneBounds::new(0, 4, 5).unwrap(),  // Gene can be 0-4 (divisor=5)
+                GeneBounds::integer(0, 9, 10).unwrap(), // Gene can be 0-9 (steps=10)
+                GeneBounds::integer(0, 4, 5).unwrap(),  // Gene can be 0-4 (steps=5)
             ],
         )
     }

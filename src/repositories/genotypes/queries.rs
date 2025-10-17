@@ -794,7 +794,7 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
             g.genome "genome!",
             g.request_id "request_id!:Uuid",
             g.generation_id "generation_id!",
-            f.fitness "fitness:Option<f64>"
+            f.fitness
         FROM fx_durable_ga.genotypes g
         LEFT JOIN fx_durable_ga.fitness f ON g.id = f.genotype_id
         WHERE (

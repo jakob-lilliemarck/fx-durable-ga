@@ -17,10 +17,14 @@ struct Cube;
 impl Encodeable for Cube {
     const NAME: &'static str = "cube";
 
-    type Phenotype = (i64, i64, i64);
+    type Phenotype = (f64, f64, f64);
 
     fn morphology() -> Vec<GeneBounds> {
-        vec![GeneBounds::new(0, 1000, 1000).unwrap(); 3]
+        vec![
+            GeneBounds::decimal(0.5, 1.75, 1000, 3).unwrap(), // x: 0.500 to 1.750 (scaled: 500 to 1750)
+            GeneBounds::decimal(0.75, 2.00, 1000, 3).unwrap(), // y: 0.750 to 2.000 (scaled: 750 to 2000)
+            GeneBounds::decimal(2.00, 3.25, 1000, 3).unwrap(), // z: 2.000 to 3.250 (scaled: 2000 to 3250)
+        ]
     }
 
     fn encode(&self) -> Vec<i64> {
@@ -28,37 +32,31 @@ impl Encodeable for Cube {
     }
 
     fn decode(genes: &[i64]) -> Self::Phenotype {
-        (genes[0], genes[1], genes[2])
+        let bounds = Self::morphology();
+        (
+            bounds[0].decode_gene(genes[0]), // Convert to actual decimal coordinates
+            bounds[1].decode_gene(genes[1]), // e.g., gene 0 → 0.5, gene 999 → 1.75
+            bounds[2].decode_gene(genes[2]), // e.g., gene 0 → 2.0, gene 999 → 3.25
+        )
     }
 }
 
 struct CubeQuadraticEvaluator;
 
-impl Evaluator<(i64, i64, i64)> for CubeQuadraticEvaluator {
+impl Evaluator<(f64, f64, f64)> for CubeQuadraticEvaluator {
     fn fitness<'a>(
         &self,
-        phenotype: (i64, i64, i64),
+        phenotype: (f64, f64, f64),
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
         Box::pin(async move {
             let (x, y, z) = phenotype;
-            // Scale from 0..1000 to 0..10 for distance calculation
-            let x = x as f64 / 100.0;
-            let y = y as f64 / 100.0;
-            let z = z as f64 / 100.0;
 
             // Calculate distance from origin
             let dist = (x * x + y * y + z * z).sqrt();
 
-            // Maximum possible distance in our scaled space (corner to origin)
-            let max_distance = (10.0_f64.powi(2) * 3.0).sqrt(); // ~17.32
-
-            // Quadratic fitness: 1 - (normalized_distance)^2
-            // This gives more gradual fitness differences
-            let normalized_dist = dist / max_distance;
-            let fitness = 1.0 - normalized_dist.powi(2);
-
-            // Ensure fitness is always positive
-            Ok(fitness.max(0.0))
+            // Convert to positive, higher-is-better fitness
+            // The closest point should be (0.5, 0.75, 2.0) with distance ~2.194
+            Ok(1.0 / (1.0 + dist))
         })
     }
 }

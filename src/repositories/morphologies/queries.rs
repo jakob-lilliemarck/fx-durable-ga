@@ -50,9 +50,9 @@ mod new_morphology_tests {
             "test",
             1,
             vec![
-                GeneBounds::new(1, 10, 10)?,
-                GeneBounds::new(1, 10, 10)?,
-                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
             ],
         );
         let morphology_clone = morphology.clone();
@@ -76,9 +76,9 @@ mod new_morphology_tests {
             "test",
             1,
             vec![
-                GeneBounds::new(1, 10, 10)?,
-                GeneBounds::new(1, 10, 10)?,
-                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
             ],
         );
         let morphology_clone = morphology.clone();
@@ -132,9 +132,9 @@ mod get_morphology_tests {
             "test",
             1,
             vec![
-                GeneBounds::new(1, 10, 10)?,
-                GeneBounds::new(1, 10, 10)?,
-                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
             ],
         );
         let morphology_type_hash = morphology.type_hash;
@@ -153,9 +153,9 @@ mod get_morphology_tests {
             "test",
             1,
             vec![
-                GeneBounds::new(1, 10, 10)?,
-                GeneBounds::new(1, 10, 10)?,
-                GeneBounds::new(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
+                GeneBounds::integer(1, 10, 10)?,
             ],
         );
         let morphology_type_hash = morphology.type_hash;
