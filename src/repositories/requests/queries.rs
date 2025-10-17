@@ -20,18 +20,20 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 type_name,
                 type_hash,
                 goal,
-                strategy,
+                schedule,
+                selector,
                 mutagen,
                 crossover
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING
                 id,
                 requested_at,
                 type_name,
                 type_hash,
                 goal,
-                strategy,
+                schedule,
+                selector,
                 mutagen,
                 crossover
             "#,
@@ -40,7 +42,8 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
         db_request.type_name,
         db_request.type_hash,
         db_request.goal,
-        db_request.strategy,
+        db_request.schedule,
+        db_request.selector,
         db_request.mutagen,
         db_request.crossover
     )
@@ -54,8 +57,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_request_tests {
     use super::*;
-    use crate::models::FitnessGoal;
-    use crate::models::{Crossover, Mutagen, Strategy};
+    use crate::models::{Crossover, FitnessGoal, Mutagen, Schedule, Selector};
     use chrono::SubsecRound;
 
     #[sqlx::test(migrations = "./migrations")]
@@ -68,10 +70,8 @@ mod new_request_tests {
             "test",
             1,
             goal,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             mutagen,
             crossover,
         )?;
@@ -87,7 +87,8 @@ mod new_request_tests {
         assert_eq!(request_clone.type_name, inserted.type_name);
         assert_eq!(request_clone.type_hash, inserted.type_hash);
         assert_eq!(request_clone.goal, inserted.goal);
-        assert_eq!(request_clone.strategy, inserted.strategy);
+        assert_eq!(request_clone.schedule, inserted.schedule);
+        assert_eq!(request_clone.selector, inserted.selector);
 
         Ok(())
     }
@@ -102,10 +103,8 @@ mod new_request_tests {
             "test",
             1,
             goal,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             mutagen,
             crossover,
         )?;
@@ -134,7 +133,8 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
             type_name,
             type_hash,
             goal,
-            strategy,
+            schedule,
+            selector,
             mutagen,
             crossover
         FROM fx_durable_ga.requests
@@ -152,8 +152,7 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_request_tests {
     use super::*;
-    use crate::models::FitnessGoal;
-    use crate::models::{Crossover, Mutagen, Strategy};
+    use crate::models::{Crossover, FitnessGoal, Mutagen, Schedule, Selector};
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_an_existing_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
@@ -165,10 +164,8 @@ mod get_request_tests {
             "test",
             1,
             goal,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             mutagen,
             crossover,
         )?;
@@ -191,10 +188,8 @@ mod get_request_tests {
             "test",
             1,
             goal,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             mutagen,
             crossover,
         )?;

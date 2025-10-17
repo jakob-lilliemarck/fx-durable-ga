@@ -64,7 +64,7 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_genotypes_tests {
     use super::*;
-    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Strategy};
+    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Schedule, Selector};
     use crate::repositories::requests::queries::new_request;
     use chrono::SubsecRound;
 
@@ -75,10 +75,8 @@ mod new_genotypes_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -109,10 +107,8 @@ mod new_genotypes_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -160,7 +156,7 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_genotype_tests {
     use super::*;
-    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Strategy};
+    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Schedule, Selector};
     use crate::repositories::requests::queries::new_request;
     use chrono::{SubsecRound, Utc};
 
@@ -171,10 +167,8 @@ mod get_genotype_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -316,7 +310,7 @@ pub(crate) async fn create_generation_if_empty<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod create_generation_if_empty_tests {
     use super::*;
-    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Strategy};
+    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Schedule, Selector};
     use crate::repositories::requests::queries::new_request;
 
     #[sqlx::test(migrations = "./migrations")]
@@ -327,10 +321,8 @@ mod create_generation_if_empty_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -356,10 +348,8 @@ mod create_generation_if_empty_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -387,10 +377,8 @@ mod create_generation_if_empty_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -413,10 +401,8 @@ mod create_generation_if_empty_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -482,7 +468,9 @@ pub(crate) async fn record_fitness<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod record_fitness_tests {
     use super::record_fitness;
-    use crate::models::{Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Request, Strategy};
+    use crate::models::{
+        Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Request, Schedule, Selector,
+    };
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
     use chrono::SubsecRound;
@@ -495,10 +483,8 @@ mod record_fitness_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -565,7 +551,7 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
 mod get_population_tests {
     use super::{get_population, record_fitness};
     use crate::models::{
-        Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Population, Request, Strategy,
+        Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Population, Request, Schedule, Selector,
     };
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
@@ -578,10 +564,8 @@ mod get_population_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -643,10 +627,8 @@ mod get_population_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -875,7 +857,9 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod search_genotypes_tests {
     use super::{Filter, record_fitness, search_genotypes};
-    use crate::models::{Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Request, Strategy};
+    use crate::models::{
+        Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Request, Schedule, Selector,
+    };
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
     use uuid::Uuid;
@@ -886,10 +870,8 @@ mod search_genotypes_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;
@@ -897,10 +879,8 @@ mod search_genotypes_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 10,
-            },
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
         )?;

@@ -9,7 +9,8 @@ mod morphology;
 mod mutagen;
 mod population;
 mod request;
-mod strategy;
+mod schedule;
+mod selector;
 
 pub use crossover::{Crossover, ProbabilityOutOfRange};
 pub use encodeable::Encodeable;
@@ -17,10 +18,12 @@ pub use evaluator::Evaluator;
 pub use gene_bounds::{GeneBoundError, GeneBounds};
 pub use goal::FitnessGoal;
 pub use mutagen::{Decay, Mutagen, MutagenError, MutationRate, Temperature};
-pub use strategy::Strategy;
+pub use schedule::Schedule;
+pub use selector::{SelectionError, Selector};
 
 pub(crate) use fitness::Fitness;
 pub(crate) use genotype::{Gene, Genotype};
 pub(crate) use morphology::Morphology;
 pub(crate) use population::Population;
 pub(crate) use request::Request;
+pub(crate) use schedule::ScheduleDecision;

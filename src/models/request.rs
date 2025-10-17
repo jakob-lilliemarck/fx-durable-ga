@@ -1,5 +1,4 @@
-use super::{FitnessGoal, Strategy};
-use crate::models::{Crossover, mutagen::Mutagen};
+use super::{Crossover, FitnessGoal, Mutagen, Schedule, Selector};
 use chrono::{DateTime, Utc};
 use tracing::instrument;
 use uuid::Uuid;
@@ -12,7 +11,8 @@ pub(crate) struct Request {
     pub(crate) type_name: String,
     pub(crate) type_hash: i32,
     pub(crate) goal: FitnessGoal,
-    pub(crate) strategy: Strategy,
+    pub(crate) selector: Selector,
+    pub(crate) schedule: Schedule,
     pub(crate) mutagen: Mutagen,
     pub(crate) crossover: Crossover,
 }
@@ -26,7 +26,8 @@ impl Request {
         type_name: &str,
         type_hash: i32,
         goal: FitnessGoal,
-        strategy: Strategy,
+        selector: Selector,
+        schedule: Schedule,
         mutagen: Mutagen,
         crossover: Crossover,
     ) -> Result<Self, RequestValidationError> {
@@ -36,7 +37,8 @@ impl Request {
             type_name: type_name.to_string(),
             type_hash,
             goal,
-            strategy,
+            selector,
+            schedule,
             mutagen,
             crossover,
         })
@@ -44,14 +46,7 @@ impl Request {
 
     #[instrument(level = "debug", fields(request_id = %self.id))]
     pub(crate) fn population_size(&self) -> u32 {
-        match self.strategy {
-            Strategy::Generational {
-                population_size, ..
-            } => population_size,
-            Strategy::Rolling {
-                population_size, ..
-            } => population_size,
-        }
+        self.schedule.population_size
     }
 
     #[instrument(level = "debug", fields(request_id = %self.id, fitness = fitness, goal = ?self.goal))]

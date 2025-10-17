@@ -1,5 +1,5 @@
 use crate::{
-    models::{MutagenError, ProbabilityOutOfRange},
+    models::{MutagenError, ProbabilityOutOfRange, SelectionError},
     repositories::{genotypes, morphologies, requests},
 };
 
@@ -21,4 +21,8 @@ pub enum Error {
     Mutagen(#[from] MutagenError),
     #[error("Crossover: {0}")]
     Crossover(#[from] ProbabilityOutOfRange),
+    #[error("Selection error: {0}")]
+    SelectionError(#[from] SelectionError),
+    #[error("Invalid parent parent: {0}")]
+    InvalidParentIndex(usize),
 }

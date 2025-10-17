@@ -1,7 +1,7 @@
 use anyhow::Result;
 use fx_durable_ga::{
     bootstrap::bootstrap,
-    models::{Encodeable, Evaluator, FitnessGoal, GeneBounds, Strategy},
+    models::{Encodeable, Evaluator, FitnessGoal, GeneBounds, Schedule, Selector},
     service::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_building_blocks::queries::Queries;
@@ -32,16 +32,16 @@ impl Encodeable for Cube {
     }
 }
 
-struct CubeEvaluator;
+struct CubeQuadraticEvaluator;
 
-impl Evaluator<(i64, i64, i64)> for CubeEvaluator {
+impl Evaluator<(i64, i64, i64)> for CubeQuadraticEvaluator {
     fn fitness<'a>(
         &self,
         phenotype: (i64, i64, i64),
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
         Box::pin(async move {
             let (x, y, z) = phenotype;
-            // Scale from 0..100 to 0..1 for distance calculation
+            // Scale from 0..1000 to 0..10 for distance calculation
             let x = x as f64 / 100.0;
             let y = y as f64 / 100.0;
             let z = z as f64 / 100.0;
@@ -49,8 +49,16 @@ impl Evaluator<(i64, i64, i64)> for CubeEvaluator {
             // Calculate distance from origin
             let dist = (x * x + y * y + z * z).sqrt();
 
-            // Convert to positive, higher-is-better fitness
-            Ok(1.0 / (1.0 + dist))
+            // Maximum possible distance in our scaled space (corner to origin)
+            let max_distance = (10.0_f64.powi(2) * 3.0).sqrt(); // ~17.32
+
+            // Quadratic fitness: 1 - (normalized_distance)^2
+            // This gives more gradual fitness differences
+            let normalized_dist = dist / max_distance;
+            let fitness = 1.0 - normalized_dist.powi(2);
+
+            // Ensure fitness is always positive
+            Ok(fitness.max(0.0))
         })
     }
 }
@@ -76,7 +84,7 @@ async fn main() -> Result<()> {
     let service = Arc::new(
         bootstrap(pool.clone())
             .await?
-            .register::<Cube, _>(CubeEvaluator)
+            .register::<Cube, _>(CubeQuadraticEvaluator)
             .await?
             .build(),
     );
@@ -115,10 +123,8 @@ async fn main() -> Result<()> {
             Cube::NAME,
             Cube::HASH,
             FitnessGoal::maximize(0.99)?,
-            Strategy::Generational {
-                max_generations: 100,
-                population_size: 25,
-            },
+            Schedule::generational(50, 50),
+            Selector::tournament(3, 50),
             0.3, // temperature
             0.1, // mutation_rate
         )

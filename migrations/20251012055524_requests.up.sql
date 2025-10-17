@@ -6,7 +6,8 @@ CREATE TABLE fx_durable_ga.requests (
     type_name TEXT NOT NULL,
     type_hash INTEGER NOT NULL,
     goal JSONB NOT NULL,
-    strategy JSONB NOT NULL,
+    schedule JSONB NOT NULL,
+    selector JSONB NOT NULL,
     mutagen JSONB NOT NULL,
     crossover JSONB NOT NULL
 );

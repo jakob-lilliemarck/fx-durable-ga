@@ -1,13 +1,13 @@
-- Consider how float optimization would work - is it currently possible to optimize a number in tange 0.400-0.700 in 100 steps?
-- Better strategy handling - make decisions in models, orchestrate in service
-- Better initial distributions
-- Restructure genotypes - should they really know their fitness and generation id? Perhaps track in populations instead?
-- Fill out tests
-- Add termination/completion record
-- Add database indices
-- Add instrumentation
-- Add documentation
-- Add a README
+[x] Restructure genotypes - should they really know their fitness and generation id? Perhaps track in populations instead?
+[ ] Better strategy handling - make decisions in models, orchestrate in service
+[ ] Better initial distributions
+[ ] Consider how float optimization would work - is it currently possible to optimize a number in tange 0.400-0.700 in 100 steps?
+[ ] Fill out tests
+[ ] Add termination/completion record
+[ ] Add database indices
+[ ] Add instrumentation
+[ ] Add documentation
+[ ] Add a README
 
 ////
 I am considering how tor refactor:
