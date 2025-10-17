@@ -4,6 +4,7 @@ CREATE TABLE fx_durable_ga.genotypes (
     type_name TEXT NOT NULL,
     type_hash INTEGER NOT NULL,
     genome BIGINT[] NOT NULL,
+    genome_hash BIGINT NOT NULL,
     request_id UUID NOT NULL REFERENCES fx_durable_ga.requests(id),
     generation_id INTEGER NOT NULL
 );

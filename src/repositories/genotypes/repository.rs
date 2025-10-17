@@ -36,6 +36,15 @@ impl Repository {
     ) -> impl Future<Output = Result<Vec<(Genotype, Option<f64>)>, Error>> {
         super::queries::search_genotypes(&self.pool, filter, limit)
     }
+
+    #[instrument(level = "debug", skip(self), fields(filter = %request_id))]
+    pub(crate) fn get_intersection(
+        &self,
+        request_id: Uuid,
+        hashes: &[i64],
+    ) -> impl Future<Output = Result<Vec<i64>, Error>> {
+        super::queries::get_intersection(&self.pool, request_id, hashes)
+    }
 }
 
 impl<'tx> TxType<'tx> for Repository {

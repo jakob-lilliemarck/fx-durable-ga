@@ -1,13 +1,41 @@
 [x] Restructure genotypes - should they really know their fitness and generation id? Perhaps track in populations instead?
-[ ] Better strategy handling - make decisions in models, orchestrate in service
-[ ] Better initial distributions
-[ ] Consider how float optimization would work - is it currently possible to optimize a number in tange 0.400-0.700 in 100 steps?
+[x] Better strategy handling - make decisions in models, orchestrate in service
+[x] Consider how float optimization would work - is it currently possible to optimize a number in tange 0.400-0.700 in 100 steps?
+
+[ ] Better initial distributions - Latin Hypercube Sampling, Sobol sequences, or grid-based initialization to improve search space exploration
+[ ] Deduplicate genomes - CRITICAL: Analysis shows 50-70% of evaluations are duplicates! Never evaluate IDENTICAL genomes twice within one request. Genomes should be hashable, lookup method using EXISTS to check if already evaluated. Only eliminate identical genomes, keep similar ones (fitness cliffs).
+
+[ ] Early termination strategies - Stop when no improvement for N generations, population convergence detection, fitness plateau detection
+[ ] Elite preservation - Keep top N performers without re-evaluation to reduce redundant computation
+
+[ ] Request builder method - all of the configuration in a single type-safe place
+[ ] Add database indexes
+
 [ ] Fill out tests
 [ ] Add termination/completion record
-[ ] Add database indices
 [ ] Add instrumentation
 [ ] Add documentation
 [ ] Add a README
+
+////
+// EFFICIENCY ANALYSIS - Key metric: reduce number of evaluations
+//
+// Analysis of duplicate genomes shows massive optimization potential:
+// - {0,0,0} appears 16 times (optimal solution)
+// - {99,0,0} appears 19 times
+// - {230,0,0} appears 14 times
+// - Many other high-duplication patterns
+//
+// PRIORITY OPTIMIZATIONS (by impact on evaluation count):
+// 1. Genome deduplication (50-70% savings) - CRITICAL
+// 2. Better initial distribution (10-30% savings)
+// 3. Early termination (20-40% savings)
+// 4. Elite preservation (10-20% savings)
+//
+// Combined these could reduce evaluations by 60-80%!
+//
+// IMPORTANT: Only eliminate IDENTICAL genomes, never similar ones.
+// Similar genomes may have vastly different fitness (enum optimization, fitness cliffs).
 
 ////
 I am considering how tor refactor:

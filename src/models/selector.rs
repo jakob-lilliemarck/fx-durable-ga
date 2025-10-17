@@ -36,6 +36,7 @@ mod spin_roulette_tests {
             type_name: "test".to_string(),
             type_hash: 123,
             genome: vec![1, 2, 3],
+            genome_hash: Genotype::compute_genome_hash(&[1, 2, 3]),
             request_id: Uuid::now_v7(),
             generation_id: 1,
         }
@@ -202,6 +203,7 @@ mod roulette_selection_tests {
             type_name: "test".to_string(),
             type_hash: 123,
             genome: vec![1, 2, 3],
+            genome_hash: Genotype::compute_genome_hash(&[1, 2, 3]),
             request_id: Uuid::now_v7(),
             generation_id: 1,
         }
@@ -341,6 +343,7 @@ mod tournament_selection_tests {
             type_name: "test".to_string(),
             type_hash: 123,
             genome: vec![1, 2, 3],
+            genome_hash: Genotype::compute_genome_hash(&[1, 2, 3]),
             request_id: Uuid::now_v7(),
             generation_id: 1,
         }
