@@ -4,9 +4,8 @@ use super::events::{
     RequestTerminatedEvent,
 };
 use crate::models::{
-    Conclusion, Crossover, Distribution, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype,
-    Morphology, Mutagen, Request, RequestConclusion, Schedule, ScheduleDecision, Selector,
-    Terminated,
+    Crossover, Distribution, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype, Morphology,
+    Mutagen, Request, RequestConclusion, Schedule, ScheduleDecision, Selector, Terminated,
 };
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, morphologies, requests};
