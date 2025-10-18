@@ -4,8 +4,8 @@ use super::events::{
     RequestTerminatedEvent,
 };
 use crate::models::{
-    Crossover, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype, Morphology, Mutagen, Request,
-    RequestConclusion, Schedule, ScheduleDecision, Selector,
+    Crossover, Distribution, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype, Morphology,
+    Mutagen, Request, RequestConclusion, Schedule, ScheduleDecision, Selector,
 };
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, morphologies, requests};
@@ -98,6 +98,7 @@ impl Service {
         selector: Selector,
         temperature: f64,
         mutation_rate: f64,
+        distribution: Distribution,
     ) -> Result<(), Error> {
         tracing::info!("Optimization request received");
 
@@ -110,7 +111,14 @@ impl Service {
                     // Create a new optimization request with the repository
                     let request = tx_requests
                         .new_request(Request::new(
-                            type_name, type_hash, goal, selector, schedule, mutagen, crossover,
+                            type_name,
+                            type_hash,
+                            goal,
+                            selector,
+                            schedule,
+                            mutagen,
+                            crossover,
+                            distribution,
                         )?)
                         .await?;
 
@@ -136,10 +144,6 @@ impl Service {
         tracing::info!("Generating initial population");
 
         // Get the optimization request
-        tracing::debug!(
-            "About to fetch request in generate_initial_population with ID: {}",
-            request_id
-        );
         let request = self.requests.get_request(request_id).await.map_err(|e| {
             tracing::error!(
                 "Failed to fetch request in generate_initial_population with ID {}: {:?}",
@@ -157,16 +161,14 @@ impl Service {
         // Should implement duplicate checking and regeneration to ensure genetic diversity.
         // Consider using HashSet<Vec<Gene>> to track generated genomes and retry on duplicates.
 
-        let mut genotypes = Vec::with_capacity(request.population_size() as usize);
-        let mut events = Vec::with_capacity(request.population_size() as usize);
-        for _ in 0..request.population_size() {
-            let genotype = Genotype::new(
-                &request.type_name,
-                request.type_hash,
-                morphology.random(),
-                request.id,
-                1,
-            );
+        let genomes = request.distribution.distribute(&morphology);
+
+        let mut genotypes = Vec::with_capacity(genomes.len());
+        let mut events = Vec::with_capacity(genomes.len());
+
+        for genome in genomes {
+            let genotype =
+                Genotype::new(&request.type_name, request.type_hash, genome, request.id, 1);
             let event = GenotypeGenerated::new(request.id, genotype.id);
 
             genotypes.push(genotype);
@@ -211,7 +213,6 @@ impl Service {
         tracing::info!("Evaluating genotype");
 
         // Get the genotype from the database
-        tracing::debug!("About to fetch genotype with ID: {}", genotype_id);
         let genotype = self
             .genotypes
             .get_genotype(&genotype_id)
@@ -372,6 +373,15 @@ impl Service {
                             final_genotypes.push(genotype);
                             unique_count += 1;
                         }
+                    }
+
+                    if unique_count < num_offspring {
+                        // Inform of duplicate generation. This is an indication that request params may require tuning.
+                        tracing::info!(
+                            "Breeding generated {} non-unique genomes during attempt {}",
+                            num_offspring - unique_count,
+                            zero_progress_counter
+                        );
                     }
 
                     // Update zero progress counter

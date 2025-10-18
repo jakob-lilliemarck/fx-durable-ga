@@ -1,4 +1,5 @@
 mod crossover;
+mod distribution;
 mod encodeable;
 mod evaluator;
 mod gene_bounds;
@@ -11,7 +12,8 @@ mod request;
 mod schedule;
 mod selector;
 
-pub use crossover::{Crossover, ProbabilityOutOfRange};
+pub use crossover::{Crossover, ProbabilityOutOfRangeError};
+pub use distribution::Distribution;
 pub use encodeable::Encodeable;
 pub use evaluator::Evaluator;
 pub use gene_bounds::{GeneBoundError, GeneBounds};

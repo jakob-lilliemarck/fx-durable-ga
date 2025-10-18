@@ -15,6 +15,7 @@ pub(super) struct DbRequest {
     pub(super) selector: serde_json::Value,
     pub(super) mutagen: serde_json::Value,
     pub(super) crossover: serde_json::Value,
+    pub(super) distribution: serde_json::Value,
 }
 
 impl TryFrom<Request> for DbRequest {
@@ -26,6 +27,7 @@ impl TryFrom<Request> for DbRequest {
         let selector_json = serde_json::to_value(request.selector)?;
         let mutagen_json = serde_json::to_value(request.mutagen)?;
         let crossover_json = serde_json::to_value(request.crossover)?;
+        let distribution_json = serde_json::to_value(request.distribution)?;
         let goal_json = serde_json::to_value(request.goal)?;
 
         Ok(DbRequest {
@@ -38,6 +40,7 @@ impl TryFrom<Request> for DbRequest {
             selector: selector_json,
             mutagen: mutagen_json,
             crossover: crossover_json,
+            distribution: distribution_json,
         })
     }
 }
@@ -51,6 +54,7 @@ impl TryFrom<DbRequest> for Request {
         let selector = serde_json::from_value(request.selector)?;
         let mutagen = serde_json::from_value(request.mutagen)?;
         let crossover = serde_json::from_value(request.crossover)?;
+        let distribution = serde_json::from_value(request.distribution)?;
         let goal = serde_json::from_value(request.goal)?;
 
         Ok(Request {
@@ -63,6 +67,7 @@ impl TryFrom<DbRequest> for Request {
             selector,
             mutagen,
             crossover,
+            distribution,
         })
     }
 }

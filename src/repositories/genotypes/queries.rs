@@ -66,7 +66,9 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_genotypes_tests {
     use super::*;
-    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Schedule, Selector};
+    use crate::models::{
+        Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector,
+    };
     use crate::repositories::requests::queries::new_request;
     use chrono::SubsecRound;
 
@@ -81,6 +83,7 @@ mod new_genotypes_tests {
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -113,6 +116,7 @@ mod new_genotypes_tests {
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -182,7 +186,9 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_genotype_tests {
     use super::*;
-    use crate::models::{Crossover, FitnessGoal, Mutagen, Request, Schedule, Selector};
+    use crate::models::{
+        Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector,
+    };
     use crate::repositories::requests::queries::new_request;
     use chrono::{SubsecRound, Utc};
 
@@ -197,6 +203,7 @@ mod get_genotype_tests {
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -258,7 +265,8 @@ pub(crate) async fn record_fitness<'tx, E: PgExecutor<'tx>>(
 mod record_fitness_tests {
     use super::record_fitness;
     use crate::models::{
-        Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Request, Schedule, Selector,
+        Crossover, Distribution, Fitness, FitnessGoal, Genotype, Mutagen, Request, Schedule,
+        Selector,
     };
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
@@ -276,6 +284,7 @@ mod record_fitness_tests {
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -341,7 +350,8 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
 mod get_population_tests {
     use super::{get_population, record_fitness};
     use crate::models::{
-        Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Population, Request, Schedule, Selector,
+        Crossover, Distribution, Fitness, FitnessGoal, Genotype, Mutagen, Population, Request,
+        Schedule, Selector,
     };
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
@@ -358,6 +368,7 @@ mod get_population_tests {
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -422,6 +433,7 @@ mod get_population_tests {
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -943,7 +955,8 @@ mod tests {
 mod seeding {
     use super::record_fitness;
     use crate::models::{
-        Crossover, Fitness, FitnessGoal, Genotype, Mutagen, Request, Schedule, Selector,
+        Crossover, Distribution, Fitness, FitnessGoal, Genotype, Mutagen, Request, Schedule,
+        Selector,
     };
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
@@ -959,6 +972,7 @@ mod seeding {
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
         )?;
         let request_2 = Request::new(
             "test",
@@ -968,6 +982,7 @@ mod seeding {
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
         )?;
 
         let request_id_1 = request_1.id;

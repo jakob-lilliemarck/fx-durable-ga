@@ -1,12 +1,12 @@
 use anyhow::Result;
 use fx_durable_ga::{
     bootstrap::bootstrap,
-    models::{Encodeable, Evaluator, FitnessGoal, GeneBounds, Schedule, Selector},
+    models::{Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Schedule, Selector},
     services::optimization,
 };
 use fx_mq_building_blocks::queries::Queries;
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
-use sqlx::PgPool;
+use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use std::{env, sync::Arc};
 use uuid::Uuid;
@@ -34,9 +34,9 @@ impl Encodeable for Cube {
     fn decode(genes: &[i64]) -> Self::Phenotype {
         let bounds = Self::morphology();
         (
-            bounds[0].decode_gene(genes[0]), // Convert to actual decimal coordinates
-            bounds[1].decode_gene(genes[1]), // e.g., gene 0 → 0.5, gene 999 → 1.75
-            bounds[2].decode_gene(genes[2]), // e.g., gene 0 → 2.0, gene 999 → 3.25
+            bounds[0].to_f64(genes[0]), // Convert to actual decimal coordinates
+            bounds[1].to_f64(genes[1]), // e.g., gene 0 → 0.5, gene 999 → 1.75
+            bounds[2].to_f64(genes[2]), // e.g., gene 0 → 2.0, gene 999 → 3.25
         )
     }
 }
@@ -77,7 +77,10 @@ async fn main() -> Result<()> {
 
     // Get database URL from environment
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let pool = PgPool::connect(&database_url).await?;
+    let pool = PgPoolOptions::new()
+        .max_connections(50)
+        .connect(&database_url)
+        .await?;
 
     fx_event_bus::run_migrations(&pool).await?;
     fx_mq_building_blocks::migrator::run_migrations(&pool, fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME)
@@ -121,21 +124,24 @@ async fn main() -> Result<()> {
         Ok::<(), anyhow::Error>(())
     });
 
-    // Create optimization request
-    service
-        .new_optimization_request(
-            Cube::NAME,
-            Cube::HASH,
-            FitnessGoal::maximize(0.99)?,
-            Schedule::generational(50, 50),
-            Selector::tournament(3, 50),
-            0.3, // temperature
-            0.1, // mutation_rate
-        )
-        .await?;
+    // Create n optimization requests
+    for _ in 0..20 {
+        service
+            .new_optimization_request(
+                Cube::NAME,
+                Cube::HASH,
+                FitnessGoal::maximize(0.99)?,
+                Schedule::generational(100, 10),
+                Selector::tournament(3, 50),
+                0.5, // temperature
+                0.1, // mutation_rate
+                Distribution::random(50),
+            )
+            .await?;
+    }
 
     // Run for a maximum of 5 seconds
-    let timeout_duration = Duration::from_secs(30);
+    let timeout_duration = Duration::from_secs(300);
     let start_time = std::time::Instant::now();
 
     loop {

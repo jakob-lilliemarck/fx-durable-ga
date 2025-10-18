@@ -1,6 +1,6 @@
 use crate::services::lock;
 use crate::{
-    models::{MutagenError, ProbabilityOutOfRange, SelectionError},
+    models::{MutagenError, ProbabilityOutOfRangeError, SelectionError},
     repositories::{genotypes, morphologies, requests},
 };
 
@@ -21,7 +21,7 @@ pub enum Error {
     #[error("Mutagen: {0}")]
     Mutagen(#[from] MutagenError),
     #[error("Crossover: {0}")]
-    Crossover(#[from] ProbabilityOutOfRange),
+    Crossover(#[from] ProbabilityOutOfRangeError),
     #[error("Selection error: {0}")]
     SelectionError(#[from] SelectionError),
     #[error("Invalid parent parent: {0}")]

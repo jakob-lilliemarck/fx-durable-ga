@@ -9,7 +9,8 @@ CREATE TABLE fx_durable_ga.requests (
     schedule JSONB NOT NULL,
     selector JSONB NOT NULL,
     mutagen JSONB NOT NULL,
-    crossover JSONB NOT NULL
+    crossover JSONB NOT NULL,
+    distribution JSONB NOT NULL
 );
 
 CREATE TYPE fx_durable_ga.conclusion AS ENUM (

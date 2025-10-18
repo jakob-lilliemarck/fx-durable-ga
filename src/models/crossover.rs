@@ -37,12 +37,12 @@ pub enum Crossover {
 
 #[derive(Debug, thiserror::Error)]
 #[error("uniform crossover probability must be between 0.0 and 1.0, got {0}")]
-pub struct ProbabilityOutOfRange(f64);
+pub struct ProbabilityOutOfRangeError(f64);
 
 impl Crossover {
-    pub fn uniform(probability: f64) -> Result<Self, ProbabilityOutOfRange> {
+    pub fn uniform(probability: f64) -> Result<Self, ProbabilityOutOfRangeError> {
         if !(0.0..=1.0).contains(&probability) {
-            return Err(ProbabilityOutOfRange(probability));
+            return Err(ProbabilityOutOfRangeError(probability));
         }
 
         Ok(Self::Uniform { probability })

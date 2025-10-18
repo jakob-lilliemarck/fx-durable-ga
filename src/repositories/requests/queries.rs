@@ -23,9 +23,10 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 schedule,
                 selector,
                 mutagen,
-                crossover
+                crossover,
+                distribution
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             RETURNING
                 id,
                 requested_at,
@@ -35,7 +36,8 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 schedule,
                 selector,
                 mutagen,
-                crossover
+                crossover,
+                distribution
             "#,
         db_request.id,
         db_request.requested_at,
@@ -45,7 +47,8 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
         db_request.schedule,
         db_request.selector,
         db_request.mutagen,
-        db_request.crossover
+        db_request.crossover,
+        db_request.distribution
     )
     .fetch_one(tx)
     .await?;
@@ -57,7 +60,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_request_tests {
     use super::*;
-    use crate::models::{Crossover, FitnessGoal, Mutagen, Schedule, Selector};
+    use crate::models::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
     use chrono::SubsecRound;
 
     #[sqlx::test(migrations = "./migrations")]
@@ -65,6 +68,7 @@ mod new_request_tests {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
+        let distribution = Distribution::latin_hypercube(200);
 
         let request = Request::new(
             "test",
@@ -74,6 +78,7 @@ mod new_request_tests {
             Schedule::generational(100, 10),
             mutagen,
             crossover,
+            distribution,
         )?;
         let request_clone = request.clone();
 
@@ -98,6 +103,7 @@ mod new_request_tests {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
+        let distribution = Distribution::latin_hypercube(200);
 
         let request = Request::new(
             "test",
@@ -107,6 +113,7 @@ mod new_request_tests {
             Schedule::generational(100, 10),
             mutagen,
             crossover,
+            distribution,
         )?;
         let request_clone = request.clone();
 
@@ -136,7 +143,8 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
             schedule,
             selector,
             mutagen,
-            crossover
+            crossover,
+            distribution
         FROM fx_durable_ga.requests
         WHERE id = $1
         "#,
@@ -152,13 +160,14 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_request_tests {
     use super::*;
-    use crate::models::{Crossover, FitnessGoal, Mutagen, Schedule, Selector};
+    use crate::models::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_an_existing_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
+        let distribution = Distribution::latin_hypercube(200);
 
         let request = Request::new(
             "test",
@@ -168,6 +177,7 @@ mod get_request_tests {
             Schedule::generational(100, 10),
             mutagen,
             crossover,
+            distribution,
         )?;
         let request_id = request.id;
 
@@ -183,6 +193,7 @@ mod get_request_tests {
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
+        let distribution = Distribution::latin_hypercube(200);
 
         let request = Request::new(
             "test",
@@ -192,6 +203,7 @@ mod get_request_tests {
             Schedule::generational(100, 10),
             mutagen,
             crossover,
+            distribution,
         )?;
         let request_id = request.id;
 

@@ -1,4 +1,4 @@
-use super::{Crossover, FitnessGoal, Mutagen, Schedule, Selector};
+use super::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
 use chrono::{DateTime, Utc};
 use tracing::instrument;
 use uuid::Uuid;
@@ -15,6 +15,7 @@ pub(crate) struct Request {
     pub(crate) schedule: Schedule,
     pub(crate) mutagen: Mutagen,
     pub(crate) crossover: Crossover,
+    pub(crate) distribution: Distribution,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -30,6 +31,7 @@ impl Request {
         schedule: Schedule,
         mutagen: Mutagen,
         crossover: Crossover,
+        distribution: Distribution,
     ) -> Result<Self, RequestValidationError> {
         Ok(Self {
             id: Uuid::now_v7(),
@@ -41,12 +43,8 @@ impl Request {
             schedule,
             mutagen,
             crossover,
+            distribution,
         })
-    }
-
-    #[instrument(level = "debug", fields(request_id = %self.id))]
-    pub(crate) fn population_size(&self) -> u32 {
-        self.schedule.population_size
     }
 
     #[instrument(level = "debug", fields(request_id = %self.id, fitness = fitness, goal = ?self.goal))]
