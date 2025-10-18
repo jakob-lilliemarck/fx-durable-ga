@@ -5,7 +5,7 @@ use super::events::{
 };
 use crate::models::{
     Crossover, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype, Morphology, Mutagen, Request,
-    Schedule, ScheduleDecision, Selector,
+    RequestConclusion, Schedule, ScheduleDecision, Selector,
 };
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, morphologies, requests};
@@ -99,6 +99,8 @@ impl Service {
         temperature: f64,
         mutation_rate: f64,
     ) -> Result<(), Error> {
+        tracing::info!("Optimization request received");
+
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
 
@@ -129,8 +131,10 @@ impl Service {
     }
 
     // Shall be run in a job triggered by OptimizationRequested
-    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    #[instrument(level = "info", skip(self), fields(request_id = %request_id))]
     pub async fn generate_initial_population(&self, request_id: Uuid) -> Result<(), Error> {
+        tracing::info!("Generating initial population");
+
         // Get the optimization request
         tracing::debug!(
             "About to fetch request in generate_initial_population with ID: {}",
@@ -198,12 +202,14 @@ impl Service {
     }
 
     // Shall be run in a job triggerd by GenotypeGenerated
-    #[instrument(level = "debug", skip(self), fields(request_id = %request_id, genotype_id = %genotype_id))]
+    #[instrument(level = "info", skip(self), fields(request_id = %request_id, genotype_id = %genotype_id))]
     pub async fn evaluate_genotype(
         &self,
         request_id: Uuid,
         genotype_id: Uuid,
     ) -> Result<(), Error> {
+        tracing::info!("Evaluating genotype");
+
         // Get the genotype from the database
         tracing::debug!("About to fetch genotype with ID: {}", genotype_id);
         let genotype = self
@@ -288,7 +294,7 @@ impl Service {
         new_genotypes
     }
 
-    #[instrument(level = "debug", skip(self, request), fields(request_id = %request.id, num_offspring = num_offspring, next_generation_id = next_generation_id))]
+    #[instrument(level = "info", skip(self, request), fields(request_id = %request.id, num_offspring = num_offspring, next_generation_id = next_generation_id))]
     async fn breed_genotypes(
         &self,
         request: &Request,
@@ -305,6 +311,7 @@ impl Service {
                     return Ok(())
                 }
 
+                tracing::info!("Breeding genotypes");
                 // Get candidates with fitness from populations repository
                 let candidates_with_fitness = self
                     .genotypes
@@ -473,6 +480,33 @@ impl Service {
                     .await
             }
         }
+    }
+
+    #[instrument(level = "info", skip(self), fields(request_id = %request_conclusion.request_id, concluded_at = %request_conclusion.concluded_at, concluded_with = ?request_conclusion.concluded_with))]
+    pub(crate) async fn conclude_request(
+        &self,
+        request_conclusion: RequestConclusion,
+    ) -> Result<(), Error> {
+        let key = format!("conclude_request_{}", request_conclusion.request_id);
+        self.locking
+            .lock_while(&key, || async {
+                if let Some(_) = self
+                    .requests
+                    .get_request_conclusion(&request_conclusion.request_id)
+                    .await?
+                {
+                    return Ok::<(), super::Error>(());
+                }
+
+                tracing::info!("Concluding request");
+
+                self.requests
+                    .new_request_conclusion(&request_conclusion)
+                    .await?;
+
+                Ok(())
+            })
+            .await?
     }
 
     pub async fn publish_terminated(&self, request_id: Uuid) -> Result<(), Error> {

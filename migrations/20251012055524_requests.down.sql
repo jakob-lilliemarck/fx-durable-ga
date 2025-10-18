@@ -1,3 +1,9 @@
-DROP TABLE fx_durable_ga.requests;
+-- Drop tables in reverse dependency order
+DROP TABLE IF EXISTS fx_durable_ga.request_conclusions;
+DROP TABLE IF EXISTS fx_durable_ga.requests;
 
-DROP SCHEMA fx_durable_ga;
+-- Drop enum type
+DROP TYPE IF EXISTS fx_durable_ga.conclusion;
+
+-- Drop schema
+DROP SCHEMA IF EXISTS fx_durable_ga;

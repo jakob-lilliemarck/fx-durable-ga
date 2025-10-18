@@ -1,6 +1,12 @@
+use crate::{
+    models::{Conclusion, RequestConclusion},
+    services::optimization,
+};
+
 use super::jobs::{
     EvaluateGenotypeMessage, GenerateInitialPopulationMessage, MaintainPopulationMessage,
 };
+use chrono::Utc;
 use fx_event_bus::Handler;
 use fx_mq_building_blocks::queries::Queries;
 use serde::{Deserialize, Serialize};
@@ -35,7 +41,7 @@ pub struct OptimizationRequestedHandler {
 impl Handler<OptimizationRequestedEvent> for OptimizationRequestedHandler {
     type Error = fx_mq_jobs::PublishError;
 
-    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id))]
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
     fn handle<'a>(
         &'a self,
         input: std::sync::Arc<OptimizationRequestedEvent>,
@@ -96,7 +102,7 @@ pub struct GenotypeGeneratedHandlerEvent {
 impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
     type Error = fx_mq_jobs::PublishError;
 
-    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<GenotypeGenerated>,
@@ -159,7 +165,7 @@ pub struct GenotypeEvaluatedHandler {
 impl Handler<GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
     type Error = fx_mq_jobs::PublishError;
 
-    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<GenotypeEvaluatedEvent>,
@@ -209,23 +215,34 @@ impl RequestCompletedEvent {
     }
 }
 
-pub struct RequestCompletedHandler;
+pub struct RequestCompletedHandler {
+    optimization: Arc<optimization::Service>,
+}
 
 impl Handler<RequestCompletedEvent> for RequestCompletedHandler {
     type Error = super::Error;
 
-    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id))]
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<RequestCompletedEvent>,
         _: chrono::DateTime<chrono::Utc>,
         tx: sqlx::PgTransaction<'a>,
     ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
+        let optimization = self.optimization.clone();
+
         Box::pin(async move {
-            tracing::info!(
-                message = "Request completed",
-                request_id = input.request_id.to_string()
-            );
+            if let Err(err) = optimization
+                .conclude_request(RequestConclusion {
+                    request_id: input.request_id,
+                    concluded_at: Utc::now(),
+                    concluded_with: Conclusion::Completed,
+                })
+                .await
+            {
+                tracing::error!(message = "Could not conclude request", error = ?err)
+            }
+
             (tx, Ok(()))
         })
     }
@@ -250,12 +267,14 @@ impl RequestTerminatedEvent {
     }
 }
 
-pub struct RequestTerminatedHandler;
+pub struct RequestTerminatedHandler {
+    optimization: Arc<optimization::Service>,
+}
 
 impl Handler<RequestTerminatedEvent> for RequestTerminatedHandler {
     type Error = super::Error;
 
-    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id))]
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<RequestTerminatedEvent>,
@@ -263,10 +282,19 @@ impl Handler<RequestTerminatedEvent> for RequestTerminatedHandler {
         tx: sqlx::PgTransaction<'a>,
     ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
         Box::pin(async move {
-            tracing::info!(
-                message = "Request terminated",
-                request_id = input.request_id.to_string()
-            );
+            let optimization = self.optimization.clone();
+
+            if let Err(err) = optimization
+                .conclude_request(RequestConclusion {
+                    request_id: input.request_id,
+                    concluded_at: Utc::now(),
+                    concluded_with: Conclusion::Terminated,
+                })
+                .await
+            {
+                tracing::error!(message = "Could not conclude request", error = ?err)
+            }
+
             (tx, Ok(()))
         })
     }
@@ -278,6 +306,7 @@ impl Handler<RequestTerminatedEvent> for RequestTerminatedHandler {
 
 pub fn register_event_handlers(
     queries: Arc<Queries>,
+    optimization: Arc<optimization::Service>,
     registry: &mut fx_event_bus::EventHandlerRegistry,
 ) {
     registry.with_handler(OptimizationRequestedHandler {
@@ -292,7 +321,11 @@ pub fn register_event_handlers(
         queries: queries.clone(),
     });
 
-    registry.with_handler(RequestCompletedHandler);
+    registry.with_handler(RequestCompletedHandler {
+        optimization: optimization.clone(),
+    });
 
-    registry.with_handler(RequestTerminatedHandler);
+    registry.with_handler(RequestTerminatedHandler {
+        optimization: optimization.clone(),
+    });
 }

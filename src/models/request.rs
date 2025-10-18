@@ -54,3 +54,17 @@ impl Request {
         self.goal.is_reached(fitness)
     }
 }
+
+#[derive(Debug, sqlx::Type, Clone, Copy)]
+#[sqlx(type_name = "fx_durable_ga.conclusion", rename_all = "lowercase")]
+pub(crate) enum Conclusion {
+    Completed,
+    Terminated,
+}
+
+#[derive(Debug)]
+pub(crate) struct RequestConclusion {
+    pub(crate) request_id: Uuid,
+    pub(crate) concluded_at: DateTime<Utc>,
+    pub(crate) concluded_with: Conclusion,
+}

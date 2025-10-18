@@ -11,3 +11,14 @@ CREATE TABLE fx_durable_ga.requests (
     mutagen JSONB NOT NULL,
     crossover JSONB NOT NULL
 );
+
+CREATE TYPE fx_durable_ga.conclusion AS ENUM (
+    'completed',
+    'terminated'
+);
+
+CREATE TABLE fx_durable_ga.request_conclusions (
+    request_id UUID PRIMARY KEY REFERENCES fx_durable_ga.requests(id),
+    concluded_at TIMESTAMPTZ NOT NULL,
+    concluded_with fx_durable_ga.conclusion NOT NULL
+);

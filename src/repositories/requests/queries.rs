@@ -1,6 +1,6 @@
 use super::Error;
 use super::models::DbRequest;
-use crate::models::Request;
+use crate::models::{Conclusion, Request, RequestConclusion};
 use sqlx::PgExecutor;
 use tracing::instrument;
 use uuid::Uuid;
@@ -200,4 +200,55 @@ mod get_request_tests {
         assert!(selected.is_err());
         Ok(())
     }
+}
+
+#[instrument(level = "debug", skip(tx), fields(request_id = %request_conclusion.request_id, concluded_at = %request_conclusion.concluded_at, concluded_with=?request_conclusion))]
+pub(crate) async fn new_request_conclusion<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    request_conclusion: &RequestConclusion,
+) -> Result<RequestConclusion, Error> {
+    let request_conclusion = sqlx::query_as!(
+        RequestConclusion,
+        r#"
+            INSERT INTO fx_durable_ga.request_conclusions (
+                request_id,
+                concluded_at,
+                concluded_with
+            ) VALUES ($1, $2, $3)
+            RETURNING
+                request_id,
+                concluded_at,
+                concluded_with as "concluded_with: Conclusion"
+        "#,
+        request_conclusion.request_id,
+        request_conclusion.concluded_at,
+        request_conclusion.concluded_with as Conclusion
+    )
+    .fetch_one(tx)
+    .await?;
+
+    Ok(request_conclusion)
+}
+
+#[instrument(level = "debug", skip(tx), fields(id = %id))]
+pub(crate) async fn get_request_conclusion<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    id: &Uuid,
+) -> Result<Option<RequestConclusion>, Error> {
+    let request_conclusion = sqlx::query_as!(
+        RequestConclusion,
+        r#"
+            SELECT
+                request_id,
+                concluded_at,
+                concluded_with as "concluded_with: Conclusion"
+            FROM fx_durable_ga.request_conclusions
+            WHERE request_id = $1
+        "#,
+        id
+    )
+    .fetch_optional(tx)
+    .await?;
+
+    Ok(request_conclusion)
 }

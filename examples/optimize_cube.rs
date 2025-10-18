@@ -96,6 +96,7 @@ async fn main() -> Result<()> {
     let mut registry = fx_event_bus::EventHandlerRegistry::new();
     optimization::register_event_handlers(
         Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME)),
+        service.clone(),
         &mut registry,
     );
     let mut listener = fx_event_bus::Listener::new(pool.clone(), registry);

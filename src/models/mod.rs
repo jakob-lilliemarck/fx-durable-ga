@@ -1,7 +1,6 @@
 mod crossover;
 mod encodeable;
 mod evaluator;
-mod fitness;
 mod gene_bounds;
 mod genotype;
 mod goal;
@@ -21,9 +20,8 @@ pub use mutagen::{Decay, Mutagen, MutagenError, MutationRate, Temperature};
 pub use schedule::Schedule;
 pub use selector::{SelectionError, Selector};
 
-pub(crate) use fitness::Fitness;
-pub(crate) use genotype::{Gene, Genotype};
+pub(crate) use genotype::{Fitness, Gene, Genotype};
 pub(crate) use morphology::Morphology;
 pub(crate) use population::Population;
-pub(crate) use request::Request;
+pub(crate) use request::{Conclusion, Request, RequestConclusion};
 pub(crate) use schedule::ScheduleDecision;
