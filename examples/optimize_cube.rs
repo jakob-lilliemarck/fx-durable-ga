@@ -1,7 +1,10 @@
 use anyhow::Result;
 use fx_durable_ga::{
     bootstrap::bootstrap,
-    models::{Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Schedule, Selector},
+    models::{
+        Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Schedule, Selector,
+        Terminated,
+    },
     services::optimization,
 };
 use fx_mq_building_blocks::queries::Queries;
@@ -47,8 +50,13 @@ impl Evaluator<(f64, f64, f64)> for CubeQuadraticEvaluator {
     fn fitness<'a>(
         &self,
         phenotype: (f64, f64, f64),
+        terminated: &'a Box<dyn Terminated>,
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
         Box::pin(async move {
+            if terminated.is_terminated().await {
+                // abort
+            }
+
             let (x, y, z) = phenotype;
 
             // Calculate distance from origin

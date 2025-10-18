@@ -4,8 +4,9 @@ use super::events::{
     RequestTerminatedEvent,
 };
 use crate::models::{
-    Crossover, Distribution, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype, Morphology,
-    Mutagen, Request, RequestConclusion, Schedule, ScheduleDecision, Selector,
+    Conclusion, Crossover, Distribution, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype,
+    Morphology, Mutagen, Request, RequestConclusion, Schedule, ScheduleDecision, Selector,
+    Terminated,
 };
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, morphologies, requests};
@@ -232,7 +233,9 @@ impl Service {
                 })?;
 
         // Call the evaluation function. This is a long running function!
-        let fitness = evaluator.fitness(&genotype.genome).await?;
+        let terminator: Box<dyn Terminated> =
+            Box::new(Terminator::new(self.requests.clone(), request_id));
+        let fitness = evaluator.fitness(&genotype.genome, &terminator).await?;
 
         self.genotypes
             .chain(|mut tx_genotypes| {
@@ -537,8 +540,43 @@ impl Service {
     }
 }
 
+pub struct Terminator {
+    request_id: Uuid,
+    requests: requests::Repository,
+}
+
+impl Terminator {
+    fn new(requests: requests::Repository, request_id: Uuid) -> Self {
+        Terminator {
+            request_id,
+            requests,
+        }
+    }
+}
+
+impl Terminated for Terminator {
+    fn is_terminated(&self) -> BoxFuture<'_, bool> {
+        let requests = self.requests.clone();
+
+        Box::pin(async move {
+            match requests.get_request_conclusion(&self.request_id).await {
+                Ok(Some(_)) => true, // Any conclusion means terminate
+                Err(err) => {
+                    tracing::warn!(message = "Failed to check request conclusion", err = ?err);
+                    false
+                }
+                _ => false, // No conclusion yet, keep going
+            }
+        })
+    }
+}
+
 pub(crate) trait TypeErasedEvaluator: Send + Sync {
-    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
+    fn fitness<'a>(
+        &self,
+        genes: &[i64],
+        terminated: &'a Box<dyn Terminated>,
+    ) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
 
 pub(crate) struct ErasedEvaluator<P, E: Evaluator<P>> {
@@ -556,9 +594,13 @@ impl<P, E> TypeErasedEvaluator for ErasedEvaluator<P, E>
 where
     E: Evaluator<P> + Send + Sync + 'static,
 {
-    #[instrument(level = "debug", skip(self, genes), fields(genome_length = genes.len()))]
-    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
+    #[instrument(level = "debug", skip(self, genes, terminated), fields(genome_length = genes.len()))]
+    fn fitness<'a>(
+        &self,
+        genes: &[i64],
+        terminated: &'a Box<dyn Terminated>,
+    ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
         let phenotype = (self.decode)(genes);
-        self.evaluator.fitness(phenotype)
+        self.evaluator.fitness(phenotype, terminated)
     }
 }

@@ -53,7 +53,7 @@ impl Request {
     }
 }
 
-#[derive(Debug, sqlx::Type, Clone, Copy)]
+#[derive(Debug, sqlx::Type, Clone, Copy, PartialEq, Eq)]
 #[sqlx(type_name = "fx_durable_ga.conclusion", rename_all = "lowercase")]
 pub(crate) enum Conclusion {
     Completed,

@@ -7,6 +7,7 @@ use sqlx::{PgPool, PgTransaction};
 use tracing::instrument;
 use uuid::Uuid;
 
+#[derive(Debug, Clone)]
 pub(crate) struct Repository {
     pool: PgPool,
 }
