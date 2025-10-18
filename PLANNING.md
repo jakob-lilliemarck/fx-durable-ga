@@ -2,8 +2,7 @@
 [x] Better strategy handling - make decisions in models, orchestrate in service
 [x] Consider how float optimization would work - is it currently possible to optimize a number in tange 0.400-0.700 in 100 steps?
 [x] Deduplicate genomes - CRITICAL: Analysis shows 50-70% of evaluations are duplicates! Never evaluate IDENTICAL genomes twice within one request. Genomes should be hashable, lookup method using EXISTS to check if already evaluated. Only eliminate identical genomes, keep similar ones (fitness cliffs).
-
-[ ] Better initial distributions - Latin Hypercube Sampling, Sobol sequences, or grid-based initialization to improve search space exploration
+[x] Better initial distributions - Latin Hypercube Sampling, Sobol sequences, or grid-based initialization to improve search space exploration
 
 [ ] Early termination strategies - Stop when no improvement for N generations, population convergence detection, fitness plateau detection
 [ ] Elite preservation - Keep top N performers without re-evaluation to reduce redundant computation
