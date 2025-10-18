@@ -2,7 +2,7 @@ use anyhow::Result;
 use fx_durable_ga::{
     bootstrap::bootstrap,
     models::{Encodeable, Evaluator, FitnessGoal, GeneBounds, Schedule, Selector},
-    service::{register_event_handlers, register_job_handlers},
+    services::optimization,
 };
 use fx_mq_building_blocks::queries::Queries;
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -56,11 +56,11 @@ impl Evaluator<(f64, f64, f64)> for CubeQuadraticEvaluator {
 
             // Target distance (distance from origin to optimal point (0.5, 0.75, 2.0))
             let target_dist = (0.5_f64.powi(2) + 0.75_f64.powi(2) + 2.0_f64.powi(2)).sqrt(); // ≈ 2.1943
-            
+
             // Fitness 1.0 if distance matches target, decreases as we deviate
             let distance_diff = (dist - target_dist).abs();
             let fitness = 1.0 / (1.0 + distance_diff);
-            
+
             Ok(fitness)
         })
     }
@@ -72,7 +72,7 @@ async fn main() -> Result<()> {
 
     // Initialize logging at DEBUG level
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
+        .with_max_level(tracing::Level::INFO)
         .init();
 
     // Get database URL from environment
@@ -94,7 +94,7 @@ async fn main() -> Result<()> {
 
     // setup event handling and spawn an event handling agent
     let mut registry = fx_event_bus::EventHandlerRegistry::new();
-    register_event_handlers(
+    optimization::register_event_handlers(
         Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME)),
         &mut registry,
     );
@@ -109,7 +109,7 @@ async fn main() -> Result<()> {
     let hold_for = Duration::from_secs(300);
     let mut jobs_listener = fx_mq_jobs::Listener::new(
         pool.clone(),
-        register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
+        optimization::register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
         8,
         host_id,
         hold_for,

@@ -52,3 +52,49 @@ impl Genotype {
         hasher.finish() as i64
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_genome_hash_consistency() {
+        let genome1 = vec![1, 2, 3, 4, 5];
+        let genome2 = vec![1, 2, 3, 4, 5];
+        let genome3 = vec![5, 4, 3, 2, 1];
+
+        // Same genome should produce same hash
+        let hash1 = Genotype::compute_genome_hash(&genome1);
+        let hash2 = Genotype::compute_genome_hash(&genome2);
+        assert_eq!(hash1, hash2, "Same genome should produce same hash");
+
+        // Different genome should produce different hash
+        let hash3 = Genotype::compute_genome_hash(&genome3);
+        assert_ne!(
+            hash1, hash3,
+            "Different genome should produce different hash"
+        );
+    }
+
+    #[test]
+    fn test_empty_genome_hash() {
+        let empty_genome: Vec<Gene> = vec![];
+        let hash1 = Genotype::compute_genome_hash(&empty_genome);
+        let hash2 = Genotype::compute_genome_hash(&empty_genome);
+        assert_eq!(hash1, hash2, "Empty genome should produce consistent hash");
+    }
+
+    #[test]
+    fn test_zero_genome_hash() {
+        let zero_genome1 = vec![0, 0, 0];
+        let zero_genome2 = vec![0, 0, 0];
+
+        let hash1 = Genotype::compute_genome_hash(&zero_genome1);
+        let hash2 = Genotype::compute_genome_hash(&zero_genome2);
+
+        assert_eq!(
+            hash1, hash2,
+            "Identical zero genomes should produce same hash"
+        );
+    }
+}

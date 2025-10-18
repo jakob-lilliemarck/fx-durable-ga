@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id,\n            requested_at,\n            type_name,\n            type_hash,\n            goal,\n            schedule,\n            selector,\n            mutagen,\n            crossover\n        FROM fx_durable_ga.requests\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "type_hash",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "goal",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "schedule",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "selector",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "mutagen",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "crossover",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a3c4a4762b5fefc340f420dcc6e1d6c5c24b714e7a5c980ad9ad082ab02de810"
+}

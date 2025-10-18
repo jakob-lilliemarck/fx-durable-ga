@@ -1,3 +1,6 @@
+use super::jobs::{
+    EvaluateGenotypeMessage, GenerateInitialPopulationMessage, MaintainPopulationMessage,
+};
 use fx_event_bus::Handler;
 use fx_mq_building_blocks::queries::Queries;
 use serde::{Deserialize, Serialize};
@@ -5,10 +8,6 @@ use sqlx::PgTransaction;
 use std::sync::Arc;
 use tracing::instrument;
 use uuid::Uuid;
-
-use crate::service::jobs::{
-    EvaluateGenotypeMessage, GenerateInitialPopulationMessage, MaintainPopulationMessage,
-};
 
 // ============================================================
 // OptimizationRequested
@@ -36,7 +35,7 @@ pub struct OptimizationRequestedHandler {
 impl Handler<OptimizationRequestedEvent> for OptimizationRequestedHandler {
     type Error = fx_mq_jobs::PublishError;
 
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
+    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id))]
     fn handle<'a>(
         &'a self,
         input: std::sync::Arc<OptimizationRequestedEvent>,
@@ -97,7 +96,7 @@ pub struct GenotypeGeneratedHandlerEvent {
 impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
     type Error = fx_mq_jobs::PublishError;
 
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
+    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<GenotypeGenerated>,
@@ -160,7 +159,7 @@ pub struct GenotypeEvaluatedHandler {
 impl Handler<GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
     type Error = fx_mq_jobs::PublishError;
 
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
+    #[instrument(level = "info", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
         &'a self,
         input: Arc<GenotypeEvaluatedEvent>,

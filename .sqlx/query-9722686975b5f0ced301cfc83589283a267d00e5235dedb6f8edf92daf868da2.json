@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO fx_durable_ga.morphologies (\n                revised_at,\n                type_name,\n                type_hash,\n                gene_bounds\n            )\n            VALUES ($1, $2, $3, $4)\n            RETURNING\n                revised_at,\n                type_name,\n                type_hash,\n                gene_bounds\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revised_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_hash",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "gene_bounds",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text",
+        "Int4",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9722686975b5f0ced301cfc83589283a267d00e5235dedb6f8edf92daf868da2"
+}

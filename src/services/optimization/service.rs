@@ -1,15 +1,16 @@
 use super::Error;
-use super::models::{ErasedEvaluator, TypeErasedEvaluator};
+use super::events::{
+    GenotypeEvaluatedEvent, GenotypeGenerated, OptimizationRequestedEvent, RequestCompletedEvent,
+    RequestTerminatedEvent,
+};
 use crate::models::{
     Crossover, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype, Morphology, Mutagen, Request,
     Schedule, ScheduleDecision, Selector,
 };
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, morphologies, requests};
-use crate::service::events::{
-    GenotypeEvaluatedEvent, GenotypeGenerated, OptimizationRequestedEvent, RequestCompletedEvent,
-    RequestTerminatedEvent,
-};
+use crate::services::lock;
+use futures::future::BoxFuture;
 use fx_event_bus::Publisher;
 use std::collections::{HashMap, HashSet};
 use tracing::instrument;
@@ -17,6 +18,7 @@ use uuid::Uuid;
 
 // optimization service
 pub struct Service {
+    locking: lock::Service,
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
@@ -24,6 +26,7 @@ pub struct Service {
 }
 
 pub struct ServiceBuilder {
+    locking: lock::Service,
     requests: requests::Repository,
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
@@ -60,6 +63,7 @@ impl ServiceBuilder {
     #[instrument(level = "debug", skip(self), fields(evaluators_count = self.evaluators.len()))]
     pub fn build(self) -> Service {
         Service {
+            locking: self.locking,
             requests: self.requests,
             morphologies: self.morphologies,
             genotypes: self.genotypes,
@@ -70,11 +74,13 @@ impl ServiceBuilder {
 
 impl Service {
     pub(crate) fn builder(
+        locking: lock::Service,
         requests: requests::Repository,
         morphologies: morphologies::Repository,
         genotypes: genotypes::Repository,
     ) -> ServiceBuilder {
         ServiceBuilder {
+            locking,
             requests,
             morphologies,
             genotypes,
@@ -167,9 +173,7 @@ impl Service {
             .chain(|mut tx_genotypes| {
                 Box::pin(async move {
                     // Create the initial generation atomically (prevents race conditions)
-                    let inserted_genotypes = tx_genotypes
-                        .create_generation_if_empty(request.id, 1, genotypes)
-                        .await?;
+                    let inserted_genotypes = tx_genotypes.new_genotypes(genotypes).await?;
 
                     // Only proceed if genotypes were actually inserted (no race condition)
                     if !inserted_genotypes.is_empty() {
@@ -261,7 +265,7 @@ impl Service {
             // Get parents by reference to avoid cloning (indices should be valid from selector)
             let parent1 = &candidates_with_fitness[idx1].0;
             let parent2 = &candidates_with_fitness[idx2].0;
-            
+
             let mut rng = rand::rng();
 
             let mut child = Genotype::new(
@@ -285,124 +289,140 @@ impl Service {
     }
 
     #[instrument(level = "debug", skip(self, request), fields(request_id = %request.id, num_offspring = num_offspring, next_generation_id = next_generation_id))]
-    async fn breed_new_genotypes_with_deduplication(
+    async fn breed_genotypes(
         &self,
         request: &Request,
         num_offspring: usize,
         next_generation_id: i32,
     ) -> Result<(), Error> {
-        // Get candidates with fitness from populations repository
-        let candidates_with_fitness = self
-            .genotypes
-            .search_genotypes(
-                &genotypes::Filter::default()
-                    .with_request_id(request.id)
-                    .with_fitness(true)
-                    .with_order_random(),
-                request.selector.sample_size(),
-            )
-            .await?;
-
-        // Get morphology for mutation bounds
-        let morphology = self.morphologies.get_morphology(request.type_hash).await?;
-
-        // Iterative breeding with deduplication
-        let mut final_genotypes = Vec::with_capacity(num_offspring);
-        let mut generated_hashes = HashSet::new();
-        let mut zero_progress_counter = 0;
-        const MAX_ZERO_PROGRESS: i32 = 5;
-
-        while final_genotypes.len() < num_offspring && zero_progress_counter < MAX_ZERO_PROGRESS {
-            let needed = num_offspring - final_genotypes.len();
-
-            // Re-select parents for this iteration
-            let parent_indices = request
-                .selector
-                .select_parents(needed, candidates_with_fitness.clone())
-                .map_err(|e| Error::SelectionError(e))?;
-            
-            // Breed a batch directly from indices
-            let batch_genotypes = Self::breed_offspring_batch(
-                request,
-                parent_indices,
-                &candidates_with_fitness,
-                &morphology,
-                next_generation_id,
-            );
-
-            // Collect hashes from this batch
-            let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash).collect();
-
-            // Check database for intersections
-            let intersecting_hashes = self
-                .genotypes
-                .get_intersection(request.id, &batch_hashes)
-                .await?
-                .into_iter()
-                .collect::<HashSet<i64>>();
-
-            // Filter out duplicates (database + already generated)
-            let mut unique_count = 0;
-            for genotype in batch_genotypes {
-                if !intersecting_hashes.contains(&genotype.genome_hash)
-                    && !generated_hashes.contains(&genotype.genome_hash)
-                {
-                    generated_hashes.insert(genotype.genome_hash);
-                    final_genotypes.push(genotype);
-                    unique_count += 1;
+        let key = format!("request_{}", request.id);
+        let ret = self
+            .locking
+            .lock_while(&key, || async {
+                // Early return if it exists!
+                let exists = self.genotypes.check_if_generation_exists(request.id, next_generation_id).await?;
+                if exists {
+                    return Ok(())
                 }
-            }
 
-            // Update zero progress counter
-            if unique_count == 0 {
-                zero_progress_counter += 1;
-            } else {
-                zero_progress_counter = 0;
-            }
-        }
+                // Get candidates with fitness from populations repository
+                let candidates_with_fitness = self
+                    .genotypes
+                    .search_genotypes(
+                        &genotypes::Filter::default()
+                            .with_request_id(request.id)
+                            .with_fitness(true)
+                            .with_order_random(),
+                        request.selector.sample_size(),
+                    )
+                    .await?;
 
-        // If we couldn't generate enough unique genotypes, log a warning
-        if final_genotypes.len() < num_offspring {
-            tracing::warn!(
-                "Could only generate {} unique genotypes out of {} requested for request {}",
-                final_genotypes.len(),
-                num_offspring,
-                request.id
-            );
-        }
+                // Get morphology for mutation bounds
+                let morphology = self.morphologies.get_morphology(request.type_hash).await?;
 
-        // Update database (only if we have any genotypes)
-        if !final_genotypes.is_empty() {
-            // Create events for final genotypes
-            let events: Vec<GenotypeGenerated> = final_genotypes
-                .iter()
-                .map(|genotype| GenotypeGenerated::new(request.id, genotype.id))
-                .collect();
+                // Iterative breeding with deduplication
+                let mut final_genotypes = Vec::with_capacity(num_offspring);
+                let mut generated_hashes = HashSet::new();
+                let mut zero_progress_counter = 0;
+                const MAX_ZERO_PROGRESS: i32 = 5;
 
-            self.genotypes
-                .chain(|mut tx_genotypes| {
-                    Box::pin(async move {
-                        let inserted_genotypes = tx_genotypes
-                            .create_generation_if_empty(request.id, next_generation_id, final_genotypes)
-                            .await?;
+                while final_genotypes.len() < num_offspring && zero_progress_counter < MAX_ZERO_PROGRESS {
+                    let needed = num_offspring - final_genotypes.len();
 
-                        // Only proceed if genotypes were actually inserted (no race condition)
-                        if !inserted_genotypes.is_empty() {
-                            let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
-                            publisher.publish_many(&events).await?;
+                    // Re-select parents for this iteration
+                    let parent_indices = request
+                        .selector
+                        .select_parents(needed, candidates_with_fitness.clone())
+                        .map_err(|e| Error::SelectionError(e))?;
 
-                            Ok((publisher, ()))
-                        } else {
-                            // Race condition occurred - another worker created the generation
-                            let publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
-                            Ok((publisher, ()))
+                    // Breed a batch directly from indices
+                    let batch_genotypes = Self::breed_offspring_batch(
+                        request,
+                        parent_indices,
+                        &candidates_with_fitness,
+                        &morphology,
+                        next_generation_id,
+                    );
+
+                    // Collect hashes from this batch
+                    let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash).collect();
+
+                    // Check database for intersections
+                    let intersecting_hashes = self
+                        .genotypes
+                        .get_intersection(request.id, &batch_hashes)
+                        .await?
+                        .into_iter()
+                        .collect::<HashSet<i64>>();
+
+                    // Filter out duplicates (database + already generated)
+                    let mut unique_count = 0;
+                    for genotype in batch_genotypes {
+                        if !intersecting_hashes.contains(&genotype.genome_hash)
+                        && !generated_hashes.contains(&genotype.genome_hash)
+                        {
+                            generated_hashes.insert(genotype.genome_hash);
+                            final_genotypes.push(genotype);
+                            unique_count += 1;
                         }
-                    })
-                })
-                .await?;
-        }
+                    }
 
-        Ok(())
+                    // Update zero progress counter
+                    if unique_count == 0 {
+                        zero_progress_counter += 1;
+                    } else {
+                        zero_progress_counter = 0;
+                    }
+                }
+
+                // If we couldn't generate enough unique genotypes, log a warning
+                if final_genotypes.len() < num_offspring {
+                    tracing::warn!(
+                        "Could only generate {} unique genotypes out of {} requested for request {}",
+                        final_genotypes.len(),
+                        num_offspring,
+                        request.id
+                    );
+                }
+
+                // Update database (only if we have any genotypes)
+                if !final_genotypes.is_empty() {
+                    // Create events for final genotypes
+                    let events: Vec<GenotypeGenerated> = final_genotypes
+                        .iter()
+                        .map(|genotype| GenotypeGenerated::new(request.id, genotype.id))
+                        .collect();
+
+                    // FIXME:
+                    // It could be that the lock acquired inside insert_generation is released BEFORE the transaction is commited.
+                    // if that is the case, it means other queries will start to run then, not yet seeing the work carried out by THIS transaction.
+                    // Also we do unneccesary work if we discard works - we might as well open a lock at the beginning of this whole function call, and hold it to the end of the call?
+                    self.genotypes
+                        .chain(|mut tx_genotypes| {
+                            Box::pin(async move {
+                                let inserted_genotypes = tx_genotypes
+                                    .new_genotypes(final_genotypes)
+                                    .await?;
+
+                                // Only proceed if genotypes were actually inserted (no race condition)
+                                if !inserted_genotypes.is_empty() {
+                                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+                                    publisher.publish_many(&events).await?;
+
+                                    Ok((publisher, ()))
+                                } else {
+                                    // Race condition occurred - another worker created the generation
+                                    let publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+                                    Ok((publisher, ()))
+                                }
+                            })
+                        })
+                        .await?;
+                }
+
+                Ok(())
+            }).await?;
+        ret
     }
 
     // Shall be run in a job triggered by GenotypeEvaluated
@@ -449,12 +469,8 @@ impl Service {
                 num_offspring,
                 next_generation_id,
             } => {
-                self.breed_new_genotypes_with_deduplication(
-                    &request,
-                    num_offspring,
-                    next_generation_id,
-                )
-                .await
+                self.breed_genotypes(&request, num_offspring, next_generation_id)
+                    .await
             }
         }
     }
@@ -474,5 +490,31 @@ impl Service {
             .await?;
 
         Ok(())
+    }
+}
+
+pub(crate) trait TypeErasedEvaluator: Send + Sync {
+    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
+}
+
+pub(crate) struct ErasedEvaluator<P, E: Evaluator<P>> {
+    evaluator: E,
+    decode: fn(&[i64]) -> P,
+}
+
+impl<P, E: Evaluator<P>> ErasedEvaluator<P, E> {
+    pub(crate) fn new(evaluator: E, decode: fn(&[i64]) -> P) -> Self {
+        Self { evaluator, decode }
+    }
+}
+
+impl<P, E> TypeErasedEvaluator for ErasedEvaluator<P, E>
+where
+    E: Evaluator<P> + Send + Sync + 'static,
+{
+    #[instrument(level = "debug", skip(self, genes), fields(genome_length = genes.len()))]
+    fn fitness<'a>(&self, genes: &[i64]) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
+        let phenotype = (self.decode)(genes);
+        self.evaluator.fitness(phenotype)
     }
 }

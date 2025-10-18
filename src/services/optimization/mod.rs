@@ -1,8 +1,6 @@
 mod errors;
 mod events;
 mod jobs;
-mod models;
-mod operations;
 mod service;
 
 pub use errors::Error;

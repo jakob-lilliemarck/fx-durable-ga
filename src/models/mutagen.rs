@@ -183,6 +183,9 @@ impl Mutagen {
                 *gene = (*gene + direction * step).clamp(0, bounds.steps() as i64 - 1);
             }
         }
+
+        // Recompute hash after mutation since the genome may have changed
+        genotype.genome_hash = Genotype::compute_genome_hash(&genotype.genome);
     }
 }
 

@@ -45,6 +45,14 @@ impl Repository {
     ) -> impl Future<Output = Result<Vec<i64>, Error>> {
         super::queries::get_intersection(&self.pool, request_id, hashes)
     }
+
+    pub(crate) fn check_if_generation_exists(
+        &self,
+        request_id: Uuid,
+        generation_id: i32,
+    ) -> impl Future<Output = Result<bool, Error>> {
+        super::queries::check_if_generation_exists(&self.pool, request_id, generation_id)
+    }
 }
 
 impl<'tx> TxType<'tx> for Repository {

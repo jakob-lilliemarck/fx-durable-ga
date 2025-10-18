@@ -1,0 +1,74 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            g.id,\n            g.generated_at,\n            g.type_name,\n            g.type_hash,\n            g.genome,\n            g.genome_hash,\n            g.request_id,\n            g.generation_id,\n            f.fitness \"fitness!:Option<f64>\"\n        FROM fx_durable_ga.genotypes g\n        LEFT JOIN fx_durable_ga.fitness f ON g.id = f.genotype_id\n        WHERE (\n            $1::uuid IS NULL OR g.request_id = $1\n        )\n        AND (\n            $2::int IS NULL OR g.generation_id = $2\n        )\n        AND (\n            $3::bool IS NULL OR\n            CASE\n                WHEN $3 = true THEN f.fitness IS NOT NULL\n                ELSE f.fitness IS NULL\n            END\n        )\n        ORDER BY\n            CASE\n                WHEN $4 = 'fitness_desc' THEN f.fitness\n                ELSE NULL\n            END DESC NULLS LAST,\n            CASE\n                WHEN $4 = 'fitness_asc' THEN f.fitness\n                ELSE NULL\n            END ASC NULLS LAST,\n            CASE\n                WHEN $4 = 'random' THEN RANDOM()\n                ELSE NULL\n            END NULLS LAST,\n            g.id ASC\n        LIMIT $5;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "generated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "type_hash",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "genome",
+        "type_info": "Int8Array"
+      },
+      {
+        "ordinal": 5,
+        "name": "genome_hash",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "request_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "generation_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "fitness!:Option<f64>",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Bool",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "02e981e6c4f336e75c6a4902d7fc555a5f03b5118214fa827dfc8949a585eb46"
+}

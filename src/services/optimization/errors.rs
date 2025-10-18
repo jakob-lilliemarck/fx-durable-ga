@@ -1,3 +1,4 @@
+use crate::services::lock;
 use crate::{
     models::{MutagenError, ProbabilityOutOfRange, SelectionError},
     repositories::{genotypes, morphologies, requests},
@@ -25,4 +26,6 @@ pub enum Error {
     SelectionError(#[from] SelectionError),
     #[error("Invalid parent parent: {0}")]
     InvalidParentIndex(usize),
+    #[error("Lock error: {0}")]
+    LockError(#[from] lock::Error),
 }

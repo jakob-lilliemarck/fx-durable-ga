@@ -42,8 +42,15 @@ impl<'tx> FromTx<'tx> for fx_event_bus::Publisher<'tx> {
         fx_event_bus::Publisher::new(tx)
     }
 }
+
 impl<'tx> ToTx<'tx> for fx_event_bus::Publisher<'tx> {
     fn tx(self) -> PgTransaction<'tx> {
         self.into()
+    }
+}
+
+impl<'tx> ToTx<'tx> for PgTransaction<'tx> {
+    fn tx(self) -> PgTransaction<'tx> {
+        self
     }
 }

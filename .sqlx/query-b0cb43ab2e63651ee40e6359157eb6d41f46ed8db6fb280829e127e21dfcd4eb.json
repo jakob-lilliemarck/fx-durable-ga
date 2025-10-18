@@ -1,0 +1,46 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            request_id \"request_id!:Uuid\",\n            evaluated_genotypes \"evaluated_genotypes!:i64\",\n            live_genotypes \"live_genotypes!:i64\",\n            current_generation \"current_generation!:i32\",\n            best_fitness \"best_fitness\"\n        FROM fx_durable_ga.populations\n        WHERE request_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_id!:Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "evaluated_genotypes!:i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "live_genotypes!:i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "current_generation!:i32",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "best_fitness",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "b0cb43ab2e63651ee40e6359157eb6d41f46ed8db6fb280829e127e21dfcd4eb"
+}
