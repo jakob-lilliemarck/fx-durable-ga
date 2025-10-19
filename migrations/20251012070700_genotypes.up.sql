@@ -25,3 +25,12 @@ SELECT
 FROM fx_durable_ga.genotypes g
 LEFT JOIN fx_durable_ga.fitness f ON g.id = f.genotype_id
 GROUP BY request_id;
+
+-- For check_if_generation_exists and search_genotypes filtering
+CREATE INDEX idx_genotypes_request_generation ON fx_durable_ga.genotypes (request_id, generation_id);
+
+-- For get_intersection query
+CREATE INDEX idx_genotypes_request_genome_hash ON fx_durable_ga.genotypes (request_id, genome_hash);
+
+-- For search_genotypes fitness-based sorting
+CREATE INDEX idx_fitness_fitness ON fx_durable_ga.fitness (fitness);

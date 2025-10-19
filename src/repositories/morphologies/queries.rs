@@ -24,7 +24,7 @@ pub(crate) async fn new_morphology<'tx, E: PgExecutor<'tx>>(
                 revised_at,
                 type_name,
                 type_hash,
-                gene_bounds
+                gene_bounds;
             "#,
         db_morphology.revised_at,
         db_morphology.type_name,
@@ -106,7 +106,7 @@ pub(crate) async fn get_morphology<'tx, E: PgExecutor<'tx>>(
                 revised_at,
                 gene_bounds
             FROM fx_durable_ga.morphologies
-            WHERE type_hash = $1
+            WHERE type_hash = $1;
         "#,
         type_hash
     )

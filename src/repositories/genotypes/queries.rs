@@ -144,7 +144,7 @@ pub(crate) async fn check_if_generation_exists<'tx, E: PgExecutor<'tx>>(
                 SELECT 1
                 FROM fx_durable_ga.genotypes
                 WHERE request_id = $1 AND generation_id = $2
-            ) "exists!:bool"
+            ) "exists!:bool";
         "#,
         request_id,
         generation_id,
@@ -247,9 +247,9 @@ pub(crate) async fn record_fitness<'tx, E: PgExecutor<'tx>>(
     let inserted = sqlx::query_as!(
         Fitness,
         r#"
-        INSERT INTO fx_durable_ga.fitness (genotype_id, fitness, evaluated_at)
-        VALUES ($1, $2, $3)
-        RETURNING genotype_id, fitness, evaluated_at
+            INSERT INTO fx_durable_ga.fitness (genotype_id, fitness, evaluated_at)
+            VALUES ($1, $2, $3)
+            RETURNING genotype_id, fitness, evaluated_at;
         "#,
         fitness.genotype_id,
         fitness.fitness,
@@ -322,14 +322,14 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
     let state = sqlx::query_as!(
         Population,
         r#"
-        SELECT
-            request_id "request_id!:Uuid",
-            evaluated_genotypes "evaluated_genotypes!:i64",
-            live_genotypes "live_genotypes!:i64",
-            current_generation "current_generation!:i32",
-            best_fitness "best_fitness"
-        FROM fx_durable_ga.populations
-        WHERE request_id = $1
+            SELECT
+                request_id "request_id!:Uuid",
+                evaluated_genotypes "evaluated_genotypes!:i64",
+                live_genotypes "live_genotypes!:i64",
+                current_generation "current_generation!:i32",
+                best_fitness "best_fitness"
+            FROM fx_durable_ga.populations
+            WHERE request_id = $1;
         "#,
         request_id
     )
@@ -592,46 +592,46 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
 ) -> Result<Vec<(Genotype, Option<f64>)>, super::Error> {
     let rows = sqlx::query!(
         r#"
-        SELECT
-            g.id,
-            g.generated_at,
-            g.type_name,
-            g.type_hash,
-            g.genome,
-            g.genome_hash,
-            g.request_id,
-            g.generation_id,
-            f.fitness "fitness!:Option<f64>"
-        FROM fx_durable_ga.genotypes g
-        LEFT JOIN fx_durable_ga.fitness f ON g.id = f.genotype_id
-        WHERE (
-            $1::uuid IS NULL OR g.request_id = $1
-        )
-        AND (
-            $2::int IS NULL OR g.generation_id = $2
-        )
-        AND (
-            $3::bool IS NULL OR
-            CASE
-                WHEN $3 = true THEN f.fitness IS NOT NULL
-                ELSE f.fitness IS NULL
-            END
-        )
-        ORDER BY
-            CASE
-                WHEN $4 = 'fitness_desc' THEN f.fitness
-                ELSE NULL
-            END DESC NULLS LAST,
-            CASE
-                WHEN $4 = 'fitness_asc' THEN f.fitness
-                ELSE NULL
-            END ASC NULLS LAST,
-            CASE
-                WHEN $4 = 'random' THEN RANDOM()
-                ELSE NULL
-            END NULLS LAST,
-            g.id ASC
-        LIMIT $5;
+            SELECT
+                g.id,
+                g.generated_at,
+                g.type_name,
+                g.type_hash,
+                g.genome,
+                g.genome_hash,
+                g.request_id,
+                g.generation_id,
+                f.fitness "fitness!:Option<f64>"
+            FROM fx_durable_ga.genotypes g
+            LEFT JOIN fx_durable_ga.fitness f ON g.id = f.genotype_id
+            WHERE (
+                $1::uuid IS NULL OR g.request_id = $1
+            )
+            AND (
+                $2::int IS NULL OR g.generation_id = $2
+            )
+            AND (
+                $3::bool IS NULL OR
+                CASE
+                    WHEN $3 = true THEN f.fitness IS NOT NULL
+                    ELSE f.fitness IS NULL
+                END
+            )
+            ORDER BY
+                CASE
+                    WHEN $4 = 'fitness_desc' THEN f.fitness
+                    ELSE NULL
+                END DESC NULLS LAST,
+                CASE
+                    WHEN $4 = 'fitness_asc' THEN f.fitness
+                    ELSE NULL
+                END ASC NULLS LAST,
+                CASE
+                    WHEN $4 = 'random' THEN RANDOM()
+                    ELSE NULL
+                END NULLS LAST,
+                g.id ASC
+            LIMIT $5;
         "#,
         filter.request_id,
         filter.generation_id,

@@ -37,7 +37,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 selector,
                 mutagen,
                 crossover,
-                distribution
+                distribution;
             "#,
         db_request.id,
         db_request.requested_at,
@@ -146,7 +146,7 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
             crossover,
             distribution
         FROM fx_durable_ga.requests
-        WHERE id = $1
+        WHERE id = $1;
         "#,
         id
     )
@@ -230,7 +230,7 @@ pub(crate) async fn new_request_conclusion<'tx, E: PgExecutor<'tx>>(
             RETURNING
                 request_id,
                 concluded_at,
-                concluded_with as "concluded_with: Conclusion"
+                concluded_with as "concluded_with: Conclusion";
         "#,
         request_conclusion.request_id,
         request_conclusion.concluded_at,
@@ -255,7 +255,7 @@ pub(crate) async fn get_request_conclusion<'tx, E: PgExecutor<'tx>>(
                 concluded_at,
                 concluded_with as "concluded_with: Conclusion"
             FROM fx_durable_ga.request_conclusions
-            WHERE request_id = $1
+            WHERE request_id = $1;
         "#,
         id
     )
