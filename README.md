@@ -28,5 +28,5 @@ cargo run --example cube
 
 ### Test coverage
 ```sh
-cargo llvm-cov --html --output-dir coverage -- models::
+cargo llvm-cov --html --output-dir coverage
 ```

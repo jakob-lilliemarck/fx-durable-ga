@@ -460,3 +460,397 @@ impl Service {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bootstrap;
+    use crate::models::{
+        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector,
+        Temperature,
+    };
+
+    async fn create_test_service(pool: sqlx::PgPool) -> Service {
+        let builder = bootstrap::bootstrap(pool).await.unwrap();
+        builder.build()
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_new_optimization_request_happy_path(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Run event bus migrations for event publishing
+        fx_event_bus::run_migrations(&pool).await?;
+        
+        // Create service
+        let service = create_test_service(pool.clone()).await;
+        
+        // Create valid request parameters
+        let type_name = "TestType";
+        let type_hash = 123;
+        let goal = FitnessGoal::maximize(0.95)?;
+        let schedule = Schedule::generational(100, 10);
+        let selector = Selector::tournament(3, 20);
+        let mutagen = Mutagen::new(
+            Temperature::constant(0.5)?,
+            MutationRate::constant(0.3)?
+        );
+        let crossover = Crossover::uniform(0.5)?;
+        let distribution = Distribution::random(50);
+        
+        // Call the method
+        let result = service.new_optimization_request(
+            type_name,
+            type_hash, 
+            goal.clone(),
+            schedule.clone(),
+            selector.clone(),
+            mutagen.clone(),
+            crossover.clone(),
+            distribution.clone()
+        ).await;
+        
+        // Verify success
+        assert!(result.is_ok(), "new_optimization_request should succeed");
+        
+        // Verify request was stored in database
+        let request_count = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM fx_durable_ga.requests WHERE type_name = $1 AND type_hash = $2",
+            type_name,
+            type_hash
+        )
+        .fetch_one(&pool)
+        .await?
+        .unwrap_or(0);
+        
+        assert_eq!(request_count, 1, "Exactly one request should be stored in database");
+        
+        // Verify an OptimizationRequestedEvent was published
+        let event_count: i64 = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM fx_event_bus.events_unacknowledged WHERE name = $1"
+        )
+        .bind("OptimizationRequested")
+        .fetch_one(&pool)
+        .await?;
+        
+        assert_eq!(event_count, 1, "Exactly one OptimizationRequestedEvent should be published");
+        
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_generate_initial_population_happy_path(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Run event bus migrations
+        fx_event_bus::run_migrations(&pool).await?;
+        
+        // Create service
+        let service = create_test_service(pool.clone()).await;
+        
+        // Create a test morphology first
+        let type_name = "TestType";
+        let type_hash = 456;
+        let morphology = crate::models::Morphology::new(
+            type_name,
+            type_hash,
+            vec![
+                crate::models::GeneBounds::integer(0, 9, 10).unwrap(), // 10 steps
+                crate::models::GeneBounds::integer(0, 4, 5).unwrap(),   // 5 steps
+            ],
+        );
+        
+        // Insert morphology into database
+        service.morphologies.new_morphology(morphology).await?;
+        
+        // Create a request
+        let goal = FitnessGoal::maximize(0.95)?;
+        let schedule = Schedule::generational(100, 10);
+        let selector = Selector::tournament(3, 20);
+        let mutagen = Mutagen::new(
+            Temperature::constant(0.5)?,
+            MutationRate::constant(0.3)?
+        );
+        let crossover = Crossover::uniform(0.5)?;
+        let distribution = Distribution::random(10); // Small population for testing
+        
+        let request = crate::models::Request::new(
+            type_name,
+            type_hash,
+            goal,
+            selector,
+            schedule,
+            mutagen,
+            crossover,
+            distribution,
+        )?;
+        let request_id = request.id;
+        
+        // Insert request into database using chainable pattern
+        service.requests
+            .chain(|mut tx_requests| {
+                Box::pin(async move {
+                    let request = tx_requests.new_request(request).await?;
+                    Ok((tx_requests, request))
+                })
+            })
+            .await?;
+        
+        // Call the method under test
+        let result = service.generate_initial_population(request_id).await;
+        
+        // Verify success
+        assert!(result.is_ok(), "generate_initial_population should succeed");
+        
+        // Verify genotypes were created in database
+        let genotype_count = sqlx::query_scalar!(
+            "SELECT COUNT(*) FROM fx_durable_ga.genotypes WHERE request_id = $1 AND generation_id = 1",
+            request_id
+        )
+        .fetch_one(&pool)
+        .await?
+        .unwrap_or(0);
+        
+        assert_eq!(genotype_count, 10, "Exactly 10 genotypes should be created for generation 1");
+        
+        // Verify GenotypeGenerated events were published
+        let event_count: i64 = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM fx_event_bus.events_unacknowledged WHERE name = $1"
+        )
+        .bind("GenotypeGenerated")
+        .fetch_one(&pool)
+        .await?;
+        
+        assert_eq!(event_count, 10, "Exactly 10 GenotypeGenerated events should be published");
+        
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_evaluate_genotype_happy_path(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        use crate::models::{Encodeable, Evaluator, GeneBounds, Terminated};
+        use futures::future::BoxFuture;
+        
+        // Define a simple test type
+        #[derive(Debug)]
+        struct TestType;
+        
+        impl Encodeable for TestType {
+            const NAME: &'static str = "TestType";
+            type Phenotype = (i64, i64);
+            
+            fn morphology() -> Vec<GeneBounds> {
+                vec![
+                    GeneBounds::integer(0, 9, 10).unwrap(),
+                    GeneBounds::integer(0, 4, 5).unwrap(),
+                ]
+            }
+            
+            fn encode(&self) -> Vec<i64> {
+                vec![5, 2] // Not used in test
+            }
+            
+            fn decode(genes: &[i64]) -> Self::Phenotype {
+                (genes[0], genes[1])
+            }
+        }
+        
+        // Simple evaluator that returns constant fitness
+        struct TestEvaluator;
+        
+        impl Evaluator<(i64, i64)> for TestEvaluator {
+            fn fitness<'a>(
+                &self,
+                _phenotype: (i64, i64),
+                _terminated: &'a Box<dyn Terminated>,
+            ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
+                Box::pin(async move { Ok(0.75) })
+            }
+        }
+        
+        // Run event bus migrations
+        fx_event_bus::run_migrations(&pool).await?;
+        
+        // Create service and register evaluator
+        let service = bootstrap::bootstrap(pool.clone()).await?
+            .register::<TestType, _>(TestEvaluator)
+            .await?
+            .build();
+        
+        // Create a test request
+        let goal = FitnessGoal::maximize(0.95)?;
+        let schedule = Schedule::generational(100, 10);
+        let selector = Selector::tournament(3, 20);
+        let mutagen = Mutagen::new(
+            Temperature::constant(0.5)?,
+            MutationRate::constant(0.3)?
+        );
+        let crossover = Crossover::uniform(0.5)?;
+        let distribution = Distribution::random(1);
+        
+        let request = crate::models::Request::new(
+            TestType::NAME,
+            TestType::HASH,
+            goal,
+            selector,
+            schedule,
+            mutagen,
+            crossover,
+            distribution,
+        )?;
+        let request_id = request.id;
+        
+        // Insert request into database
+        service.requests
+            .chain(|mut tx_requests| {
+                Box::pin(async move {
+                    let request = tx_requests.new_request(request).await?;
+                    Ok((tx_requests, request))
+                })
+            })
+            .await?;
+        
+        // Create a genotype manually
+        let genotype = crate::models::Genotype::new(
+            TestType::NAME,
+            TestType::HASH,
+            vec![7, 3], // Test genome
+            request_id,
+            1, // generation_id
+        );
+        let genotype_id = genotype.id;
+        
+        // Insert genotype into database
+        service.genotypes
+            .chain(|mut tx_genotypes| {
+                Box::pin(async move {
+                    let genotypes = tx_genotypes.new_genotypes(vec![genotype]).await?;
+                    Ok((tx_genotypes, genotypes))
+                })
+            })
+            .await?;
+        
+        // Call the method under test
+        let result = service.evaluate_genotype(request_id, genotype_id).await;
+        
+        // Verify success
+        assert!(result.is_ok(), "evaluate_genotype should succeed");
+        
+        // Verify fitness was recorded in database
+        let fitness = sqlx::query_scalar!(
+            "SELECT fitness FROM fx_durable_ga.fitness WHERE genotype_id = $1",
+            genotype_id
+        )
+        .fetch_one(&pool)
+        .await?;
+        
+        assert_eq!(fitness, 0.75, "Fitness should be recorded as 0.75");
+        
+        // Verify GenotypeEvaluatedEvent was published
+        let event_count: i64 = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM fx_event_bus.events_unacknowledged WHERE name = $1"
+        )
+        .bind("GenotypeEvaluated")
+        .fetch_one(&pool)
+        .await?;
+        
+        assert_eq!(event_count, 1, "Exactly one GenotypeEvaluatedEvent should be published");
+        
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_maintain_population_request_completion(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // Run event bus migrations
+        fx_event_bus::run_migrations(&pool).await?;
+        
+        // Create service
+        let service = create_test_service(pool.clone()).await;
+        
+        // Create morphology
+        let type_name = "TestType";
+        let type_hash = 789;
+        let morphology = crate::models::Morphology::new(
+            type_name,
+            type_hash,
+            vec![
+                crate::models::GeneBounds::integer(0, 9, 10).unwrap(),
+                crate::models::GeneBounds::integer(0, 4, 5).unwrap(),
+            ],
+        );
+        service.morphologies.new_morphology(morphology).await?;
+        
+        // Create request with LOW fitness goal (0.5) so it's easy to exceed
+        let goal = FitnessGoal::maximize(0.5)?;
+        let schedule = Schedule::generational(100, 10);
+        let selector = Selector::tournament(3, 20);
+        let mutagen = Mutagen::new(
+            Temperature::constant(0.5)?,
+            MutationRate::constant(0.3)?
+        );
+        let crossover = Crossover::uniform(0.5)?;
+        let distribution = Distribution::random(5);
+        
+        let request = crate::models::Request::new(
+            type_name,
+            type_hash,
+            goal,
+            selector,
+            schedule,
+            mutagen,
+            crossover,
+            distribution,
+        )?;
+        let request_id = request.id;
+        
+        // Insert request
+        service.requests
+            .chain(|mut tx_requests| {
+                Box::pin(async move {
+                    let request = tx_requests.new_request(request).await?;
+                    Ok((tx_requests, request))
+                })
+            })
+            .await?;
+        
+        // Create genotype with fitness that EXCEEDS the goal (0.8 > 0.5)
+        let genotype = crate::models::Genotype::new(
+            type_name,
+            type_hash,
+            vec![5, 2],
+            request_id,
+            1,
+        );
+        let genotype_id = genotype.id;
+        
+        // Insert genotype and fitness
+        service.genotypes
+            .chain(|mut tx_genotypes| {
+                Box::pin(async move {
+                    // Insert genotype
+                    tx_genotypes.new_genotypes(vec![genotype]).await?;
+                    
+                    // Insert fitness that exceeds goal
+                    let fitness = crate::models::Fitness::new(genotype_id, 0.8);
+                    tx_genotypes.record_fitness(&fitness).await?;
+                    
+                    Ok((tx_genotypes, ()))
+                })
+            })
+            .await?;
+        
+        // Call the method under test
+        let result = service.maintain_population(request_id).await;
+        
+        // Verify success
+        assert!(result.is_ok(), "maintain_population should succeed");
+        
+        // Verify RequestCompletedEvent was published
+        let event_count: i64 = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM fx_event_bus.events_unacknowledged WHERE name = $1"
+        )
+        .bind("RequestCompleted")
+        .fetch_one(&pool)
+        .await?;
+        
+        assert_eq!(event_count, 1, "Exactly one RequestCompletedEvent should be published");
+        
+        Ok(())
+    }
+}
