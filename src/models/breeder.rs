@@ -58,7 +58,8 @@ impl Breeder {
 mod tests {
     use super::*;
     use crate::models::{
-        Crossover, Distribution, FitnessGoal, GeneBounds, Mutagen, Schedule, Selector,
+        Crossover, Distribution, FitnessGoal, GeneBounds, Mutagen, MutationRate, Schedule,
+        Selector, Temperature,
     };
     use chrono::Utc;
     use rand::SeedableRng;
@@ -85,7 +86,10 @@ mod tests {
             FitnessGoal::maximize(0.9).unwrap(),
             Selector::tournament(5, 20),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1).unwrap(),
+            Mutagen::new(
+                Temperature::constant(0.5).unwrap(),
+                MutationRate::constant(0.1).unwrap(),
+            ),
             Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(50),
         )

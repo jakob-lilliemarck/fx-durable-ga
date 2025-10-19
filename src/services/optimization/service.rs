@@ -296,6 +296,9 @@ impl Service {
                 // Get morphology for mutation bounds
                 let morphology = self.morphologies.get_morphology(request.type_hash).await?;
 
+                // Get current population to calculate optimization progress
+                let population = self.genotypes.get_population(&request.id).await?;
+
                 // Iterative breeding with deduplication
                 let mut final_genotypes = Vec::with_capacity(num_offspring);
                 let mut generated_hashes = HashSet::new();
@@ -318,7 +321,7 @@ impl Service {
                             &morphology,
                             &parent_pairs,
                             next_generation_id,
-                            0.0, // FIXME: 0.0 refers to optimization progress - should be computed
+                            request.goal.calculate_progress(population.best_fitness),
                             &mut rng,
                         )
                     };

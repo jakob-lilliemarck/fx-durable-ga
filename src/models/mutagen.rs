@@ -2,12 +2,12 @@ use crate::models::{Genotype, Morphology};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
-fn decay_linear(value: f64, progress: f64, multiplier: f64) -> f64 {
-    value * (1.0 - progress * multiplier).max(0.0)
+fn decay_linear(upper: f64, lower: f64, progress: f64, multiplier: f64) -> f64 {
+    lower + (upper - lower) * (1.0 - progress * multiplier).max(0.0)
 }
 
-fn decay_exponential(value: f64, progress: f64, multiplier: f64, exponent: i32) -> f64 {
-    value * (1.0 - progress * multiplier).max(0.0).powi(exponent)
+fn decay_exponential(upper: f64, lower: f64, progress: f64, multiplier: f64, exponent: i32) -> f64 {
+    lower + (upper - lower) * (1.0 - progress * multiplier).max(0.0).powi(exponent)
 }
 
 // ============================================================
@@ -16,19 +16,29 @@ fn decay_exponential(value: f64, progress: f64, multiplier: f64, exponent: i32) 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Decay {
     Constant,
-    Linear { multiplier: f64 },
-    Exponential { multiplier: f64, exponent: i32 },
+    Linear {
+        lower: f64,
+        multiplier: f64,
+    },
+    Exponential {
+        lower: f64,
+        multiplier: f64,
+        exponent: i32,
+    },
 }
 
 impl Decay {
-    fn apply(&self, value: f64, progress: f64) -> f64 {
+    fn apply(&self, upper: f64, progress: f64) -> f64 {
         match self {
-            Decay::Constant => value,
-            Decay::Linear { multiplier } => decay_linear(value, progress, *multiplier),
+            Decay::Constant => upper,
+            Decay::Linear { lower, multiplier } => {
+                decay_linear(upper, *lower, progress, *multiplier)
+            }
             Decay::Exponential {
+                lower,
                 multiplier,
                 exponent,
-            } => decay_exponential(value, progress, *multiplier, *exponent),
+            } => decay_exponential(upper, *lower, progress, *multiplier, *exponent),
         }
     }
 }
@@ -43,17 +53,15 @@ pub struct Temperature {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("temperature must be between 0.0 and 1.0, got: {0}")]
-pub struct TemperatureOutOfRange(f64);
+pub enum TemperatureError {
+    #[error("temperature value must be between 0.0 and 1.0, got: {0}")]
+    ValueOutOfRange(f64),
+    #[error("temperature lower bound ({lower}) must be <= upper bound ({upper})")]
+    InvalidBounds { lower: f64, upper: f64 },
+}
 
 impl Temperature {
-    pub fn new(value: f64, decay: Decay) -> Result<Self, TemperatureOutOfRange> {
-        let value = Self::validate(value)?;
-
-        Ok(Self { value, decay })
-    }
-
-    pub fn constant(value: f64) -> Result<Self, TemperatureOutOfRange> {
+    pub fn constant(value: f64) -> Result<Self, TemperatureError> {
         let value = Self::validate(value)?;
 
         Ok(Self {
@@ -62,12 +70,49 @@ impl Temperature {
         })
     }
 
-    fn validate(value: f64) -> Result<f64, TemperatureOutOfRange> {
+    fn validate(value: f64) -> Result<f64, TemperatureError> {
         if !(0.0..=1.0).contains(&value) {
-            return Err(TemperatureOutOfRange(value));
+            return Err(TemperatureError::ValueOutOfRange(value));
         }
 
         Ok(value)
+    }
+
+    pub fn linear(upper: f64, lower: f64, multiplier: f64) -> Result<Self, TemperatureError> {
+        let upper = Self::validate(upper)?;
+        let lower = Self::validate(lower)?;
+
+        if lower > upper {
+            return Err(TemperatureError::InvalidBounds { lower, upper });
+        }
+
+        Ok(Self {
+            value: upper,
+            decay: Decay::Linear { lower, multiplier },
+        })
+    }
+
+    pub fn exponential(
+        upper: f64,
+        lower: f64,
+        multiplier: f64,
+        exponent: i32,
+    ) -> Result<Self, TemperatureError> {
+        let upper = Self::validate(upper)?;
+        let lower = Self::validate(lower)?;
+
+        if lower > upper {
+            return Err(TemperatureError::InvalidBounds { lower, upper });
+        }
+
+        Ok(Self {
+            value: upper,
+            decay: Decay::Exponential {
+                lower,
+                multiplier,
+                exponent,
+            },
+        })
     }
 
     fn get(&self, progress: f64) -> f64 {
@@ -85,17 +130,15 @@ pub struct MutationRate {
 }
 
 #[derive(Debug, thiserror::Error)]
-#[error("mutation_rate must be between 0.0 and 1.0, got: {0}")]
-pub struct MutationRateOutOfRange(f64);
+pub enum MutationRateError {
+    #[error("mutation rate value must be between 0.0 and 1.0, got: {0}")]
+    ValueOutOfRange(f64),
+    #[error("mutation rate lower bound ({lower}) must be <= upper bound ({upper})")]
+    InvalidBounds { lower: f64, upper: f64 },
+}
 
 impl MutationRate {
-    pub fn new(value: f64, decay: Decay) -> Result<Self, MutationRateOutOfRange> {
-        let value = Self::validate(value)?;
-
-        Ok(Self { value, decay })
-    }
-
-    pub fn constant(value: f64) -> Result<Self, MutationRateOutOfRange> {
+    pub fn constant(value: f64) -> Result<Self, MutationRateError> {
         let value = Self::validate(value)?;
 
         Ok(Self {
@@ -104,12 +147,49 @@ impl MutationRate {
         })
     }
 
-    fn validate(value: f64) -> Result<f64, MutationRateOutOfRange> {
+    fn validate(value: f64) -> Result<f64, MutationRateError> {
         if !(0.0..=1.0).contains(&value) {
-            return Err(MutationRateOutOfRange(value));
+            return Err(MutationRateError::ValueOutOfRange(value));
         }
 
         Ok(value)
+    }
+
+    pub fn linear(upper: f64, lower: f64, multiplier: f64) -> Result<Self, MutationRateError> {
+        let upper = Self::validate(upper)?;
+        let lower = Self::validate(lower)?;
+
+        if lower > upper {
+            return Err(MutationRateError::InvalidBounds { lower, upper });
+        }
+
+        Ok(Self {
+            value: upper,
+            decay: Decay::Linear { lower, multiplier },
+        })
+    }
+
+    pub fn exponential(
+        upper: f64,
+        lower: f64,
+        multiplier: f64,
+        exponent: i32,
+    ) -> Result<Self, MutationRateError> {
+        let upper = Self::validate(upper)?;
+        let lower = Self::validate(lower)?;
+
+        if lower > upper {
+            return Err(MutationRateError::InvalidBounds { lower, upper });
+        }
+
+        Ok(Self {
+            value: upper,
+            decay: Decay::Exponential {
+                lower,
+                multiplier,
+                exponent,
+            },
+        })
     }
 
     fn get(&self, progress: f64) -> f64 {
@@ -129,9 +209,9 @@ pub struct Mutagen {
 #[derive(Debug, thiserror::Error)]
 pub enum MutagenError {
     #[error("Mutation rate error: {0}")]
-    MutationRate(#[from] MutationRateOutOfRange),
+    MutationRate(#[from] MutationRateError),
     #[error("Temperature error: {0}")]
-    Temperature(#[from] TemperatureOutOfRange),
+    Temperature(#[from] TemperatureError),
 }
 
 impl Mutagen {
@@ -142,17 +222,15 @@ impl Mutagen {
         }
     }
 
+    /// Helper method for backward compatibility - use Mutagen::new() with Temperature/MutationRate constructors instead
     pub fn constant(
         temperature_value: f64,
         mutation_rate_value: f64,
     ) -> Result<Self, MutagenError> {
-        let temperature = Temperature::constant(temperature_value)?;
-        let mutation_rate = MutationRate::constant(mutation_rate_value)?;
-
-        Ok(Self {
-            temperature,
-            mutation_rate,
-        })
+        Ok(Self::new(
+            Temperature::constant(temperature_value)?,
+            MutationRate::constant(mutation_rate_value)?,
+        ))
     }
 
     pub(crate) fn mutate<R: Rng>(
@@ -212,84 +290,30 @@ mod tests {
     }
 
     #[test]
-    fn test_temperature_validation_errors() {
-        assert!(Temperature::new(-0.1, Decay::Constant).is_err());
-        assert!(Temperature::new(1.5, Decay::Constant).is_err());
+    fn it_validates_temperature_and_mutation_rate_bounds() {
+        // Temperature validation
         assert!(Temperature::constant(-0.1).is_err());
         assert!(Temperature::constant(1.5).is_err());
-    }
+        assert!(Temperature::linear(-0.1, 0.0, 1.0).is_err());
+        assert!(Temperature::exponential(1.5, 0.0, 1.0, 2).is_err());
 
-    #[test]
-    fn test_mutation_rate_validation_errors() {
-        assert!(MutationRate::new(-0.1, Decay::Constant).is_err());
-        assert!(MutationRate::new(1.5, Decay::Constant).is_err());
+        // MutationRate validation
         assert!(MutationRate::constant(-0.1).is_err());
         assert!(MutationRate::constant(1.5).is_err());
+        assert!(MutationRate::linear(-0.1, 0.0, 1.0).is_err());
+        assert!(MutationRate::exponential(1.5, 0.0, 1.0, 2).is_err());
+
+        // Lower > upper validation for MutationRate
+        assert!(MutationRate::linear(0.3, 0.5, 1.0).is_err()); 
+        assert!(MutationRate::exponential(0.2, 0.4, 1.0, 2).is_err());
+        
+        // Lower > upper validation for Temperature
+        assert!(Temperature::linear(0.3, 0.5, 1.0).is_err());
+        assert!(Temperature::exponential(0.2, 0.4, 1.0, 2).is_err());
     }
 
     #[test]
-    fn test_mutagen_validation_errors() {
-        let result = Mutagen::constant(-0.1, 0.5); // Invalid temperature
-        assert!(result.is_err());
-
-        let result = Mutagen::constant(0.5, -0.1); // Invalid mutation rate
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_linear_decay_through_temperature() {
-        let temp = Temperature::new(1.0, Decay::Linear { multiplier: 1.0 }).unwrap();
-
-        assert_eq!(temp.get(0.0), 1.0); // No progress
-        assert_eq!(temp.get(0.5), 0.5); // Half progress
-        assert_eq!(temp.get(1.0), 0.0); // Full progress
-        assert_eq!(temp.get(1.5), 0.0); // Over-progress (clamped)
-    }
-
-    #[test]
-    fn test_exponential_decay_through_temperature() {
-        let temp = Temperature::new(
-            1.0,
-            Decay::Exponential {
-                multiplier: 1.0,
-                exponent: 2,
-            },
-        )
-        .unwrap();
-
-        assert_eq!(temp.get(0.0), 1.0); // No progress
-        assert_eq!(temp.get(0.5), 0.25); // Quadratic: (1.0 - 0.5)^2 = 0.25
-        assert_eq!(temp.get(1.0), 0.0); // Full progress
-    }
-
-    #[test]
-    fn test_linear_decay_through_mutation_rate() {
-        let rate = MutationRate::new(1.0, Decay::Linear { multiplier: 1.0 }).unwrap();
-
-        assert_eq!(rate.get(0.0), 1.0); // No progress
-        assert_eq!(rate.get(0.5), 0.5); // Half progress
-        assert_eq!(rate.get(1.0), 0.0); // Full progress
-        assert_eq!(rate.get(1.5), 0.0); // Over-progress (clamped)
-    }
-
-    #[test]
-    fn test_exponential_decay_through_mutation_rate() {
-        let rate = MutationRate::new(
-            1.0,
-            Decay::Exponential {
-                multiplier: 1.0,
-                exponent: 2,
-            },
-        )
-        .unwrap();
-
-        assert_eq!(rate.get(0.0), 1.0); // No progress
-        assert_eq!(rate.get(0.5), 0.25); // Quadratic: (1.0 - 0.5)^2 = 0.25
-        assert_eq!(rate.get(1.0), 0.0); // Full progress
-    }
-
-    #[test]
-    fn test_constant_decay() {
+    fn it_applies_constant_decay() {
         let temp = Temperature::constant(0.7).unwrap();
         let rate = MutationRate::constant(0.3).unwrap();
 
@@ -304,6 +328,38 @@ mod tests {
     }
 
     #[test]
+    fn it_applies_linear_decay() {
+        let temp = Temperature::linear(1.0, 0.0, 1.0).unwrap();
+        let rate = MutationRate::linear(1.0, 0.0, 1.0).unwrap();
+
+        // Linear decay: value * (1.0 - progress * multiplier)
+        assert_eq!(temp.get(0.0), 1.0); // No progress
+        assert_eq!(temp.get(0.5), 0.5); // Half progress
+        assert_eq!(temp.get(1.0), 0.0); // Full progress
+        assert_eq!(temp.get(1.5), 0.0); // Over-progress (clamped)
+
+        assert_eq!(rate.get(0.0), 1.0);
+        assert_eq!(rate.get(0.5), 0.5);
+        assert_eq!(rate.get(1.0), 0.0);
+        assert_eq!(rate.get(1.5), 0.0);
+    }
+
+    #[test]
+    fn it_applies_exponential_decay() {
+        let temp = Temperature::exponential(1.0, 0.0, 1.0, 2).unwrap();
+        let rate = MutationRate::exponential(1.0, 0.0, 1.0, 2).unwrap();
+
+        // Exponential decay: value * (1.0 - progress * multiplier)^exponent
+        assert_eq!(temp.get(0.0), 1.0); // No progress
+        assert_eq!(temp.get(0.5), 0.25); // Quadratic: (1.0 - 0.5)^2 = 0.25
+        assert_eq!(temp.get(1.0), 0.0); // Full progress
+
+        assert_eq!(rate.get(0.0), 1.0);
+        assert_eq!(rate.get(0.5), 0.25);
+        assert_eq!(rate.get(1.0), 0.0);
+    }
+
+    #[test]
     fn it_mutates() {
         let mut rng = StdRng::seed_from_u64(42);
         let morphology = get_test_morphology();
@@ -311,8 +367,8 @@ mod tests {
 
         // Create test data
         let mutagen = Mutagen::new(
-            Temperature::new(0.1, Decay::Constant).expect("temperature is in range"), // Low temp = small steps
-            MutationRate::new(1.0, Decay::Constant).expect("mutation_rate is in range"), // 100% mutation rate
+            Temperature::constant(0.1).expect("temperature is in range"), // Low temp = small steps
+            MutationRate::constant(1.0).expect("mutation_rate is in range"), // 100% mutation rate
         );
 
         let original_genome = genotype.genome.clone();
@@ -335,8 +391,8 @@ mod tests {
         let mut genotype = get_test_genotype();
 
         let mutagen = Mutagen::new(
-            Temperature::new(1.0, Decay::Constant).expect("temperature is in range"),
-            MutationRate::new(0.0, Decay::Constant).expect("mutation_rate is in range"), // 0% mutation rate
+            Temperature::constant(1.0).expect("temperature is in range"),
+            MutationRate::constant(0.0).expect("mutation_rate is in range"), // 0% mutation rate
         );
 
         let original_genome = genotype.genome.clone();
@@ -348,19 +404,36 @@ mod tests {
     }
 
     #[test]
-    fn it_applies_progress_to_decay() {
+    fn it_composes_different_decay_strategies() {
+        // Test that we can mix different decay types
         let mutagen = Mutagen::new(
-            Temperature::new(1.0, Decay::Linear { multiplier: 1.0 })
-                .expect("temperature is in range"),
-            MutationRate::new(0.8, Decay::Constant).expect("mutation_range is in range"),
+            Temperature::linear(0.8, 0.1, 0.9).unwrap(), // Linear temperature decay
+            MutationRate::exponential(0.5, 0.0, 1.0, 2).unwrap(), // Exponential mutation rate decay
         );
 
-        // Test that temperature decays with progress
-        assert_eq!(mutagen.temperature.get(0.0), 1.0);
-        assert_eq!(mutagen.temperature.get(0.5), 0.5);
-        assert_eq!(mutagen.temperature.get(1.0), 0.0);
+        // Verify the composition works correctly
+        assert_eq!(mutagen.temperature.get(0.0), 0.8);
+        assert_eq!(mutagen.mutation_rate.get(0.0), 0.5);
+        // Exponential decay: lower + (upper - lower) * (1.0 - progress * multiplier)^exponent
+        // 0.0 + (0.5 - 0.0) * (1.0 - 0.5 * 1.0)^2 = 0.5 * (0.5)^2 = 0.5 * 0.25 = 0.125
+        assert_eq!(mutagen.mutation_rate.get(0.5), 0.125);
 
-        // Test that constant rate doesn't decay
-        assert_eq!(mutagen.mutation_rate.get(0.5), 0.8);
+        // Linear temperature decay: lower + (upper - lower) * (1.0 - progress * multiplier)
+        // 0.1 + (0.8 - 0.1) * (1.0 - 0.5 * 0.9) = 0.1 + 0.7 * 0.55 = 0.1 + 0.385 = 0.485
+        assert!((mutagen.temperature.get(0.5) - 0.485).abs() < 1e-10);
+    }
+
+    #[test]
+    fn it_validates_mutagen_constant_parameters() {
+        // Test temperature validation error
+        assert!(Mutagen::constant(-0.1, 0.5).is_err());
+        assert!(Mutagen::constant(1.5, 0.5).is_err());
+        
+        // Test mutation rate validation error
+        assert!(Mutagen::constant(0.5, -0.1).is_err());
+        assert!(Mutagen::constant(0.5, 1.5).is_err());
+        
+        // Test successful case
+        assert!(Mutagen::constant(0.5, 0.3).is_ok());
     }
 }

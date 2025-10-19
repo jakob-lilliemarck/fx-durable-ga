@@ -30,6 +30,31 @@ impl FitnessGoal {
         }
     }
 
+    /// Calculate optimization progress from 0.0 (no progress) to 1.0 (goal reached)
+    /// Returns 0.0 if best_fitness is None
+    pub(crate) fn calculate_progress(&self, best_fitness: Option<f64>) -> f64 {
+        let best_fitness = match best_fitness {
+            Some(fitness) => fitness,
+            None => return 0.0, // No fitness data = no progress
+        };
+
+        match self {
+            FitnessGoal::Maximize { threshold } => {
+                // For maximize: progress = current_fitness / threshold
+                // Clamp to [0.0, 1.0] in case fitness exceeds threshold
+                (best_fitness / threshold).min(1.0).max(0.0)
+            }
+            FitnessGoal::Minimize { threshold } => {
+                // For minimize: progress = (1.0 - current_fitness) / (1.0 - threshold)
+                // This assumes fitness is in [0.0, 1.0] range (as enforced by threshold validation)
+                if *threshold >= 1.0 {
+                    return 1.0; // Edge case: threshold is 1.0, any fitness <= 1.0 is complete progress
+                }
+                ((1.0 - best_fitness) / (1.0 - threshold)).min(1.0).max(0.0)
+            }
+        }
+    }
+
     fn validate(threshold: f64) -> Result<f64, ThresholdOutOfRange> {
         if !(0.0..=1.0).contains(&threshold) {
             return Err(ThresholdOutOfRange(threshold));
@@ -84,5 +109,56 @@ mod tests {
         // Test that 1.0 threshold for maximize accepts only perfect scores
         assert!(max_goal.is_reached(1.0));
         assert!(!max_goal.is_reached(0.9)); // Even near-perfect scores fail
+    }
+
+    #[test]
+    fn test_progress_calculation_maximize() {
+        let goal = FitnessGoal::maximize(0.8).unwrap();
+
+        // No fitness data = no progress
+        assert_eq!(goal.calculate_progress(None), 0.0);
+        
+        // Progress from 0.0 to threshold
+        assert_eq!(goal.calculate_progress(Some(0.0)), 0.0);   // 0/0.8 = 0.0
+        assert_eq!(goal.calculate_progress(Some(0.4)), 0.5);   // 0.4/0.8 = 0.5
+        assert_eq!(goal.calculate_progress(Some(0.8)), 1.0);   // 0.8/0.8 = 1.0
+        
+        // Exceeding threshold should clamp to 1.0
+        assert_eq!(goal.calculate_progress(Some(1.0)), 1.0);   // Clamped
+        
+        // Negative values should clamp to 0.0
+        assert_eq!(goal.calculate_progress(Some(-0.1)), 0.0);  // Clamped
+    }
+
+    #[test]
+    fn test_progress_calculation_minimize() {
+        let goal = FitnessGoal::minimize(0.2).unwrap();
+
+        // No fitness data = no progress
+        assert_eq!(goal.calculate_progress(None), 0.0);
+        
+        // Progress formula: (1.0 - current) / (1.0 - threshold)
+        // With threshold 0.2: (1.0 - current) / 0.8
+        assert_eq!(goal.calculate_progress(Some(1.0)), 0.0);   // (1.0-1.0)/0.8 = 0.0
+        assert_eq!(goal.calculate_progress(Some(0.6)), 0.5);   // (1.0-0.6)/0.8 = 0.5
+        assert_eq!(goal.calculate_progress(Some(0.2)), 1.0);   // (1.0-0.2)/0.8 = 1.0
+        
+        // Better than threshold should clamp to 1.0
+        assert_eq!(goal.calculate_progress(Some(0.1)), 1.0);   // Clamped
+        
+        // Worse than 1.0 should clamp to 0.0
+        assert_eq!(goal.calculate_progress(Some(1.1)), 0.0);   // Clamped
+    }
+
+    #[test]
+    fn test_progress_calculation_edge_cases() {
+        // Edge case: minimize with threshold 1.0
+        let min_goal_edge = FitnessGoal::minimize(1.0).unwrap();
+        assert_eq!(min_goal_edge.calculate_progress(Some(0.5)), 1.0); // Special case
+        assert_eq!(min_goal_edge.calculate_progress(Some(1.0)), 1.0); // Special case
+        
+        // Edge case: maximize with threshold very close to 0
+        let max_goal_edge = FitnessGoal::maximize(0.001).unwrap();
+        assert_eq!(max_goal_edge.calculate_progress(Some(0.0005)), 0.5); // 0.0005/0.001 = 0.5
     }
 }

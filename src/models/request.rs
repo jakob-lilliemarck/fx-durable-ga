@@ -71,7 +71,9 @@ pub(crate) struct RequestConclusion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
+    use crate::models::{
+        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector, Temperature,
+    };
 
     fn create_test_request(goal: FitnessGoal) -> Request {
         Request::new(
@@ -80,7 +82,10 @@ mod tests {
             goal,
             Selector::tournament(5, 20),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1).unwrap(),
+            Mutagen::new(
+                Temperature::constant(0.5).unwrap(),
+                MutationRate::constant(0.1).unwrap(),
+            ),
             Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(50),
         )
