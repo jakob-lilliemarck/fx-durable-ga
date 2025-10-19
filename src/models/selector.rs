@@ -2,9 +2,9 @@ use crate::models::Genotype;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 
-/// Pure function for single roulette wheel spin
+/// Pure function for single roulette wheel spin (borrowed)
 fn spin_roulette(
-    candidates: &[(Genotype, f64)],
+    candidates: &[(&Genotype, f64)],
     total_fitness: f64,
     offset: f64,
     rng: &mut impl rand::Rng,
@@ -45,19 +45,15 @@ mod spin_roulette_tests {
     #[test]
     fn it_spins_the_roulette() {
         // Create candidates with fitness values 0.1, 0.3, 0.6
-        let candidates = vec![
-            (
-                create_test_genotype("00000000-0000-0000-0000-000000000001"),
-                0.1,
-            ),
-            (
-                create_test_genotype("00000000-0000-0000-0000-000000000002"),
-                0.3,
-            ),
-            (
-                create_test_genotype("00000000-0000-0000-0000-000000000003"),
-                0.6,
-            ),
+        let genotypes = vec![
+            create_test_genotype("00000000-0000-0000-0000-000000000001"),
+            create_test_genotype("00000000-0000-0000-0000-000000000002"),
+            create_test_genotype("00000000-0000-0000-0000-000000000003"),
+        ];
+        let candidates: Vec<(&Genotype, f64)> = vec![
+            (&genotypes[0], 0.1),
+            (&genotypes[1], 0.3),
+            (&genotypes[2], 0.6),
         ];
         let total_fitness = 1.0;
         let offset = 0.0;
@@ -88,10 +84,8 @@ mod spin_roulette_tests {
 
     #[test]
     fn it_always_selects_single_candidate() {
-        let candidates = vec![(
-            create_test_genotype("00000000-0000-0000-0000-000000000001"),
-            1.0,
-        )];
+        let genotype = create_test_genotype("00000000-0000-0000-0000-000000000001");
+        let candidates = vec![(&genotype, 1.0)];
         let mut rng = rand::rng();
 
         for _ in 0..3 {
@@ -102,16 +96,9 @@ mod spin_roulette_tests {
 
     #[test]
     fn it_distributes_equal_fitness_evenly() {
-        let candidates = vec![
-            (
-                create_test_genotype("00000000-0000-0000-0000-000000000001"),
-                1.0,
-            ),
-            (
-                create_test_genotype("00000000-0000-0000-0000-000000000002"),
-                1.0,
-            ),
-        ];
+        let genotype_1 = create_test_genotype("00000000-0000-0000-0000-000000000001");
+        let genotype_2 = create_test_genotype("00000000-0000-0000-0000-000000000002");
+        let candidates = vec![(&genotype_1, 1.0), (&genotype_2, 1.0)];
         let mut counts = [0; 2];
         let mut rng = rand::rng();
 
@@ -133,32 +120,28 @@ mod spin_roulette_tests {
 
     #[test]
     fn it_fails_when_total_fitness_is_incorrect() {
-        let candidates = vec![(
-            create_test_genotype("00000000-0000-0000-0000-000000000001"),
-            0.0,
-        )];
-        // Pass incorrect total_fitness (higher than actual sum of 0.6)
+        let genotype = create_test_genotype("00000000-0000-0000-0000-000000000001");
+        let candidates = vec![(&genotype, 0.0)];
         let total_fitness = 1.0;
         let offset = 0.0;
         let mut rng = rand::rng();
 
-        // Since candidate has fitness 0.0 there should be no chance of the spin to be in range - this should _always_ error
         let should_err = spin_roulette(&candidates, total_fitness, offset, &mut rng);
         assert!(should_err.is_err(),);
     }
 }
 
 /// Pure function for roulette selection
-fn roulette_selection(
+fn roulette_selection<'a>(
     num_pairs: usize,
-    candidates_with_fitness: Vec<(Genotype, Option<f64>)>,
+    candidates_with_fitness: &'a [(Genotype, Option<f64>)],
     rng: &mut impl rand::Rng,
-) -> Result<Vec<(usize, usize)>, SelectionError> {
+) -> Result<Vec<(&'a Genotype, &'a Genotype)>, SelectionError> {
     let mut parent_pairs = Vec::with_capacity(num_pairs);
 
-    // Filter out genotypes without fitness
-    let evaluated_candidates: Vec<(Genotype, f64)> = candidates_with_fitness
-        .into_iter()
+    // Filter out genotypes without fitness (borrowed)
+    let evaluated_candidates: Vec<(&Genotype, f64)> = candidates_with_fitness
+        .iter()
         .filter_map(|(genotype, fitness_opt)| fitness_opt.map(|fitness| (genotype, fitness)))
         .collect();
 
@@ -188,24 +171,27 @@ fn roulette_selection(
     for _ in 0..num_pairs {
         let parent1_idx = spin_roulette(&evaluated_candidates, total_fitness, 0.0, rng)?;
         let parent2_idx = spin_roulette(&evaluated_candidates, total_fitness, 0.0, rng)?;
-        parent_pairs.push((parent1_idx, parent2_idx));
+        parent_pairs.push((
+            evaluated_candidates[parent1_idx].0,
+            evaluated_candidates[parent2_idx].0,
+        ));
     }
 
     Ok(parent_pairs)
 }
 
 /// Pure function for tournament selection
-fn tournament_selection(
+fn tournament_selection<'a>(
     num_pairs: usize,
     tournament_size: usize,
-    candidates_with_fitness: Vec<(Genotype, Option<f64>)>,
+    candidates_with_fitness: &'a [(Genotype, Option<f64>)],
     rng: &mut impl rand::Rng,
-) -> Result<Vec<(usize, usize)>, SelectionError> {
+) -> Result<Vec<(&'a Genotype, &'a Genotype)>, SelectionError> {
     let mut parent_pairs = Vec::with_capacity(num_pairs);
 
-    // Filter out genotypes without fitness
-    let evaluated_candidates: Vec<(Genotype, f64)> = candidates_with_fitness
-        .into_iter()
+    // Filter out genotypes without fitness (borrowed)
+    let evaluated_candidates: Vec<(&Genotype, f64)> = candidates_with_fitness
+        .iter()
         .filter_map(|(genotype, fitness_opt)| fitness_opt.map(|fitness| (genotype, fitness)))
         .collect();
 
@@ -240,7 +226,10 @@ fn tournament_selection(
             }
         }
 
-        parent_pairs.push((parent1_idx, parent2_idx));
+        parent_pairs.push((
+            evaluated_candidates[parent1_idx].0,
+            evaluated_candidates[parent2_idx].0,
+        ));
     }
 
     Ok(parent_pairs)
@@ -291,11 +280,11 @@ impl Selector {
     }
 
     /// Select parent pairs from candidates with fitness
-    pub(crate) fn select_parents(
+    pub(crate) fn select_parents<'a>(
         &self,
         num_pairs: usize,
-        candidates_with_fitness: Vec<(Genotype, Option<f64>)>,
-    ) -> Result<Vec<(usize, usize)>, SelectionError> {
+        candidates_with_fitness: &'a [(Genotype, Option<f64>)],
+    ) -> Result<Vec<(&'a Genotype, &'a Genotype)>, SelectionError> {
         let mut rng = rand::rng();
         match self.method {
             SelectionMethod::Tournament { size } => {
@@ -376,16 +365,17 @@ mod selector_tests {
             ),
         ];
 
-        let result = tournament_selection(2, 2, candidates, &mut rng);
+        let result = tournament_selection(2, 2, &candidates, &mut rng);
         assert!(result.is_ok());
 
         let pairs = result.unwrap();
         assert_eq!(pairs.len(), 2);
 
-        // Verify indices are valid
-        for (parent1_idx, parent2_idx) in &pairs {
-            assert!(*parent1_idx < 6);
-            assert!(*parent2_idx < 6);
+        // Verify returned refs point into candidates
+        for (p1, p2) in &pairs {
+            let any_match = candidates.iter().any(|(g, _)| std::ptr::eq(*p1, g))
+                && candidates.iter().any(|(g, _)| std::ptr::eq(*p2, g));
+            assert!(any_match);
         }
     }
 
@@ -408,16 +398,16 @@ mod selector_tests {
             ),
         ];
 
-        let result = selector.select_parents(2, candidates);
+        let result = selector.select_parents(2, &candidates);
         assert!(result.is_ok());
 
         let pairs = result.unwrap();
         assert_eq!(pairs.len(), 2);
 
-        // Verify indices are valid
-        for (parent1_idx, parent2_idx) in &pairs {
-            assert!(*parent1_idx < 3);
-            assert!(*parent2_idx < 3);
+        for (p1, p2) in &pairs {
+            let any_match = candidates.iter().any(|(g, _)| std::ptr::eq(*p1, g))
+                && candidates.iter().any(|(g, _)| std::ptr::eq(*p2, g));
+            assert!(any_match);
         }
     }
 
@@ -430,7 +420,7 @@ mod selector_tests {
             Some(1.0),
         )];
 
-        let result = selector.select_parents(1, candidates);
+        let result = selector.select_parents(1, &candidates);
         assert_eq!(
             result,
             Err(SelectionError::InsufficientCandidates {
@@ -449,7 +439,7 @@ mod selector_tests {
             None,
         )];
 
-        let result = selector.select_parents(1, candidates);
+        let result = selector.select_parents(1, &candidates);
         assert_eq!(result, Err(SelectionError::NoValidParents));
     }
 
@@ -468,7 +458,7 @@ mod selector_tests {
             ),
         ];
 
-        let result = selector.select_parents(1, candidates);
+        let result = selector.select_parents(1, &candidates);
         assert_eq!(result, Err(SelectionError::InvalidFitnessForRoulette));
     }
 
@@ -481,7 +471,7 @@ mod selector_tests {
             Some(0.0),
         )];
 
-        let result = selector.select_parents(1, candidates);
+        let result = selector.select_parents(1, &candidates);
         assert_eq!(result, Err(SelectionError::InvalidFitnessForRoulette));
     }
 

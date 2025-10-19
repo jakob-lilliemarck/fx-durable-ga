@@ -4,8 +4,9 @@ use super::events::{
     RequestTerminatedEvent,
 };
 use crate::models::{
-    Crossover, Distribution, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype, Morphology,
-    Mutagen, Request, RequestConclusion, Schedule, ScheduleDecision, Selector, Terminated,
+    Breeder, Crossover, Distribution, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype,
+    Morphology, Mutagen, Request, RequestConclusion, Schedule, ScheduleDecision, Selector,
+    Terminated,
 };
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, morphologies, requests};
@@ -257,43 +258,6 @@ impl Service {
         Ok(())
     }
 
-    /// Pure breeding logic - no database operations, returns offspring ready for deduplication
-    fn breed_offspring_batch(
-        request: &Request,
-        parent_indices: Vec<(usize, usize)>,
-        candidates_with_fitness: &[(Genotype, Option<f64>)],
-        morphology: &Morphology,
-        next_generation_id: i32,
-    ) -> Vec<Genotype> {
-        let mut new_genotypes = Vec::with_capacity(parent_indices.len());
-
-        for (idx1, idx2) in parent_indices {
-            // Get parents by reference to avoid cloning (indices should be valid from selector)
-            let parent1 = &candidates_with_fitness[idx1].0;
-            let parent2 = &candidates_with_fitness[idx2].0;
-
-            let mut rng = rand::rng();
-
-            let mut child = Genotype::new(
-                &request.type_name,
-                request.type_hash,
-                request.crossover.apply(&mut rng, parent1, parent2),
-                request.id,
-                next_generation_id,
-            );
-
-            let mut rng = rand::rng();
-            // FIXME: 0.0 refers to optimization progress - should be computed
-            request
-                .mutagen
-                .mutate(&mut rng, &mut child, morphology, 0.0);
-
-            new_genotypes.push(child);
-        }
-
-        new_genotypes
-    }
-
     #[instrument(level = "info", skip(self, request), fields(request_id = %request.id, num_offspring = num_offspring, next_generation_id = next_generation_id))]
     async fn breed_genotypes(
         &self,
@@ -336,20 +300,24 @@ impl Service {
                 while final_genotypes.len() < num_offspring && zero_progress_counter < MAX_ZERO_PROGRESS {
                     let needed = num_offspring - final_genotypes.len();
 
-                    // Re-select parents for this iteration
-                    let parent_indices = request
+                    // Re-select parents for this iteration (borrowed refs)
+                    let parent_pairs = request
                         .selector
-                        .select_parents(needed, candidates_with_fitness.clone())
+                        .select_parents(needed, &candidates_with_fitness)
                         .map_err(|e| Error::SelectionError(e))?;
 
-                    // Breed a batch directly from indices
-                    let batch_genotypes = Self::breed_offspring_batch(
-                        request,
-                        parent_indices,
-                        &candidates_with_fitness,
-                        &morphology,
-                        next_generation_id,
-                    );
+                    // Breed using Breeder (before async operations)
+                    let batch_genotypes = {
+                        let mut rng = rand::rng();
+                        Breeder::breed_batch(
+                            &request,
+                            &morphology,
+                            &parent_pairs,
+                            next_generation_id,
+                            0.0, // FIXME: 0.0 refers to optimization progress - should be computed
+                            &mut rng,
+                        )
+                    };
 
                     // Collect hashes from this batch
                     let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash).collect();
@@ -366,7 +334,7 @@ impl Service {
                     let mut unique_count = 0;
                     for genotype in batch_genotypes {
                         if !intersecting_hashes.contains(&genotype.genome_hash)
-                        && !generated_hashes.contains(&genotype.genome_hash)
+                            && !generated_hashes.contains(&genotype.genome_hash)
                         {
                             generated_hashes.insert(genotype.genome_hash);
                             final_genotypes.push(genotype);

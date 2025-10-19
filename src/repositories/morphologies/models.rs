@@ -62,7 +62,7 @@ mod tests {
     fn create_test_db_morphology() -> DBMorphology {
         let original_morphology = create_test_morphology();
         let mut db_morphology = DBMorphology::try_from(original_morphology).unwrap();
-        
+
         // Create invalid gene bounds for error testing
         db_morphology.gene_bounds = json!({"invalid": "gene_bounds"});
         db_morphology
@@ -84,7 +84,7 @@ mod tests {
         // Create a real morphology and serialize it to get valid JSON
         let original_morphology = create_test_morphology();
         let db_morphology = DBMorphology::try_from(original_morphology).unwrap();
-        
+
         // Now convert back
         let morphology = Morphology::try_from(db_morphology).unwrap();
 
@@ -96,7 +96,7 @@ mod tests {
     #[test]
     fn test_invalid_gene_bounds_json_fails() {
         let db_morphology = create_test_db_morphology();
-        
+
         let result = Morphology::try_from(db_morphology);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Serde(_)));
