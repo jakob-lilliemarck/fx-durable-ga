@@ -4,14 +4,13 @@ use super::events::{
     RequestTerminatedEvent,
 };
 use crate::models::{
-    Breeder, Crossover, Distribution, Encodeable, Evaluator, Fitness, FitnessGoal, Genotype,
-    Morphology, Mutagen, Request, RequestConclusion, Schedule, ScheduleDecision, Selector,
-    Terminated,
+    Breeder, Crossover, Distribution, Fitness, FitnessGoal, Genotype, Mutagen, Request,
+    RequestConclusion, Schedule, ScheduleDecision, Selector, Terminated,
 };
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, morphologies, requests};
 use crate::services::lock;
-use futures::future::BoxFuture;
+use crate::services::optimization::models::{Terminator, TypeErasedEvaluator};
 use fx_event_bus::Publisher;
 use std::collections::{HashMap, HashSet};
 use tracing::instrument;
@@ -19,66 +18,12 @@ use uuid::Uuid;
 
 // optimization service
 pub struct Service {
-    locking: lock::Service,
-    requests: requests::Repository,
-    morphologies: morphologies::Repository,
-    genotypes: genotypes::Repository,
-    evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
-    max_deduplication_attempts: i32,
-}
-
-pub struct ServiceBuilder {
-    locking: lock::Service,
-    requests: requests::Repository,
-    morphologies: morphologies::Repository,
-    genotypes: genotypes::Repository,
-    evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
-    max_deduplication_attempts: i32,
-}
-
-impl ServiceBuilder {
-    // NOTE:
-    // This is a N+1, probably not so bad, it shouldn't be like this.
-    // Its simple though, so I'll go with it for a first version
-    #[instrument(level = "debug", skip(self, evaluator), fields(type_name = T::NAME, type_hash = T::HASH))]
-    pub async fn register<T, E>(mut self, evaluator: E) -> Result<Self, Error>
-    where
-        T: Encodeable + 'static,
-        E: Evaluator<T::Phenotype> + Send + Sync + 'static,
-    {
-        // Insert the morphology of the type if it does not already exist in the database
-        if let Err(morphologies::Error::NotFound) = self.morphologies.get_morphology(T::HASH).await
-        {
-            self.morphologies
-                .new_morphology(Morphology::new(T::NAME, T::HASH, T::morphology()))
-                .await?;
-        }
-
-        // Erase the type
-        let erased = ErasedEvaluator::new(evaluator, T::decode);
-
-        // Insert it
-        self.evaluators.insert(T::HASH, Box::new(erased));
-
-        Ok(self)
-    }
-
-    pub fn with_max_deduplication_attempts(mut self, attempts: i32) -> Self {
-        self.max_deduplication_attempts = attempts;
-        self
-    }
-
-    #[instrument(level = "debug", skip(self), fields(evaluators_count = self.evaluators.len()))]
-    pub fn build(self) -> Service {
-        Service {
-            locking: self.locking,
-            requests: self.requests,
-            morphologies: self.morphologies,
-            genotypes: self.genotypes,
-            evaluators: self.evaluators,
-            max_deduplication_attempts: self.max_deduplication_attempts,
-        }
-    }
+    pub(super) locking: lock::Service,
+    pub(super) requests: requests::Repository,
+    pub(super) morphologies: morphologies::Repository,
+    pub(super) genotypes: genotypes::Repository,
+    pub(super) evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
+    pub(super) max_deduplication_attempts: i32,
 }
 
 impl Service {
@@ -87,8 +32,8 @@ impl Service {
         requests: requests::Repository,
         morphologies: morphologies::Repository,
         genotypes: genotypes::Repository,
-    ) -> ServiceBuilder {
-        ServiceBuilder {
+    ) -> super::ServiceBuilder {
+        super::ServiceBuilder {
             locking,
             requests,
             morphologies,
@@ -513,70 +458,5 @@ impl Service {
             .await?;
 
         Ok(())
-    }
-}
-
-pub struct Terminator {
-    request_id: Uuid,
-    requests: requests::Repository,
-}
-
-impl Terminator {
-    fn new(requests: requests::Repository, request_id: Uuid) -> Self {
-        Terminator {
-            request_id,
-            requests,
-        }
-    }
-}
-
-impl Terminated for Terminator {
-    fn is_terminated(&self) -> BoxFuture<'_, bool> {
-        let requests = self.requests.clone();
-
-        Box::pin(async move {
-            match requests.get_request_conclusion(&self.request_id).await {
-                Ok(Some(_)) => true, // Any conclusion means terminate
-                Err(err) => {
-                    tracing::warn!(message = "Failed to check request conclusion", err = ?err);
-                    false
-                }
-                _ => false, // No conclusion yet, keep going
-            }
-        })
-    }
-}
-
-pub(crate) trait TypeErasedEvaluator: Send + Sync {
-    fn fitness<'a>(
-        &self,
-        genes: &[i64],
-        terminated: &'a Box<dyn Terminated>,
-    ) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
-}
-
-pub(crate) struct ErasedEvaluator<P, E: Evaluator<P>> {
-    evaluator: E,
-    decode: fn(&[i64]) -> P,
-}
-
-impl<P, E: Evaluator<P>> ErasedEvaluator<P, E> {
-    pub(crate) fn new(evaluator: E, decode: fn(&[i64]) -> P) -> Self {
-        Self { evaluator, decode }
-    }
-}
-
-impl<P, E> TypeErasedEvaluator for ErasedEvaluator<P, E>
-where
-    E: Evaluator<P> + Send + Sync + 'static,
-{
-    #[instrument(level = "debug", skip(self, genes, terminated), fields(genome_length = genes.len()))]
-    fn fitness<'a>(
-        &self,
-        genes: &[i64],
-        terminated: &'a Box<dyn Terminated>,
-    ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
-        let phenotype = (self.decode)(genes);
-        self.evaluator.fitness(phenotype, terminated)
     }
 }
