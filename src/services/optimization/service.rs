@@ -24,6 +24,7 @@ pub struct Service {
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
     evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
+    max_deduplication_attempts: i32,
 }
 
 pub struct ServiceBuilder {
@@ -32,6 +33,7 @@ pub struct ServiceBuilder {
     morphologies: morphologies::Repository,
     genotypes: genotypes::Repository,
     evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
+    max_deduplication_attempts: i32,
 }
 
 impl ServiceBuilder {
@@ -61,6 +63,11 @@ impl ServiceBuilder {
         Ok(self)
     }
 
+    pub fn with_max_deduplication_attempts(mut self, attempts: i32) -> Self {
+        self.max_deduplication_attempts = attempts;
+        self
+    }
+
     #[instrument(level = "debug", skip(self), fields(evaluators_count = self.evaluators.len()))]
     pub fn build(self) -> Service {
         Service {
@@ -69,6 +76,7 @@ impl ServiceBuilder {
             morphologies: self.morphologies,
             genotypes: self.genotypes,
             evaluators: self.evaluators,
+            max_deduplication_attempts: self.max_deduplication_attempts,
         }
     }
 }
@@ -86,6 +94,7 @@ impl Service {
             morphologies,
             genotypes,
             evaluators: HashMap::new(),
+            max_deduplication_attempts: 5, // Default value
         }
     }
 
@@ -154,11 +163,7 @@ impl Service {
         // Get the morphology of the type under optimization
         let morphology = self.morphologies.get_morphology(request.type_hash).await?;
 
-        // FIXME: DUPLICATE GENOMES PREVENTION
-        // Currently using random genome generation which can create duplicate genotypes.
-        // Should implement duplicate checking and regeneration to ensure genetic diversity.
-        // Consider using HashSet<Vec<Gene>> to track generated genomes and retry on duplicates.
-
+        // Create an inital distribution of genomes
         let genomes = request.distribution.distribute(&morphology);
 
         let mut genotypes = Vec::with_capacity(genomes.len());
@@ -294,10 +299,9 @@ impl Service {
                 // Iterative breeding with deduplication
                 let mut final_genotypes = Vec::with_capacity(num_offspring);
                 let mut generated_hashes = HashSet::new();
-                let mut zero_progress_counter = 0;
-                const MAX_ZERO_PROGRESS: i32 = 5;
+                let mut deduplication_attempts = 0;
 
-                while final_genotypes.len() < num_offspring && zero_progress_counter < MAX_ZERO_PROGRESS {
+                while final_genotypes.len() < num_offspring && deduplication_attempts < self.max_deduplication_attempts {
                     let needed = num_offspring - final_genotypes.len();
 
                     // Re-select parents for this iteration (borrowed refs)
@@ -347,16 +351,25 @@ impl Service {
                         tracing::info!(
                             "Breeding generated {} non-unique genomes during attempt {}",
                             num_offspring - unique_count,
-                            zero_progress_counter
+                            deduplication_attempts
                         );
                     }
 
-                    // Update zero progress counter
+                    // Update deduplication_attempts counter
                     if unique_count == 0 {
-                        zero_progress_counter += 1;
+                        deduplication_attempts += 1;
                     } else {
-                        zero_progress_counter = 0;
+                        deduplication_attempts = 0;
                     }
+                }
+
+                // Check if we exhausted max_deduplication_attempts progress iterations
+                if deduplication_attempts >= self.max_deduplication_attempts {
+                    tracing::warn!(
+                        "Breeding exhausted max_deduplication_attempts ({}) for request {}. Consider tuning selection parameters or increasing diversity.",
+                        self.max_deduplication_attempts,
+                        request.id
+                    );
                 }
 
                 // If we couldn't generate enough unique genotypes, log a warning
@@ -377,10 +390,6 @@ impl Service {
                         .map(|genotype| GenotypeGenerated::new(request.id, genotype.id))
                         .collect();
 
-                    // FIXME:
-                    // It could be that the lock acquired inside insert_generation is released BEFORE the transaction is commited.
-                    // if that is the case, it means other queries will start to run then, not yet seeing the work carried out by THIS transaction.
-                    // Also we do unneccesary work if we discard works - we might as well open a lock at the beginning of this whole function call, and hold it to the end of the call?
                     self.genotypes
                         .chain(|mut tx_genotypes| {
                             Box::pin(async move {
