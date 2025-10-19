@@ -23,3 +23,8 @@ Thumbs.db
 
 # sqlx offline mode (keep this)
 !.sqlx/
+
+# Coverage reports
+coverage/
+*.profraw
+*.profdata

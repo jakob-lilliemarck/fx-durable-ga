@@ -88,7 +88,7 @@ impl Service {
         }
     }
 
-    #[instrument(level = "info", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, temperature = temperature, mutation_rate = mutation_rate))]
+    #[instrument(level = "info", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen, crossover = ?crossover))]
     pub async fn new_optimization_request(
         &self,
         type_name: &str,
@@ -96,14 +96,11 @@ impl Service {
         goal: FitnessGoal,
         schedule: Schedule,
         selector: Selector,
-        temperature: f64,
-        mutation_rate: f64,
+        mutagen: Mutagen,
+        crossover: Crossover,
         distribution: Distribution,
     ) -> Result<(), Error> {
         tracing::info!("Optimization request received");
-
-        let mutagen = Mutagen::constant(0.5, 0.1)?;
-        let crossover = Crossover::uniform(0.5)?;
 
         self.requests
             .chain(|mut tx_requests| {

@@ -1,3 +1,4 @@
+mod breeder;
 mod crossover;
 mod distribution;
 mod encodeable;
@@ -22,6 +23,7 @@ pub use mutagen::{Decay, Mutagen, MutagenError, MutationRate, Temperature};
 pub use schedule::Schedule;
 pub use selector::{SelectionError, Selector};
 
+pub(crate) use breeder::Breeder;
 pub(crate) use genotype::{Fitness, Gene, Genotype};
 pub(crate) use morphology::Morphology;
 pub(crate) use population::Population;

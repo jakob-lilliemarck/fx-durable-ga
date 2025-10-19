@@ -2,8 +2,8 @@ use anyhow::Result;
 use fx_durable_ga::{
     bootstrap::bootstrap,
     models::{
-        Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Schedule, Selector,
-        Terminated,
+        Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen, Schedule,
+        Selector, Terminated,
     },
     services::optimization,
 };
@@ -141,8 +141,8 @@ async fn main() -> Result<()> {
                 FitnessGoal::maximize(0.99)?,
                 Schedule::generational(100, 10),
                 Selector::tournament(3, 50),
-                0.5, // temperature
-                0.1, // mutation_rate
+                Mutagen::constant(0.5, 0.1)?,
+                Crossover::uniform(0.5)?,
                 Distribution::random(50),
             )
             .await?;
