@@ -10,13 +10,13 @@
 
 [x] Early termination strategies - Stop when no improvement for N generations, population convergence detection, fitness plateau detection. Prevents wasted computation on converged populations and provides automatic stopping criteria.
 
-[ ] Request builder method - all of the configuration in a single type-safe place. Simplify API usage and reduce parameter errors with a fluent builder pattern for optimization requests.
+[x] Add database indexes - Add indexes on commonly queried columns (request_id, generation_id, genome_hash) to improve query performance as data volume grows.
 
-[ ] Add database indexes - Add indexes on commonly queried columns (request_id, generation_id, genome_hash) to improve query performance as data volume grows.
-
-[ ] Add termination/completion record - Track optimization outcomes and termination reasons for analysis and debugging of optimization runs.
+[x] Add termination/completion record - Track optimization outcomes and termination reasons for analysis and debugging of optimization runs.
 
 [ ] Fill out tests - Expand test coverage for critical paths, edge cases, and integration scenarios to ensure system reliability.
+
+[ ] Request builder method - all of the configuration in a single type-safe place. Simplify API usage and reduce parameter errors with a fluent builder pattern for optimization requests.
 
 [ ] Add instrumentation - Add metrics and observability for optimization performance, convergence rates, and resource usage.
 
