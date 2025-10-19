@@ -762,7 +762,7 @@ mod search_genotypes_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_genotypes_with_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        let (request_id_1, _) = super::seeding::seed(&pool).await?;
+        let (request_id_1, _) = super::seeding::seed(&pool).await;
 
         let found =
             search_genotypes(&pool, &Filter::default().with_request_id(request_id_1), 5).await?;
@@ -790,7 +790,7 @@ mod search_genotypes_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_genotypes_with_generation_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        super::seeding::seed(&pool).await?;
+        super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_generation_id(2), 5).await?;
 
@@ -817,7 +817,7 @@ mod search_genotypes_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_genotypes_with_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        super::seeding::seed(&pool).await?;
+        super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_fitness(true), 5).await?;
 
@@ -848,7 +848,7 @@ mod search_genotypes_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_genotypes_with_fitness_desc(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        super::seeding::seed(&pool).await?;
+        super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
             &pool,
@@ -886,7 +886,7 @@ mod search_genotypes_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_genotypes_with_fitness_asc(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        super::seeding::seed(&pool).await?;
+        super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
             &pool,
@@ -924,7 +924,7 @@ mod search_genotypes_tests {
 
     #[sqlx::test(migrations = "./migrations")]
     async fn it_gets_genotypes_without_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        super::seeding::seed(&pool).await?;
+        super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_fitness(false), 5).await?;
 
@@ -953,7 +953,7 @@ mod search_genotypes_tests {
     async fn it_gets_genotypes_with_request_id_fitness_and_random_order(
         pool: sqlx::PgPool,
     ) -> anyhow::Result<()> {
-        let (request_id_1, _) = super::seeding::seed(&pool).await?;
+        let (request_id_1, _) = super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
             &pool,
@@ -1009,7 +1009,7 @@ mod tests {
     async fn it_gets_the_intersection(pool: sqlx::PgPool) -> anyhow::Result<()> {
         use crate::models::Genotype;
 
-        let (request_id_1, _request_id_2) = super::seeding::seed(&pool).await?;
+        let (request_id_1, _request_id_2) = super::seeding::seed(&pool).await;
 
         // Test hashes for genomes in request_id_1: [1,2,3] and [4,5,6]
         let hash_1_2_3 = Genotype::compute_genome_hash(&[1, 2, 3]);
@@ -1034,7 +1034,7 @@ mod tests {
     ) -> anyhow::Result<()> {
         use crate::models::Genotype;
 
-        let (request_id_1, _) = super::seeding::seed(&pool).await?;
+        let (request_id_1, _) = super::seeding::seed(&pool).await;
 
         // Test with hashes that don't exist in the database
         let nonexistent_hashes = vec![
@@ -1054,7 +1054,7 @@ mod tests {
     async fn it_isolates_intersection_by_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
         use crate::models::Genotype;
 
-        let (request_id_1, request_id_2) = super::seeding::seed(&pool).await?;
+        let (request_id_1, request_id_2) = super::seeding::seed(&pool).await;
 
         // Test with hashes from request_2: [7,8,9], [10,11,12], [13,14,15]
         let hash_7_8_9 = Genotype::compute_genome_hash(&[7, 8, 9]);
@@ -1087,34 +1087,36 @@ mod seeding {
     use crate::repositories::requests::queries::new_request;
     use uuid::Uuid;
 
-    pub(super) async fn seed(pool: &sqlx::PgPool) -> anyhow::Result<(Uuid, Uuid)> {
+    pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid) {
         // Create requests first
         let request_1 = Request::new(
             "test",
             1,
-            FitnessGoal::maximize(0.9)?,
+            FitnessGoal::maximize(0.9).unwrap(),
             Selector::tournament(10, 20),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
+            Mutagen::constant(0.5, 0.1).unwrap(),
+            Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(200),
-        )?;
+        )
+        .unwrap();
         let request_2 = Request::new(
             "test",
             1,
-            FitnessGoal::maximize(0.9)?,
+            FitnessGoal::maximize(0.9).unwrap(),
             Selector::tournament(10, 20),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
+            Mutagen::constant(0.5, 0.1).unwrap(),
+            Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(200),
-        )?;
+        )
+        .unwrap();
 
         let request_id_1 = request_1.id;
         let request_id_2 = request_2.id;
 
-        new_request(pool, request_1).await?;
-        new_request(pool, request_2).await?;
+        new_request(pool, request_1).await.unwrap();
+        new_request(pool, request_2).await.unwrap();
 
         let genotype_id_1 = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
         let genotype_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
@@ -1175,13 +1177,19 @@ mod seeding {
             },
         ];
 
-        new_genotypes(pool, genotypes).await?;
+        new_genotypes(pool, genotypes).await.unwrap();
 
-        record_fitness(pool, &Fitness::new(genotype_id_1, 0.11)).await?;
+        record_fitness(pool, &Fitness::new(genotype_id_1, 0.11))
+            .await
+            .unwrap();
         // genotype_id_2 has not fitness
-        record_fitness(pool, &Fitness::new(genotype_id_3, 0.12)).await?;
-        record_fitness(pool, &Fitness::new(genotype_id_4, 0.42)).await?;
+        record_fitness(pool, &Fitness::new(genotype_id_3, 0.12))
+            .await
+            .unwrap();
+        record_fitness(pool, &Fitness::new(genotype_id_4, 0.42))
+            .await
+            .unwrap();
         // genotype_id_5 has not fitness
-        Ok((request_id_1, request_id_2))
+        (request_id_1, request_id_2)
     }
 }

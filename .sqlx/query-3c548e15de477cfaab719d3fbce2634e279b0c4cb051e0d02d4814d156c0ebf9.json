@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO fx_durable_ga.requests (\n                id,\n                requested_at,\n                type_name,\n                type_hash,\n                goal,\n                schedule,\n                selector,\n                mutagen,\n                crossover\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n            RETURNING\n                id,\n                requested_at,\n                type_name,\n                type_hash,\n                goal,\n                schedule,\n                selector,\n                mutagen,\n                crossover\n            ",
+  "query": "\n            INSERT INTO fx_durable_ga.requests (\n                id,\n                requested_at,\n                type_name,\n                type_hash,\n                goal,\n                schedule,\n                selector,\n                mutagen,\n                crossover,\n                distribution\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n            RETURNING\n                id,\n                requested_at,\n                type_name,\n                type_hash,\n                goal,\n                schedule,\n                selector,\n                mutagen,\n                crossover,\n                distribution;\n            ",
   "describe": {
     "columns": [
       {
@@ -47,6 +47,11 @@
         "ordinal": 8,
         "name": "crossover",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "distribution",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
@@ -55,6 +60,7 @@
         "Timestamptz",
         "Text",
         "Int4",
+        "Jsonb",
         "Jsonb",
         "Jsonb",
         "Jsonb",
@@ -71,8 +77,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "d40e146b7c84ddff8540a6dd1c77492ea3d4525b309ae8631fcf0bfce82691d3"
+  "hash": "3c548e15de477cfaab719d3fbce2634e279b0c4cb051e0d02d4814d156c0ebf9"
 }

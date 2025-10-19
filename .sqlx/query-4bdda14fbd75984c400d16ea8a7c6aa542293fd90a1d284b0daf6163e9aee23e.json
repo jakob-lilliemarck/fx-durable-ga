@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id,\n            requested_at,\n            type_name,\n            type_hash,\n            goal,\n            schedule,\n            selector,\n            mutagen,\n            crossover\n        FROM fx_durable_ga.requests\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT\n            id,\n            requested_at,\n            type_name,\n            type_hash,\n            goal,\n            schedule,\n            selector,\n            mutagen,\n            crossover,\n            distribution\n        FROM fx_durable_ga.requests\n        WHERE id = $1;\n        ",
   "describe": {
     "columns": [
       {
@@ -47,6 +47,11 @@
         "ordinal": 8,
         "name": "crossover",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "distribution",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
@@ -63,8 +68,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "a3c4a4762b5fefc340f420dcc6e1d6c5c24b714e7a5c980ad9ad082ab02de810"
+  "hash": "4bdda14fbd75984c400d16ea8a7c6aa542293fd90a1d284b0daf6163e9aee23e"
 }

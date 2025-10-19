@@ -66,14 +66,14 @@ mod tests {
         // Same genome should produce same hash
         let hash1 = Genotype::compute_genome_hash(&genome1);
         let hash2 = Genotype::compute_genome_hash(&genome2);
-        assert_eq!(hash1, hash2, "Same genome should produce same hash");
+
+        // Same genome should produce same hash
+        assert_eq!(hash1, hash2);
+
+        let hash3 = Genotype::compute_genome_hash(&genome3);
 
         // Different genome should produce different hash
-        let hash3 = Genotype::compute_genome_hash(&genome3);
-        assert_ne!(
-            hash1, hash3,
-            "Different genome should produce different hash"
-        );
+        assert_ne!(hash1, hash3);
     }
 
     #[test]
@@ -81,7 +81,9 @@ mod tests {
         let empty_genome: Vec<Gene> = vec![];
         let hash1 = Genotype::compute_genome_hash(&empty_genome);
         let hash2 = Genotype::compute_genome_hash(&empty_genome);
-        assert_eq!(hash1, hash2, "Empty genome should produce consistent hash");
+
+        //Empty genome should produce consistent hash
+        assert_eq!(hash1, hash2);
     }
 
     #[test]
@@ -92,10 +94,8 @@ mod tests {
         let hash1 = Genotype::compute_genome_hash(&zero_genome1);
         let hash2 = Genotype::compute_genome_hash(&zero_genome2);
 
-        assert_eq!(
-            hash1, hash2,
-            "Identical zero genomes should produce same hash"
-        );
+        // Identical zero genomes should produce same hash
+        assert_eq!(hash1, hash2,);
     }
 }
 

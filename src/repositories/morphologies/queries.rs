@@ -167,4 +167,12 @@ mod get_morphology_tests {
 
         Ok(())
     }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_handles_database_errors(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        pool.close().await;
+        let result = get_morphology(&pool, 1).await;
+        assert!(matches!(result, Err(Error::Database(_))));
+        Ok(())
+    }
 }

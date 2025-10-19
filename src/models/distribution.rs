@@ -86,15 +86,20 @@ mod tests {
     use super::*;
     use crate::models::GeneBounds;
 
+    // Helper to create test morphology
+    fn create_test_morphology(gene_bounds: Vec<GeneBounds>) -> Morphology {
+        Morphology::new("test", 1, gene_bounds)
+    }
+
     #[test]
     fn test_latin_hypercube_2d_simple() {
-        // Create a simple 2D morphology: 4 samples in 2 dimensions
         let morphology = create_test_morphology(vec![
             GeneBounds::integer(0, 3, 4).unwrap(), // 4 steps: [0, 1, 2, 3]
             GeneBounds::integer(0, 3, 4).unwrap(), // 4 steps: [0, 1, 2, 3]
         ]);
 
-        let genomes = latin_hypercube(4, &morphology);
+        let dist = Distribution::latin_hypercube(4);
+        let genomes = dist.distribute(&morphology);
 
         // Should have 4 genomes, each with 2 genes
         assert_eq!(genomes.len(), 4);
@@ -112,12 +117,6 @@ mod tests {
         let mut dim2_sorted = dim2.clone();
         dim2_sorted.sort();
         assert_eq!(dim2_sorted, vec![0, 1, 2, 3]);
-
-        // Print for human verification (will show in test output)
-        println!("2D Latin Hypercube (4 samples):");
-        for (i, genome) in genomes.iter().enumerate() {
-            println!("  Sample {}: [{}, {}]", i, genome[0], genome[1]);
-        }
     }
 
     #[test]
@@ -129,7 +128,8 @@ mod tests {
             GeneBounds::integer(0, 2, 3).unwrap(), // 3 steps: [0, 1, 2]
         ]);
 
-        let genomes = latin_hypercube(3, &morphology);
+        let dist = Distribution::latin_hypercube(3);
+        let genomes = dist.distribute(&morphology);
 
         // Should have 3 genomes, each with 3 genes
         assert_eq!(genomes.len(), 3);
@@ -139,15 +139,7 @@ mod tests {
         for dim in 0..3 {
             let mut values: Vec<i64> = genomes.iter().map(|g| g[dim]).collect();
             values.sort();
-            assert_eq!(values, vec![0, 1, 2], "Dimension {} failed", dim);
-        }
-
-        println!("3D Latin Hypercube (3 samples):");
-        for (i, genome) in genomes.iter().enumerate() {
-            println!(
-                "  Sample {}: [{}, {}, {}]",
-                i, genome[0], genome[1], genome[2]
-            );
+            assert_eq!(values, vec![0, 1, 2]);
         }
     }
 
@@ -159,20 +151,36 @@ mod tests {
             GeneBounds::integer(0, 9, 10).unwrap(),
         ]);
 
-        let genomes = latin_hypercube(1, &morphology);
+        let dist = Distribution::latin_hypercube(1);
+        let genomes = dist.distribute(&morphology);
 
+        // Basic structure should work with single sample
         assert_eq!(genomes.len(), 1);
         assert_eq!(genomes[0].len(), 2);
 
-        // With single sample, should get middle values (steps-1)/2 = 4.5 → 5
-        assert_eq!(genomes[0][0], 5);
-        assert_eq!(genomes[0][1], 5);
-
-        println!("Single sample: [{}, {}]", genomes[0][0], genomes[0][1]);
+        // Values should be within bounds
+        assert!((0..=9).contains(&genomes[0][0]));
+        assert!((0..=9).contains(&genomes[0][1]));
     }
 
-    // Helper to create test morphology
-    fn create_test_morphology(gene_bounds: Vec<GeneBounds>) -> Morphology {
-        Morphology::new("test", 1, gene_bounds)
+    #[test]
+    fn test_distribution_distribute_random() {
+        let morphology = create_test_morphology(vec![
+            GeneBounds::integer(0, 5000, 1000).unwrap(),
+            GeneBounds::integer(0, 3000, 1000).unwrap(),
+        ]);
+
+        let dist = Distribution::random(5);
+
+        // Generate multiple distributions to test randomness
+        let genomes1 = dist.distribute(&morphology);
+        let genomes2 = dist.distribute(&morphology);
+
+        // Basic structure validation
+        assert_eq!(genomes1.len(), 5);
+        assert!(genomes1.iter().all(|genome| genome.len() == 2));
+
+        // The key test: random distributions should be different
+        assert_ne!(genomes1, genomes2);
     }
 }

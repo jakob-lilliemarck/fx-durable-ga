@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            request_id \"request_id!:Uuid\",\n            evaluated_genotypes \"evaluated_genotypes!:i64\",\n            live_genotypes \"live_genotypes!:i64\",\n            current_generation \"current_generation!:i32\",\n            best_fitness \"best_fitness\"\n        FROM fx_durable_ga.populations\n        WHERE request_id = $1\n        ",
+  "query": "\n            SELECT\n                request_id \"request_id!:Uuid\",\n                evaluated_genotypes \"evaluated_genotypes!:i64\",\n                live_genotypes \"live_genotypes!:i64\",\n                current_generation \"current_generation!:i32\",\n                best_fitness \"best_fitness\"\n            FROM fx_durable_ga.populations\n            WHERE request_id = $1;\n        ",
   "describe": {
     "columns": [
       {
@@ -42,5 +42,5 @@
       true
     ]
   },
-  "hash": "b0cb43ab2e63651ee40e6359157eb6d41f46ed8db6fb280829e127e21dfcd4eb"
+  "hash": "8dfb835c518a14b744c745628856bb927579699f2ac59caa5ba7be964d6b4969"
 }

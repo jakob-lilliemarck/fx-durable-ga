@@ -38,3 +38,51 @@ impl FitnessGoal {
         Ok(threshold)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_invalid_thresholds() {
+        // Test minimize with invalid threshold
+        assert!(FitnessGoal::minimize(-0.1).is_err());
+        assert!(FitnessGoal::minimize(1.5).is_err());
+
+        // Test maximize with invalid threshold
+        assert!(FitnessGoal::maximize(-0.1).is_err());
+        assert!(FitnessGoal::maximize(1.5).is_err());
+    }
+
+    #[test]
+    fn test_is_reached_minimize() {
+        let goal = FitnessGoal::minimize(0.5).unwrap();
+
+        assert!(goal.is_reached(0.3)); // Below threshold
+        assert!(goal.is_reached(0.5)); // At threshold
+        assert!(!goal.is_reached(0.7)); // Above threshold
+    }
+
+    #[test]
+    fn test_is_reached_maximize() {
+        let goal = FitnessGoal::maximize(0.5).unwrap();
+
+        assert!(!goal.is_reached(0.3)); // Below threshold
+        assert!(goal.is_reached(0.5)); // At threshold
+        assert!(goal.is_reached(0.7)); // Above threshold
+    }
+
+    #[test]
+    fn test_boundary_values() {
+        let min_goal = FitnessGoal::minimize(0.0).unwrap();
+        let max_goal = FitnessGoal::maximize(1.0).unwrap();
+
+        // Test that 0.0 threshold for minimize accepts everything
+        assert!(min_goal.is_reached(0.0));
+        assert!(!min_goal.is_reached(0.1)); // Even tiny positive values fail
+
+        // Test that 1.0 threshold for maximize accepts only perfect scores
+        assert!(max_goal.is_reached(1.0));
+        assert!(!max_goal.is_reached(0.9)); // Even near-perfect scores fail
+    }
+}

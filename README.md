@@ -25,3 +25,8 @@ This creates the `.sqlx/` directory with cached query metadata, allowing compila
 ```bash
 cargo run --example cube
 ```
+
+### Test coverage
+```sh
+cargo llvm-cov --html --output-dir coverage -- models::
+```

@@ -132,10 +132,7 @@ mod tests {
         }
 
         // Single point crossover should have exactly 1 transition
-        assert_eq!(
-            transitions, 1,
-            "Single point crossover should have exactly one transition point"
-        );
+        assert_eq!(transitions, 1);
 
         // All genes should come from one parent or the other
         for (i, &gene) in child.iter().enumerate() {
@@ -162,5 +159,33 @@ mod tests {
         let crossover = Crossover::Uniform { probability: 1.0 };
         let child_genome = crossover.apply(&mut rng, &parent_a, &parent_b);
         assert_eq!(child_genome, parent_a.genome);
+    }
+
+    #[test]
+    fn it_validates_uniform_crossover_probability() {
+        // Test invalid probabilities (line 45)
+        let result = Crossover::uniform(-0.1);
+        assert!(result.is_err());
+
+        let result = Crossover::uniform(1.5);
+        assert!(result.is_err());
+
+        // Test valid probabilities work
+        let result = Crossover::uniform(0.5);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn it_creates_single_point_crossover() {
+        // Test the constructor (lines 51-53)
+        let crossover = Crossover::single_point();
+
+        // Verify it actually works
+        let mut rng = StdRng::seed_from_u64(42);
+        let parent_a = create_test_genotype(vec![1, 2, 3]);
+        let parent_b = create_test_genotype(vec![4, 5, 6]);
+
+        let child = crossover.apply(&mut rng, &parent_a, &parent_b);
+        assert_eq!(child.len(), 3);
     }
 }

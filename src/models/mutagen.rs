@@ -196,21 +196,6 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
     use uuid::Uuid;
 
-    #[test]
-    fn it_computes_linear_decay() {
-        assert_eq!(decay_linear(100.0, 0.0, 1.0), 100.0); // No progress
-        assert_eq!(decay_linear(100.0, 0.5, 1.0), 50.0); // Half progress
-        assert_eq!(decay_linear(100.0, 1.0, 1.0), 0.0); // Full progress
-        assert_eq!(decay_linear(100.0, 1.5, 1.0), 0.0); // Over-progress (clamped)
-    }
-
-    #[test]
-    fn it_computes_exponential_decay() {
-        assert_eq!(decay_exponential(100.0, 0.0, 1.0, 2), 100.0); // No progress
-        assert_eq!(decay_exponential(100.0, 0.5, 1.0, 2), 25.0); // Quadratic
-        assert_eq!(decay_exponential(100.0, 1.0, 1.0, 2), 0.0); // Full progress
-    }
-
     fn get_test_genotype() -> Genotype {
         Genotype::new("TestType", 123, vec![5, 2], Uuid::now_v7(), 1)
     }
@@ -224,6 +209,98 @@ mod tests {
                 GeneBounds::integer(0, 4, 5).unwrap(),  // Gene can be 0-4 (steps=5)
             ],
         )
+    }
+
+    #[test]
+    fn test_temperature_validation_errors() {
+        assert!(Temperature::new(-0.1, Decay::Constant).is_err());
+        assert!(Temperature::new(1.5, Decay::Constant).is_err());
+        assert!(Temperature::constant(-0.1).is_err());
+        assert!(Temperature::constant(1.5).is_err());
+    }
+
+    #[test]
+    fn test_mutation_rate_validation_errors() {
+        assert!(MutationRate::new(-0.1, Decay::Constant).is_err());
+        assert!(MutationRate::new(1.5, Decay::Constant).is_err());
+        assert!(MutationRate::constant(-0.1).is_err());
+        assert!(MutationRate::constant(1.5).is_err());
+    }
+
+    #[test]
+    fn test_mutagen_validation_errors() {
+        let result = Mutagen::constant(-0.1, 0.5); // Invalid temperature
+        assert!(result.is_err());
+
+        let result = Mutagen::constant(0.5, -0.1); // Invalid mutation rate
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_linear_decay_through_temperature() {
+        let temp = Temperature::new(1.0, Decay::Linear { multiplier: 1.0 }).unwrap();
+
+        assert_eq!(temp.get(0.0), 1.0); // No progress
+        assert_eq!(temp.get(0.5), 0.5); // Half progress
+        assert_eq!(temp.get(1.0), 0.0); // Full progress
+        assert_eq!(temp.get(1.5), 0.0); // Over-progress (clamped)
+    }
+
+    #[test]
+    fn test_exponential_decay_through_temperature() {
+        let temp = Temperature::new(
+            1.0,
+            Decay::Exponential {
+                multiplier: 1.0,
+                exponent: 2,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(temp.get(0.0), 1.0); // No progress
+        assert_eq!(temp.get(0.5), 0.25); // Quadratic: (1.0 - 0.5)^2 = 0.25
+        assert_eq!(temp.get(1.0), 0.0); // Full progress
+    }
+
+    #[test]
+    fn test_linear_decay_through_mutation_rate() {
+        let rate = MutationRate::new(1.0, Decay::Linear { multiplier: 1.0 }).unwrap();
+
+        assert_eq!(rate.get(0.0), 1.0); // No progress
+        assert_eq!(rate.get(0.5), 0.5); // Half progress
+        assert_eq!(rate.get(1.0), 0.0); // Full progress
+        assert_eq!(rate.get(1.5), 0.0); // Over-progress (clamped)
+    }
+
+    #[test]
+    fn test_exponential_decay_through_mutation_rate() {
+        let rate = MutationRate::new(
+            1.0,
+            Decay::Exponential {
+                multiplier: 1.0,
+                exponent: 2,
+            },
+        )
+        .unwrap();
+
+        assert_eq!(rate.get(0.0), 1.0); // No progress
+        assert_eq!(rate.get(0.5), 0.25); // Quadratic: (1.0 - 0.5)^2 = 0.25
+        assert_eq!(rate.get(1.0), 0.0); // Full progress
+    }
+
+    #[test]
+    fn test_constant_decay() {
+        let temp = Temperature::constant(0.7).unwrap();
+        let rate = MutationRate::constant(0.3).unwrap();
+
+        // Constant values shouldn't change with progress
+        assert_eq!(temp.get(0.0), 0.7);
+        assert_eq!(temp.get(0.5), 0.7);
+        assert_eq!(temp.get(1.0), 0.7);
+
+        assert_eq!(rate.get(0.0), 0.3);
+        assert_eq!(rate.get(0.5), 0.3);
+        assert_eq!(rate.get(1.0), 0.3);
     }
 
     #[test]

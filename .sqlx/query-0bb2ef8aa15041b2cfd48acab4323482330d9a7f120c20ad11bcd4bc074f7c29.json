@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            INSERT INTO fx_durable_ga.morphologies (\n                revised_at,\n                type_name,\n                type_hash,\n                gene_bounds\n            )\n            VALUES ($1, $2, $3, $4)\n            RETURNING\n                revised_at,\n                type_name,\n                type_hash,\n                gene_bounds\n            ",
+  "query": "\n            INSERT INTO fx_durable_ga.morphologies (\n                revised_at,\n                type_name,\n                type_hash,\n                gene_bounds\n            )\n            VALUES ($1, $2, $3, $4)\n            RETURNING\n                revised_at,\n                type_name,\n                type_hash,\n                gene_bounds;\n            ",
   "describe": {
     "columns": [
       {
@@ -39,5 +39,5 @@
       false
     ]
   },
-  "hash": "9722686975b5f0ced301cfc83589283a267d00e5235dedb6f8edf92daf868da2"
+  "hash": "0bb2ef8aa15041b2cfd48acab4323482330d9a7f120c20ad11bcd4bc074f7c29"
 }
