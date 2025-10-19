@@ -155,6 +155,77 @@ pub(crate) async fn check_if_generation_exists<'tx, E: PgExecutor<'tx>>(
     Ok(exists)
 }
 
+#[cfg(test)]
+mod check_if_generation_exists_tests {
+    use uuid::Uuid;
+
+    use crate::{
+        models::{Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector},
+        repositories::{
+            genotypes::{new_genotypes, queries::check_if_generation_exists},
+            requests::queries::new_request,
+        },
+    };
+
+    use super::Genotype;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_returns_true_when_generation_exists(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let mut genotypes = Vec::with_capacity(3);
+
+        genotypes.push(Genotype {
+            id: Uuid::now_v7(),
+            generated_at: chrono::Utc::now(),
+            type_name: "test".to_string(),
+            type_hash: 1,
+            genome: vec![1, 2, 3],
+            genome_hash: Genotype::compute_genome_hash(&[1, 2, 3]),
+            request_id,
+            generation_id: 1,
+        });
+
+        new_genotypes(&pool, genotypes).await?;
+
+        let exists = check_if_generation_exists(&pool, request_id, 1).await?;
+        assert!(exists);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_returns_false_when_none_exist(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let exists = check_if_generation_exists(&pool, request_id, 1).await?;
+        assert!(!exists);
+        Ok(())
+    }
+}
+
 #[instrument(level = "debug", skip(tx), fields(genotype_id = %id))]
 pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -310,6 +381,28 @@ mod record_fitness_tests {
         assert_eq!(recorded.genotype_id, fitness.genotype_id);
         assert_eq!(recorded.fitness, fitness.fitness);
         assert_eq!(recorded.evaluated_at, fitness.evaluated_at.trunc_subsecs(6));
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
+        )?;
+        let request_clone = request.clone();
+
+        let first = new_request(&pool, request).await;
+        let second = new_request(&pool, request_clone).await;
+
+        assert!(first.is_ok());
+        assert!(second.is_err());
         Ok(())
     }
 }
@@ -855,6 +948,38 @@ mod search_genotypes_tests {
 
         Ok(())
     }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_genotypes_with_request_id_fitness_and_random_order(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        let (request_id_1, _) = super::seeding::seed(&pool).await?;
+
+        let found = search_genotypes(
+            &pool,
+            &Filter::default()
+                .with_request_id(request_id_1)
+                .with_fitness(true)
+                .with_order_random(),
+            5,
+        )
+        .await?;
+
+        let actual: Vec<(Uuid, Option<f64>)> = found
+            .iter()
+            .map(|(genotype, fitness)| (genotype.id, *fitness))
+            .collect();
+
+        assert_eq!(
+            vec![(
+                Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
+                Some(0.11)
+            ),],
+            actual
+        );
+
+        Ok(())
+    }
 }
 
 #[instrument(level = "debug", skip(tx), fields(request_id=?request_id))]
@@ -926,7 +1051,7 @@ mod tests {
     }
 
     #[sqlx::test(migrations = "./migrations")]
-    async fn it_filters_by_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
+    async fn it_isolates_intersection_by_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
         use crate::models::Genotype;
 
         let (request_id_1, request_id_2) = super::seeding::seed(&pool).await?;

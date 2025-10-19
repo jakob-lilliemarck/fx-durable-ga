@@ -242,6 +242,120 @@ pub(crate) async fn new_request_conclusion<'tx, E: PgExecutor<'tx>>(
     Ok(request_conclusion)
 }
 
+#[cfg(test)]
+mod new_request_conclusion_conclusion_tests {
+    use crate::models::Crossover;
+    use crate::models::Distribution;
+    use crate::models::FitnessGoal;
+    use crate::models::Mutagen;
+    use crate::models::Request;
+    use crate::models::Schedule;
+    use crate::models::Selector;
+    use crate::repositories::requests::queries::new_request;
+    use crate::{
+        models::{Conclusion, RequestConclusion},
+        repositories::requests::queries::new_request_conclusion,
+    };
+    use chrono::SubsecRound;
+    use chrono::Utc;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_inserts_a_new_completed_conclusion(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let request_conclusion = RequestConclusion {
+            request_id,
+            concluded_at: Utc::now(),
+            concluded_with: Conclusion::Completed,
+        };
+
+        let actual = new_request_conclusion(&pool, &request_conclusion).await?;
+
+        assert_eq!(request_conclusion.request_id, actual.request_id);
+        assert_eq!(
+            request_conclusion.concluded_at.trunc_subsecs(6),
+            actual.concluded_at
+        );
+        assert_eq!(request_conclusion.concluded_with, actual.concluded_with);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_inserts_a_new_terminated_conclusion(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let request_conclusion = RequestConclusion {
+            request_id,
+            concluded_at: Utc::now(),
+            concluded_with: Conclusion::Terminated,
+        };
+
+        let actual = new_request_conclusion(&pool, &request_conclusion).await?;
+
+        assert_eq!(request_conclusion.request_id, actual.request_id);
+        assert_eq!(
+            request_conclusion.concluded_at.trunc_subsecs(6),
+            actual.concluded_at
+        );
+        assert_eq!(request_conclusion.concluded_with, actual.concluded_with);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let request_conclusion = RequestConclusion {
+            request_id,
+            concluded_at: Utc::now(),
+            concluded_with: Conclusion::Terminated,
+        };
+
+        let first = new_request_conclusion(&pool, &request_conclusion).await;
+        let second = new_request_conclusion(&pool, &request_conclusion).await;
+
+        assert!(first.is_ok());
+        assert!(second.is_err());
+
+        Ok(())
+    }
+}
+
 #[instrument(level = "debug", skip(tx), fields(id = %id))]
 pub(crate) async fn get_request_conclusion<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -263,4 +377,80 @@ pub(crate) async fn get_request_conclusion<'tx, E: PgExecutor<'tx>>(
     .await?;
 
     Ok(request_conclusion)
+}
+
+#[cfg(test)]
+mod get_request_conclusion_tests {
+    use crate::models::Crossover;
+    use crate::models::Distribution;
+    use crate::models::FitnessGoal;
+    use crate::models::Mutagen;
+    use crate::models::Request;
+    use crate::models::Schedule;
+    use crate::models::Selector;
+    use crate::repositories::requests::queries::get_request_conclusion;
+    use crate::repositories::requests::queries::new_request;
+    use crate::{
+        models::{Conclusion, RequestConclusion},
+        repositories::requests::queries::new_request_conclusion,
+    };
+    use chrono::SubsecRound;
+    use chrono::Utc;
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_gets_a_request_conclusion(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let request_conclusion = RequestConclusion {
+            request_id,
+            concluded_at: Utc::now(),
+            concluded_with: Conclusion::Terminated,
+        };
+        new_request_conclusion(&pool, &request_conclusion).await?;
+
+        let actual = get_request_conclusion(&pool, &request_id)
+            .await?
+            .expect("expected be Some(RequestConclusion)");
+
+        assert_eq!(request_conclusion.request_id, actual.request_id);
+        assert_eq!(
+            request_conclusion.concluded_at.trunc_subsecs(6),
+            actual.concluded_at
+        );
+        assert_eq!(request_conclusion.concluded_with, actual.concluded_with);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn it_returns_none_when_there_is_none(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10, 20),
+            Schedule::generational(100, 10),
+            Mutagen::constant(0.5, 0.1)?,
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(200),
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let actual = get_request_conclusion(&pool, &request_id).await?;
+        assert!(actual.is_none());
+
+        Ok(())
+    }
 }

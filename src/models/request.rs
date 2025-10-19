@@ -61,6 +61,7 @@ pub(crate) enum Conclusion {
 }
 
 #[derive(Debug)]
+#[cfg_attr(test, derive(Clone))]
 pub(crate) struct RequestConclusion {
     pub(crate) request_id: Uuid,
     pub(crate) concluded_at: DateTime<Utc>,
