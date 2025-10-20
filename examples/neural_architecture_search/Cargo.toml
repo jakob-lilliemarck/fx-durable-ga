@@ -1,0 +1,25 @@
+[package]
+authors = ["Jakob Lilliemarck <lilliemarckjakob@gmail.com>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+name = "neural-architecture-search"
+publish = false
+version = "0.1.0"
+
+[features]
+default = ["burn/dataset", "burn/sqlite-bundled"]
+ndarray = ["burn/ndarray"]
+wgpu = ["burn/wgpu"]
+tch-cpu = ["burn/tch"]
+tch-gpu = ["burn/tch"]
+
+[dependencies]
+burn = { git = "https://github.com/tracel-ai/burn.git", features = ["train", "dataset", "sqlite-bundled"] }
+
+# Serialization
+log = "0.4"
+serde = { version = "1.0", features = ["std", "derive"] }
+
+# Displaying results
+textplots = "0.8.7"
+rgb = "0.8.52"
