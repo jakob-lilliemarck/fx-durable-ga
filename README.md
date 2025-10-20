@@ -64,16 +64,16 @@ impl Encodeable for MyParams {
     fn encode(&self) -> Vec<i64> {
         let bounds = Self::morphology();
         vec![
-            bounds[0].from_sample((self.learning_rate - 0.001) / (1.0 - 0.001)),
-            bounds[1].from_sample((self.batch_size - 16) as f64 / (512 - 16) as f64),
+            bounds[0].encode_f64(self.learning_rate).expect("learning_rate within bounds"),
+            bounds[1].encode_f64(self.batch_size as f64).expect("batch_size within bounds"),
         ]
     }
 
     fn decode(genes: &[i64]) -> Self::Phenotype {
         let bounds = Self::morphology();
         MyParams {
-            learning_rate: bounds[0].to_f64(genes[0]),
-            batch_size: (bounds[1].to_f64(genes[1]) * (512 - 16) as f64 + 16.0) as i64,
+            learning_rate: bounds[0].decode_f64(genes[0]),
+            batch_size: bounds[1].decode_f64(genes[1]) as i64,
         }
     }
 }

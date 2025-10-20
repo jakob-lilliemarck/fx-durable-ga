@@ -14,6 +14,8 @@ pub enum GeneBoundError {
     StepsOverflow { steps: u32, max: i32 },
     #[error("ZeroSteps: number of steps must be greater than 0")]
     ZeroSteps,
+    #[error("ValueOutOfBounds: value {value} is outside bounds [{lower}, {upper}]")]
+    ValueOutOfBounds { value: f64, lower: f64, upper: f64 },
 }
 
 impl GeneBoundError {
@@ -34,31 +36,40 @@ impl GeneBoundError {
     pub(crate) fn zero_steps() -> Self {
         Self::ZeroSteps
     }
+
+    /// Creates a value out of bounds error.
+    pub(crate) fn value_out_of_bounds(value: f64, lower: f64, upper: f64) -> Self {
+        Self::ValueOutOfBounds {
+            value,
+            lower,
+            upper,
+        }
+    }
 }
 
 /// Defines the search space bounds and discretization for a single gene parameter.
-/// 
+///
 /// Each gene in a genetic algorithm represents one optimization parameter. `GeneBounds`
 /// specifies the valid range of values and how finely to discretize that range.
 /// Uses fixed-point arithmetic internally for precise decimal handling without floating-point errors.
-/// 
+///
 /// # Discretization
-/// 
+///
 /// The genetic algorithm works with discrete gene values (integers from 0 to steps-1).
 /// These are mapped to continuous values in your specified range. More steps provide
 /// finer resolution but increase the search space size.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```rust
 /// use fx_durable_ga::models::GeneBounds;
-/// 
+///
 /// // Trading strategy parameter: risk tolerance from 0.1% to 2.5% with 0.01% precision
 /// let risk_bounds = GeneBounds::decimal(0.001, 0.025, 241, 5)?;
-/// 
+///
 /// // Portfolio allocation: 0% to 100% in 1% increments
 /// let allocation_bounds = GeneBounds::decimal(0.0, 1.0, 101, 2)?;
-/// 
+///
 /// // Discrete choice: algorithm variant selection (4 options)
 /// let variant_bounds = GeneBounds::integer(0, 3, 4)?;
 /// # Ok::<(), fx_durable_ga::models::GeneBoundError>(())
@@ -139,7 +150,7 @@ impl GeneBounds {
     }
 
     /// Converts a discrete gene value to its corresponding decimal value in the real range.
-    pub fn to_f64(&self, gene: Gene) -> f64 {
+    pub fn decode_f64(&self, gene: Gene) -> f64 {
         let range = self.upper_scaled - self.lower_scaled;
         let scaled_value = self.lower_scaled + (gene * range) / (self.steps - 1) as i64;
         scaled_value as f64 / self.scale_factor as f64
@@ -160,6 +171,35 @@ impl GeneBounds {
     pub fn from_sample(&self, sample: f64) -> Gene {
         // Map [0,1] sample to discrete gene index [0, steps-1]
         (sample * (self.steps - 1) as f64).round() as Gene
+    }
+
+    /// Encodes an f64 value directly to a gene index using the bounds' range.
+    ///
+    /// Returns an error if the value is outside the bounds' [lower, upper] range.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use fx_durable_ga::models::GeneBounds;
+    ///
+    /// let bounds = GeneBounds::decimal(0.001, 1.0, 1000, 3)?;
+    /// let gene = bounds.encode_f64(0.5)?; // Encodes 0.5 to appropriate gene index
+    /// let decoded = bounds.decode_f64(gene);  // Should be approximately 0.5
+    /// # Ok::<(), fx_durable_ga::models::GeneBoundError>(())
+    /// ```
+    pub fn encode_f64(&self, value: f64) -> Result<Gene, GeneBoundError> {
+        let lower = self.lower_scaled as f64 / self.scale_factor as f64;
+        let upper = self.upper_scaled as f64 / self.scale_factor as f64;
+
+        if value < lower || value > upper {
+            return Err(GeneBoundError::value_out_of_bounds(value, lower, upper));
+        }
+
+        let range = (self.upper_scaled - self.lower_scaled) as f64;
+        let scaled_input = (value * self.scale_factor as f64).round() as i64;
+        let normalized = (scaled_input - self.lower_scaled) as f64 / range;
+
+        Ok(self.from_sample(normalized))
     }
 }
 
@@ -228,8 +268,8 @@ mod tests {
         let bounds = GeneBounds::decimal(0.0, 1.0, 2, 3).unwrap();
 
         // With 2 steps, we should get exactly the lower and upper bounds
-        assert_eq!(bounds.to_f64(0), 0.0); // Lower bound included
-        assert_eq!(bounds.to_f64(1), 1.0); // Upper bound included
+        assert_eq!(bounds.decode_f64(0), 0.0); // Lower bound included
+        assert_eq!(bounds.decode_f64(1), 1.0); // Upper bound included
 
         // Verify from_sample maps correctly to these discrete values
         assert_eq!(bounds.from_sample(0.0), 0); // Maps to lower bound
@@ -237,11 +277,11 @@ mod tests {
 
         // Test with more steps to show even distribution
         let bounds_5 = GeneBounds::decimal(0.0, 4.0, 5, 1).unwrap();
-        assert_eq!(bounds_5.to_f64(0), 0.0); // 0.0
-        assert_eq!(bounds_5.to_f64(1), 1.0); // 1.0
-        assert_eq!(bounds_5.to_f64(2), 2.0); // 2.0
-        assert_eq!(bounds_5.to_f64(3), 3.0); // 3.0
-        assert_eq!(bounds_5.to_f64(4), 4.0); // 4.0 (upper bound included)
+        assert_eq!(bounds_5.decode_f64(0), 0.0); // 0.0
+        assert_eq!(bounds_5.decode_f64(1), 1.0); // 1.0
+        assert_eq!(bounds_5.decode_f64(2), 2.0); // 2.0
+        assert_eq!(bounds_5.decode_f64(3), 3.0); // 3.0
+        assert_eq!(bounds_5.decode_f64(4), 4.0); // 4.0 (upper bound included)
     }
 
     #[test]
@@ -264,19 +304,19 @@ mod tests {
     }
 
     #[test]
-    fn test_to_f64_conversion() {
+    fn test_decode_f64_conversion() {
         // Test decimal conversion
         let bounds = GeneBounds::decimal(0.0, 10.0, 11, 1).unwrap(); // 11 steps: 0,1,2,...,10
 
-        assert_eq!(bounds.to_f64(0), 0.0); // First step
-        assert_eq!(bounds.to_f64(5), 5.0); // Middle step
-        assert_eq!(bounds.to_f64(10), 10.0); // Last step
+        assert_eq!(bounds.decode_f64(0), 0.0); // First step
+        assert_eq!(bounds.decode_f64(5), 5.0); // Middle step
+        assert_eq!(bounds.decode_f64(10), 10.0); // Last step
 
         // Test with higher precision
         let precise_bounds = GeneBounds::decimal(0.0, 1.0, 101, 3).unwrap(); // 0.000 to 1.000
-        assert!((precise_bounds.to_f64(0) - 0.0).abs() < 0.001);
-        assert!((precise_bounds.to_f64(50) - 0.5).abs() < 0.01);
-        assert!((precise_bounds.to_f64(100) - 1.0).abs() < 0.001);
+        assert!((precise_bounds.decode_f64(0) - 0.0).abs() < 0.001);
+        assert!((precise_bounds.decode_f64(50) - 0.5).abs() < 0.01);
+        assert!((precise_bounds.decode_f64(100) - 1.0).abs() < 0.001);
     }
 
     #[test]
@@ -293,5 +333,78 @@ mod tests {
         // Verify bounds
         assert!(gene1 >= 0 && gene1 < 100);
         assert!(gene2 >= 0 && gene2 < 100);
+    }
+
+    #[test]
+    fn test_encode_f64_decimal_bounds() {
+        let bounds = GeneBounds::decimal(0.0, 1.0, 11, 2).unwrap(); // 0.00 to 1.00, 11 steps
+
+        // Test boundary values
+        assert_eq!(bounds.encode_f64(0.0).unwrap(), 0);
+        assert_eq!(bounds.encode_f64(1.0).unwrap(), 10);
+
+        // Test middle value
+        let gene = bounds.encode_f64(0.5).unwrap();
+        assert_eq!(gene, 5);
+
+        // Test roundtrip
+        let decoded = bounds.decode_f64(gene);
+        assert!((decoded - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_encode_f64_integer_bounds() {
+        let bounds = GeneBounds::integer(10, 20, 11).unwrap(); // 10 to 20, 11 steps
+
+        // Test boundary values
+        assert_eq!(bounds.encode_f64(10.0).unwrap(), 0);
+        assert_eq!(bounds.encode_f64(20.0).unwrap(), 10);
+
+        // Test middle value
+        let gene = bounds.encode_f64(15.0).unwrap();
+        assert_eq!(gene, 5);
+
+        // Test roundtrip
+        let decoded = bounds.decode_f64(gene);
+        assert!((decoded - 15.0).abs() < 0.1);
+    }
+
+    #[test]
+    fn test_encode_f64_out_of_bounds() {
+        let bounds = GeneBounds::decimal(0.001, 1.0, 1000, 3).unwrap();
+
+        // Test values outside bounds
+        assert!(bounds.encode_f64(0.0).is_err()); // Below lower bound
+        assert!(bounds.encode_f64(1.1).is_err()); // Above upper bound
+
+        // Test exact boundary values work
+        assert!(bounds.encode_f64(0.001).is_ok());
+        assert!(bounds.encode_f64(1.0).is_ok());
+    }
+
+    #[test]
+    fn test_encode_f64_precision() {
+        let bounds = GeneBounds::decimal(0.0, 1.0, 1001, 3).unwrap(); // 0.000 to 1.000, 1001 steps
+
+        // Test high precision value
+        let gene = bounds.encode_f64(0.123).unwrap();
+        let decoded = bounds.decode_f64(gene);
+
+        // Should be very close due to high step count
+        assert!((decoded - 0.123).abs() < 0.002);
+    }
+
+    #[test]
+    fn test_encode_f64_error_message() {
+        let bounds = GeneBounds::decimal(0.5, 1.5, 100, 2).unwrap();
+
+        let result = bounds.encode_f64(0.3);
+        assert!(result.is_err());
+
+        let error = result.unwrap_err();
+        let error_msg = format!("{}", error);
+        assert!(error_msg.contains("0.3"));
+        assert!(error_msg.contains("0.5"));
+        assert!(error_msg.contains("1.5"));
     }
 }

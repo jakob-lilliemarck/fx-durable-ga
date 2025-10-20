@@ -60,19 +60,19 @@ impl Encodeable for Point {
 
     /// Converts this point to genetic representation.
     ///
-    /// Maps floating-point coordinates back to normalized [0,1] samples, then to gene indices.
+    /// Uses the bounds' encode_f64 method to directly convert coordinates to gene indices.
     fn encode(&self) -> Vec<i64> {
         let bounds = Self::morphology();
-
-        // Map coordinates to normalized [0,1] samples within each dimension's range
-        let x_normalized = (self.x - 0.5) / (1.75 - 0.5); // x range: 0.5 to 1.75
-        let y_normalized = (self.y - 0.75) / (2.00 - 0.75); // y range: 0.75 to 2.0
-        let z_normalized = (self.z - 2.00) / (3.25 - 2.00); // z range: 2.0 to 3.25
-
         vec![
-            bounds[0].from_sample(x_normalized.clamp(0.0, 1.0)),
-            bounds[1].from_sample(y_normalized.clamp(0.0, 1.0)),
-            bounds[2].from_sample(z_normalized.clamp(0.0, 1.0)),
+            bounds[0]
+                .encode_f64(self.x)
+                .expect("x coordinate within bounds"),
+            bounds[1]
+                .encode_f64(self.y)
+                .expect("y coordinate within bounds"),
+            bounds[2]
+                .encode_f64(self.z)
+                .expect("z coordinate within bounds"),
         ]
     }
 
@@ -82,9 +82,9 @@ impl Encodeable for Point {
     fn decode(genes: &[i64]) -> Self::Phenotype {
         let bounds = Self::morphology();
         Point {
-            x: bounds[0].to_f64(genes[0]), // Convert to actual decimal coordinates
-            y: bounds[1].to_f64(genes[1]), // e.g., gene 0 → 0.5, gene 999 → 1.75
-            z: bounds[2].to_f64(genes[2]), // e.g., gene 0 → 2.0, gene 999 → 3.25
+            x: bounds[0].decode_f64(genes[0]), // Convert to actual decimal coordinates
+            y: bounds[1].decode_f64(genes[1]), // e.g., gene 0 → 0.5, gene 999 → 1.75
+            z: bounds[2].decode_f64(genes[2]), // e.g., gene 0 → 2.0, gene 999 → 3.25
         }
     }
 }
@@ -185,7 +185,7 @@ async fn main() -> Result<()> {
     });
 
     // Create multiple optimization requests with different genetic algorithm parameters
-    for _ in 0..20 {
+    for _ in 0..1 {
         service
             .new_optimization_request(
                 Point::NAME,
@@ -204,7 +204,7 @@ async fn main() -> Result<()> {
     }
 
     // Run for a maximum of 5 seconds
-    let timeout_duration = Duration::from_secs(300);
+    let timeout_duration = Duration::from_secs(60);
     let start_time = std::time::Instant::now();
 
     loop {

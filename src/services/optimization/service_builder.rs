@@ -29,7 +29,7 @@ impl ServiceBuilder {
     ///
     /// ## Type Registration Process
     /// 1. **Morphology Creation**: Automatically creates and stores the search space definition
-    /// 2. **Type Erasure**: Converts your specific evaluator into a type-erased form for internal storage  
+    /// 2. **Type Erasure**: Converts your specific evaluator into a type-erased form for internal storage
     /// 3. **Hash Mapping**: Associates your type's hash with its evaluator for efficient lookup
     /// 4. **Database Integration**: Ensures the type's morphology exists in persistent storage
     ///
@@ -55,7 +55,7 @@ impl ServiceBuilder {
     /// - `encode()`: Converts instances to genetic representation
     /// - `decode()`: Converts genes back to phenotypes for evaluation
     ///
-    /// # Evaluator Implementation Requirements  
+    /// # Evaluator Implementation Requirements
     ///
     /// Your evaluator must implement `Evaluator<T::Phenotype>` with:
     /// - `fitness()`: Async function returning fitness scores (0.0-1.0 recommended)
@@ -84,7 +84,7 @@ impl ServiceBuilder {
     ///     fn morphology() -> Vec<GeneBounds> {
     ///         vec![
     ///             GeneBounds::decimal(0.001, 1.0, 1000, 3).unwrap(),  // learning_rate
-    ///             GeneBounds::integer(8, 512, 32).unwrap(),            // batch_size  
+    ///             GeneBounds::integer(8, 512, 32).unwrap(),            // batch_size
     ///             GeneBounds::integer(1, 10, 10).unwrap(),             // layers
     ///         ]
     ///     }
@@ -101,9 +101,9 @@ impl ServiceBuilder {
     ///     fn decode(genes: &[i64]) -> Self::Phenotype {
     ///         let bounds = Self::morphology();
     ///         Parameters {
-    ///             learning_rate: bounds[0].to_f64(genes[0]),
-    ///             batch_size: (bounds[1].to_f64(genes[1]) * (512 - 8) as f64 + 8.0) as i64,
-    ///             layers: (bounds[2].to_f64(genes[2]) * 9.0 + 1.0) as i64,
+    ///             learning_rate: bounds[0].decode_f64(genes[0]),
+    ///             batch_size: (bounds[1].decode_f64(genes[1]) * (512 - 8) as f64 + 8.0) as i64,
+    ///             layers: (bounds[2].decode_f64(genes[2]) * 9.0 + 1.0) as i64,
     ///         }
     ///     }
     /// }
@@ -131,7 +131,7 @@ impl ServiceBuilder {
     /// # }
     /// ```
     ///
-    /// ## Geometric/Spatial Problems  
+    /// ## Geometric/Spatial Problems
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
     /// # use fx_durable_ga::services::optimization::ServiceBuilder;
@@ -140,7 +140,7 @@ impl ServiceBuilder {
     /// #[derive(Debug, Clone)]
     /// struct Point3D {
     ///     x: f64,
-    ///     y: f64, 
+    ///     y: f64,
     ///     z: f64,
     /// }
     ///
@@ -168,9 +168,9 @@ impl ServiceBuilder {
     ///     fn decode(genes: &[i64]) -> Self::Phenotype {
     ///         let bounds = Self::morphology();
     ///         Point3D {
-    ///             x: bounds[0].to_f64(genes[0]) * 20.0 - 10.0,
-    ///             y: bounds[1].to_f64(genes[1]) * 20.0 - 10.0,
-    ///             z: bounds[2].to_f64(genes[2]) * 20.0,
+    ///             x: bounds[0].decode_f64(genes[0]) * 20.0 - 10.0,
+    ///             y: bounds[1].decode_f64(genes[1]) * 20.0 - 10.0,
+    ///             z: bounds[2].decode_f64(genes[2]) * 20.0,
     ///         }
     ///     }
     /// }
@@ -196,7 +196,7 @@ impl ServiceBuilder {
     ///             let dy = point.y - target.y;
     ///             let dz = point.z - target.z;
     ///             let distance = (dx*dx + dy*dy + dz*dz).sqrt();
-    ///             
+    ///
     ///             // Convert distance to fitness (closer = higher fitness)
     ///             let fitness = 1.0 / (1.0 + distance);
     ///             Ok(fitness)
@@ -263,7 +263,7 @@ impl ServiceBuilder {
     ///                 .enumerate()
     ///                 .map(|(job, &worker)| costs[job][worker as usize])
     ///                 .sum();
-    ///             
+    ///
     ///             // Lower cost = higher fitness
     ///             let max_possible_cost = 1000.0;
     ///             let fitness = (max_possible_cost - total_cost) / max_possible_cost;
@@ -308,26 +308,26 @@ impl ServiceBuilder {
     /// ```rust,no_run
     /// # use fx_durable_ga::services::optimization::ServiceBuilder;
     /// # struct TypeA; struct TypeB; struct EvaluatorA; struct EvaluatorB;
-    /// # impl fx_durable_ga::models::Encodeable for TypeA { 
+    /// # impl fx_durable_ga::models::Encodeable for TypeA {
     /// #     const NAME: &'static str = "TypeA"; type Phenotype = TypeA;
     /// #     fn morphology() -> Vec<fx_durable_ga::models::GeneBounds> { vec![] }
     /// #     fn encode(&self) -> Vec<i64> { vec![] }
     /// #     fn decode(_: &[i64]) -> Self::Phenotype { TypeA }
     /// # }
-    /// # impl fx_durable_ga::models::Encodeable for TypeB { 
+    /// # impl fx_durable_ga::models::Encodeable for TypeB {
     /// #     const NAME: &'static str = "TypeB"; type Phenotype = TypeB;
     /// #     fn morphology() -> Vec<fx_durable_ga::models::GeneBounds> { vec![] }
     /// #     fn encode(&self) -> Vec<i64> { vec![] }
     /// #     fn decode(_: &[i64]) -> Self::Phenotype { TypeB }
     /// # }
     /// # impl fx_durable_ga::models::Evaluator<TypeA> for EvaluatorA {
-    /// #     fn fitness<'a>(&self, _: TypeA, _: &'a Box<dyn fx_durable_ga::models::Terminated>) 
-    /// #         -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> 
+    /// #     fn fitness<'a>(&self, _: TypeA, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
+    /// #         -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>>
     /// #         { Box::pin(async move { Ok(0.5) }) }
     /// # }
     /// # impl fx_durable_ga::models::Evaluator<TypeB> for EvaluatorB {
-    /// #     fn fitness<'a>(&self, _: TypeB, _: &'a Box<dyn fx_durable_ga::models::Terminated>) 
-    /// #         -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> 
+    /// #     fn fitness<'a>(&self, _: TypeB, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
+    /// #         -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>>
     /// #         { Box::pin(async move { Ok(0.5) }) }
     /// # }
     /// # async fn example(builder: ServiceBuilder) -> Result<(), Box<dyn std::error::Error>> {
@@ -378,7 +378,7 @@ impl ServiceBuilder {
     ///     fn decode(genes: &[i64]) -> Self::Phenotype {
     ///         let bounds = Self::morphology();
     ///         OptimizationTarget {
-    ///             value: bounds[0].to_f64(genes[0]) * 200.0 - 100.0
+    ///             value: bounds[0].decode_f64(genes[0]) * 200.0 - 100.0
     ///         }
     ///     }
     /// }

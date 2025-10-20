@@ -148,7 +148,7 @@ impl Service {
     ///
     /// service.new_optimization_request(
     ///     MyType::NAME,
-    ///     MyType::HASH, 
+    ///     MyType::HASH,
     ///     FitnessGoal::maximize(0.95)?,                    // High-quality target
     ///     Schedule::generational(50, 50),                 // Moderate generations
     ///     Selector::tournament(3, 100),                   // Balanced selection
@@ -241,8 +241,8 @@ impl Service {
     ///     fn decode(genes: &[i64]) -> Self::Phenotype {
     ///         let bounds = Self::morphology();
     ///         Point {
-    ///             x: bounds[0].to_f64(genes[0]),
-    ///             y: bounds[1].to_f64(genes[1]),
+    ///             x: bounds[0].decode_f64(genes[0]),
+    ///             y: bounds[1].decode_f64(genes[1]),
     ///         }
     ///     }
     /// }
