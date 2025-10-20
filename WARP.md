@@ -13,8 +13,10 @@
 
 **Documentation by visibility level:**
 - `fn` (private) - No doc comments needed
-- `pub(super)`, `pub(self)`, `pub(crate)` - Simple, brief doc comments describing the contract
-- `pub fn` (public API) - More comprehensive doc comments, include examples for complex method calls. Keep simple and lean.
+- `pub(super)`, `pub(self)`, `pub(crate)` - Simple, brief doc comments describing what the method does, how to call it, and what to expect
+- `pub fn` (public API) - More comprehensive doc comments describing what the method does, how to call it, what to expect, include examples for complex method calls. Keep simple and lean.
+
+**Important:** Doc comments should focus on _what the method does_, _how to call it_, and _what to expect_. They should NOT reveal implementation details - those belong in code comments.
 
 - Code comments `//` are intended for the _developer_. They should capture important implementation details, and make the code more approachable while working on it. Especially logic conditions that may be hard for humans to understand.
 - After writing documentation, always run doc tests for the modified file to ensure correctness - fix any errors.

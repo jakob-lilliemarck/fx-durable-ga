@@ -8,6 +8,8 @@ use uuid::Uuid;
 // ============================================================
 // GenerateInitialPopulation
 // ============================================================
+
+/// Message to trigger initial population generation for an optimization request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenerateInitialPopulationMessage {
     pub request_id: Uuid,
@@ -17,6 +19,7 @@ impl Message for GenerateInitialPopulationMessage {
     const NAME: &str = "GenerateInitialPopulationMessage";
 }
 
+/// Handler that processes initial population generation jobs.
 pub struct GenerateInitialPopulationHandler {
     service: Arc<super::Service>,
 }
@@ -55,6 +58,8 @@ impl Handler for GenerateInitialPopulationHandler {
 // ============================================================
 // EvaluateGenotype
 // ============================================================
+
+/// Message to trigger fitness evaluation for a specific genotype.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluateGenotypeMessage {
     pub request_id: Uuid,
@@ -65,6 +70,7 @@ impl Message for EvaluateGenotypeMessage {
     const NAME: &str = "EvaluateGenotypeMessage";
 }
 
+/// Handler that processes genotype evaluation jobs.
 pub struct EvaluateGenotypeHandler {
     service: Arc<super::Service>,
 }
@@ -103,6 +109,8 @@ impl Handler for EvaluateGenotypeHandler {
 // ============================================================
 // MaintainPopulation
 // ============================================================
+
+/// Message to trigger population maintenance for an optimization request.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MaintainPopulationMessage {
     pub request_id: Uuid,
@@ -112,6 +120,7 @@ impl Message for MaintainPopulationMessage {
     const NAME: &str = "MaintainPopulationMessage";
 }
 
+/// Handler that processes population maintenance jobs.
 pub struct MaintainPopulationHandler {
     service: Arc<super::Service>,
 }
@@ -146,6 +155,9 @@ impl Handler for MaintainPopulationHandler {
 // ============================================================
 // Registration
 // ============================================================
+
+/// Registers all optimization job handlers with the job registry.
+#[instrument(level = "debug", skip_all)]
 pub fn register_job_handlers(
     service: &Arc<super::Service>,
     builder: fx_mq_jobs::RegistryBuilder,

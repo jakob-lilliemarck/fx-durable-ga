@@ -6,12 +6,15 @@ use futures::future::BoxFuture;
 use tracing::instrument;
 use uuid::Uuid;
 
+/// Checks if an optimization request has been terminated by querying for request conclusions.
 pub(crate) struct Terminator {
     request_id: Uuid,
     requests: requests::Repository,
 }
 
 impl Terminator {
+    /// Creates a new terminator for the given request.
+    #[instrument(level = "debug", skip(requests), fields(request_id = %request_id))]
     pub(crate) fn new(requests: requests::Repository, request_id: Uuid) -> Self {
         Terminator {
             request_id,
@@ -21,6 +24,7 @@ impl Terminator {
 }
 
 impl Terminated for Terminator {
+    #[instrument(level = "debug", skip(self), fields(request_id = %self.request_id))]
     fn is_terminated(&self) -> BoxFuture<'_, bool> {
         let requests = self.requests.clone();
 
@@ -37,6 +41,8 @@ impl Terminated for Terminator {
     }
 }
 
+/// Type-erased evaluator trait that allows storing different evaluator types in a collection.
+/// Converts gene arrays to phenotypes and delegates to the underlying evaluator.
 pub(crate) trait TypeErasedEvaluator: Send + Sync {
     fn fitness<'a>(
         &self,
@@ -45,12 +51,15 @@ pub(crate) trait TypeErasedEvaluator: Send + Sync {
     ) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
 
+/// Wraps a typed evaluator to implement the type-erased interface.
+/// Handles decoding genes to phenotypes before evaluation.
 pub(crate) struct ErasedEvaluator<P, E: Evaluator<P>> {
     evaluator: E,
     decode: fn(&[i64]) -> P,
 }
 
 impl<P, E: Evaluator<P>> ErasedEvaluator<P, E> {
+    /// Creates a new erased evaluator with the given evaluator and decode function.
     pub(crate) fn new(evaluator: E, decode: fn(&[i64]) -> P) -> Self {
         Self { evaluator, decode }
     }

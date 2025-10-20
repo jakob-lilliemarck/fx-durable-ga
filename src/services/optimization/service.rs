@@ -16,7 +16,8 @@ use std::collections::{HashMap, HashSet};
 use tracing::instrument;
 use uuid::Uuid;
 
-// optimization service
+/// Genetic algorithm optimization service that manages the entire optimization lifecycle.
+/// Handles request creation, population generation, genotype evaluation, and breeding.
 pub struct Service {
     pub(super) locking: lock::Service,
     pub(super) requests: requests::Repository,
@@ -27,6 +28,8 @@ pub struct Service {
 }
 
 impl Service {
+    /// Creates a new service builder with the required dependencies.
+    #[instrument(level = "debug", skip_all)]
     pub(crate) fn builder(
         locking: lock::Service,
         requests: requests::Repository,
@@ -90,8 +93,9 @@ impl Service {
         Ok(())
     }
 
-    // Shall be run in a job triggered by OptimizationRequested
-    #[instrument(level = "info", skip(self), fields(request_id = %request_id))]
+    /// Generates the initial population of genotypes for an optimization request.
+    /// Creates genotypes based on the request's distribution and publishes generation events.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) async fn generate_initial_population(&self, request_id: Uuid) -> Result<(), Error> {
         tracing::info!("Generating initial population");
 
@@ -151,8 +155,9 @@ impl Service {
         Ok(())
     }
 
-    // Shall be run in a job triggerd by GenotypeGenerated
-    #[instrument(level = "info", skip(self), fields(request_id = %request_id, genotype_id = %genotype_id))]
+    /// Evaluates a genotype's fitness using the appropriate evaluator.
+    /// Records the fitness result and publishes an evaluation event.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id, genotype_id = %genotype_id))]
     pub(crate) async fn evaluate_genotype(
         &self,
         request_id: Uuid,
@@ -208,7 +213,7 @@ impl Service {
         Ok(())
     }
 
-    #[instrument(level = "info", skip(self, request), fields(request_id = %request.id, num_offspring = num_offspring, next_generation_id = next_generation_id))]
+    #[instrument(level = "debug", skip(self, request), fields(request_id = %request.id, num_offspring = num_offspring, next_generation_id = next_generation_id))]
     async fn breed_genotypes(
         &self,
         request: &Request,
@@ -219,7 +224,7 @@ impl Service {
         let ret = self
             .locking
             .lock_while(&key, || async {
-                // Early return if it exists!
+                // Early return if generation already exists (prevents duplicate work)
                 let exists = self.genotypes.check_if_generation_exists(request.id, next_generation_id).await?;
                 if exists {
                     return Ok(())
@@ -244,7 +249,7 @@ impl Service {
                 // Get current population to calculate optimization progress
                 let population = self.genotypes.get_population(&request.id).await?;
 
-                // Iterative breeding with deduplication
+                // Iterative breeding with deduplication to avoid creating duplicate genomes
                 let mut final_genotypes = Vec::with_capacity(num_offspring);
                 let mut generated_hashes = HashSet::new();
                 let mut deduplication_attempts = 0;
@@ -366,7 +371,8 @@ impl Service {
         ret
     }
 
-    // Shall be run in a job triggered by GenotypeEvaluated
+    /// Maintains the population by checking completion status and scheduling breeding or termination.
+    /// Called after each genotype evaluation to determine the next optimization step.
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) async fn maintain_population(&self, request_id: Uuid) -> Result<(), Error> {
         // Get the request
@@ -416,7 +422,9 @@ impl Service {
         }
     }
 
-    #[instrument(level = "info", skip(self), fields(request_id = %request_conclusion.request_id, concluded_at = %request_conclusion.concluded_at, concluded_with = ?request_conclusion.concluded_with))]
+    /// Records the conclusion of an optimization request to prevent duplicate processing.
+    /// Uses locking to ensure atomicity when multiple workers might conclude the same request.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_conclusion.request_id, concluded_at = %request_conclusion.concluded_at, concluded_with = ?request_conclusion.concluded_with))]
     pub(crate) async fn conclude_request(
         &self,
         request_conclusion: RequestConclusion,
@@ -443,6 +451,8 @@ impl Service {
             .await?
     }
 
+    /// Publishes a termination event for an optimization request.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) async fn publish_terminated(&self, request_id: Uuid) -> Result<(), Error> {
         self.genotypes
             .chain(|tx_genotypes| {

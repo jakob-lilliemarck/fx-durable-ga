@@ -1,9 +1,10 @@
 use crate::services::lock;
 use crate::{
-    models::{MutagenError, ProbabilityOutOfRangeError, SelectionError},
+    models::SelectionError,
     repositories::{genotypes, morphologies, requests},
 };
 
+/// Errors that can occur during optimization operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("RequestsRepositoryError: {0}")]
@@ -16,16 +17,8 @@ pub enum Error {
     UnknownTypeError { type_hash: i32, type_name: String },
     #[error("EvaluationError: {0}")]
     EvaluationError(#[from] anyhow::Error),
-    #[error("NoValidParents")]
-    NoValidParents,
-    #[error("Mutagen: {0}")]
-    Mutagen(#[from] MutagenError),
-    #[error("Crossover: {0}")]
-    Crossover(#[from] ProbabilityOutOfRangeError),
     #[error("Selection error: {0}")]
     SelectionError(#[from] SelectionError),
-    #[error("Invalid parent parent: {0}")]
-    InvalidParentIndex(usize),
     #[error("Lock error: {0}")]
     LockError(#[from] lock::Error),
 }

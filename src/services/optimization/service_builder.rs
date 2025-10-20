@@ -7,6 +7,8 @@ use crate::{
 use std::collections::HashMap;
 use tracing::instrument;
 
+/// Builder for creating optimization services with registered type evaluators.
+/// Handles morphology registration and evaluator type erasure.
 pub struct ServiceBuilder {
     pub(super) locking: lock::Service,
     pub(super) requests: requests::Repository,
@@ -17,9 +19,8 @@ pub struct ServiceBuilder {
 }
 
 impl ServiceBuilder {
-    // NOTE:
-    // This is a N+1, probably not so bad, it shouldn't be like this.
-    // Its simple though, so I'll go with it for a first version
+    /// Registers an evaluator for a specific type, ensuring its morphology exists in the database.
+    /// Creates the morphology if it doesn't exist and stores the type-erased evaluator.
     #[instrument(level = "debug", skip(self, evaluator), fields(type_name = T::NAME, type_hash = T::HASH))]
     pub async fn register<T, E>(mut self, evaluator: E) -> Result<Self, super::Error>
     where
@@ -34,20 +35,20 @@ impl ServiceBuilder {
                 .await?;
         }
 
-        // Erase the type
+        // Erase the type and store the evaluator
         let erased = super::models::ErasedEvaluator::new(evaluator, T::decode);
-
-        // Insert it
         self.evaluators.insert(T::HASH, Box::new(erased));
 
         Ok(self)
     }
 
+    /// Sets the maximum number of deduplication attempts when breeding genotypes.
     pub fn with_max_deduplication_attempts(mut self, attempts: i32) -> Self {
         self.max_deduplication_attempts = attempts;
         self
     }
 
+    /// Builds the optimization service with all registered evaluators.
     #[instrument(level = "debug", skip(self), fields(evaluators_count = self.evaluators.len()))]
     pub fn build(self) -> Service {
         Service {

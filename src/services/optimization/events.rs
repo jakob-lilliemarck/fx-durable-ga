@@ -18,6 +18,8 @@ use uuid::Uuid;
 // ============================================================
 // OptimizationRequested
 // ============================================================
+
+/// Event published when a new optimization request is created.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct OptimizationRequestedEvent {
     request_id: Uuid,
@@ -28,12 +30,13 @@ impl fx_event_bus::Event for OptimizationRequestedEvent {
 }
 
 impl OptimizationRequestedEvent {
-    #[instrument(level = "debug", fields(request_id = %request_id))]
+    /// Creates a new optimization requested event.
     pub fn new(request_id: Uuid) -> Self {
         Self { request_id }
     }
 }
 
+/// Handler that responds to optimization requests by scheduling initial population generation.
 pub struct OptimizationRequestedHandler {
     queries: Arc<Queries>,
 }
@@ -75,6 +78,8 @@ impl Handler<OptimizationRequestedEvent> for OptimizationRequestedHandler {
 // ============================================================
 // GenotypeGenerated
 // ============================================================
+
+/// Event published when a new genotype is generated for evaluation.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GenotypeGenerated {
     request_id: Uuid,
@@ -86,7 +91,7 @@ impl fx_event_bus::Event for GenotypeGenerated {
 }
 
 impl GenotypeGenerated {
-    #[instrument(level = "debug", fields(request_id = %request_id, genotype_id = %genotype_id))]
+    /// Creates a new genotype generated event.
     pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
         Self {
             request_id,
@@ -95,6 +100,7 @@ impl GenotypeGenerated {
     }
 }
 
+/// Handler that responds to genotype generation by scheduling evaluation jobs.
 pub struct GenotypeGeneratedHandlerEvent {
     queries: Arc<Queries>,
 }
@@ -138,6 +144,8 @@ impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
 // ============================================================
 // GenotypeEvaluated
 // ============================================================
+
+/// Event published when a genotype's fitness has been evaluated.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GenotypeEvaluatedEvent {
     request_id: Uuid,
@@ -149,7 +157,7 @@ impl fx_event_bus::Event for GenotypeEvaluatedEvent {
 }
 
 impl GenotypeEvaluatedEvent {
-    #[instrument(level = "debug", fields(request_id = %request_id, genotype_id = %genotype_id))]
+    /// Creates a new genotype evaluated event.
     pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
         Self {
             request_id,
@@ -158,6 +166,7 @@ impl GenotypeEvaluatedEvent {
     }
 }
 
+/// Handler that responds to genotype evaluations by scheduling population maintenance.
 pub struct GenotypeEvaluatedHandler {
     queries: Arc<Queries>,
 }
@@ -199,6 +208,8 @@ impl Handler<GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
 // ============================================================
 // RequestCompleted
 // ============================================================
+
+/// Event published when an optimization request reaches its fitness goal.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RequestCompletedEvent {
     request_id: Uuid,
@@ -209,12 +220,13 @@ impl fx_event_bus::Event for RequestCompletedEvent {
 }
 
 impl RequestCompletedEvent {
-    #[instrument(level = "debug", fields(request_id = %request_id))]
+    /// Creates a new request completed event.
     pub fn new(request_id: Uuid) -> Self {
         Self { request_id }
     }
 }
 
+/// Handler that concludes optimization requests when they complete successfully.
 pub struct RequestCompletedHandler {
     optimization: Arc<optimization::Service>,
 }
@@ -251,6 +263,8 @@ impl Handler<RequestCompletedEvent> for RequestCompletedHandler {
 // ============================================================
 // RequestTerminated
 // ============================================================
+
+/// Event published when an optimization request is terminated before completion.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct RequestTerminatedEvent {
     request_id: Uuid,
@@ -261,12 +275,13 @@ impl fx_event_bus::Event for RequestTerminatedEvent {
 }
 
 impl RequestTerminatedEvent {
-    #[instrument(level = "debug", fields(request_id = %request_id))]
+    /// Creates a new request terminated event.
     pub fn new(request_id: Uuid) -> Self {
         Self { request_id }
     }
 }
 
+/// Handler that concludes optimization requests when they are terminated early.
 pub struct RequestTerminatedHandler {
     optimization: Arc<optimization::Service>,
 }
@@ -304,6 +319,8 @@ impl Handler<RequestTerminatedEvent> for RequestTerminatedHandler {
 // Registration
 // ============================================================
 
+/// Registers all optimization event handlers with the event bus registry.
+#[instrument(level = "debug", skip_all)]
 pub fn register_event_handlers(
     queries: Arc<Queries>,
     optimization: Arc<optimization::Service>,
