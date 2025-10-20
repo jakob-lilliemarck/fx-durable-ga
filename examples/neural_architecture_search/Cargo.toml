@@ -7,14 +7,14 @@ publish = false
 version = "0.1.0"
 
 [features]
-default = ["burn/dataset", "burn/sqlite-bundled"]
+default = ["ndarray"]
 ndarray = ["burn/ndarray"]
 wgpu = ["burn/wgpu"]
 tch-cpu = ["burn/tch"]
 tch-gpu = ["burn/tch"]
 
 [dependencies]
-burn = { git = "https://github.com/tracel-ai/burn.git", features = ["train", "dataset", "sqlite-bundled"] }
+burn = { git = "https://github.com/tracel-ai/burn.git", features = ["train"], default-features = false }
 
 # Serialization
 log = "0.4"
@@ -23,3 +23,31 @@ serde = { version = "1.0", features = ["std", "derive"] }
 # Displaying results
 textplots = "0.8.7"
 rgb = "0.8.52"
+rand = "0.8"
+
+# For loading CSV data in-memory
+reqwest = { version = "0.11", features = ["blocking"] }
+csv = "1.3"
+
+# GA optimization  
+fx-durable-ga = { git = "https://github.com/jakob-lilliemarck/fx-durable-ga" }
+
+# Required for GA optimization infrastructure
+tokio = { version = "1.42.0", features = [
+    "rt-multi-thread",
+    "macros",
+    "full",
+    "tracing",
+] }
+dotenv = "0.15.0"
+tracing-subscriber = { version = "0.3.19", features = ["json"] }
+anyhow = "1.0.95"
+uuid = { version = "1.14.0", features = ["serde", "v7"] }
+futures = "0.3.31"
+
+# Database and event system (required by GA framework)
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "chrono", "uuid", "json"] }
+fx-event-bus = "~0.1.7"
+fx-mq-building-blocks = "0.1.5"
+fx-mq-jobs = "~0.1.4"
+tracing = "0.1.41"

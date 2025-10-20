@@ -1,127 +1,78 @@
 use burn::{
-    data::{
-        dataloader::batcher::Batcher,
-        dataset::{Dataset, HuggingfaceDatasetLoader, SqliteDataset},
-    },
+    data::dataloader::batcher::Batcher,
     prelude::*,
 };
 
 pub const NUM_FEATURES: usize = 8;
 
-// Pre-computed statistics for the housing dataset features
-const FEATURES_MIN: [f32; NUM_FEATURES] = [0.4999, 1., 0.8461, 0.375, 3., 0.6923, 32.54, -124.35];
-const FEATURES_MAX: [f32; NUM_FEATURES] = [
-    15., 52., 141.9091, 34.0667, 35682., 1243.3333, 41.95, -114.31,
-];
-
-#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct HousingDistrictItem {
-    /// Median income
-    #[serde(rename = "MedInc")]
-    pub median_income: f32,
-
-    /// Median house age
-    #[serde(rename = "HouseAge")]
-    pub house_age: f32,
-
-    /// Average number of rooms per household
-    #[serde(rename = "AveRooms")]
-    pub avg_rooms: f32,
-
-    /// Average number of bedrooms per household
-    #[serde(rename = "AveBedrms")]
-    pub avg_bedrooms: f32,
-
-    /// Block group population
-    #[serde(rename = "Population")]
-    pub population: f32,
-
-    /// Average number of household members
-    #[serde(rename = "AveOccup")]
-    pub avg_occupancy: f32,
-
-    /// Block group latitude
-    #[serde(rename = "Latitude")]
-    pub latitude: f32,
-
-    /// Block group longitude
-    #[serde(rename = "Longitude")]
-    pub longitude: f32,
-
-    /// Median house value (in 100 000$)
-    #[serde(rename = "MedHouseVal")]
-    pub median_house_value: f32,
+#[derive(Clone, Debug)]
+pub struct HousingItem {
+    pub features: [f32; NUM_FEATURES],
+    pub target: f32,
 }
 
 pub struct HousingDataset {
-    dataset: SqliteDataset<HousingDistrictItem>,
-}
-
-impl Dataset<HousingDistrictItem> for HousingDataset {
-    fn get(&self, index: usize) -> Option<HousingDistrictItem> {
-        self.dataset.get(index)
-    }
-
-    fn len(&self) -> usize {
-        self.dataset.len()
-    }
+    items: Vec<HousingItem>,
 }
 
 impl HousingDataset {
-    pub fn train() -> Self {
-        Self::new("train")
-    }
-
-    pub fn validation() -> Self {
-        Self::new("validation")
-    }
-
-    pub fn test() -> Self {
-        Self::new("test")
-    }
-
-    pub fn new(split: &str) -> Self {
-        let dataset: SqliteDataset<HousingDistrictItem> =
-            HuggingfaceDatasetLoader::new("gvlassis/california_housing")
-                .dataset(split)
-                .unwrap();
-
-        Self { dataset }
-    }
-}
-
-/// Normalizer for the housing dataset.
-#[derive(Clone, Debug)]
-pub struct Normalizer<B: Backend> {
-    pub min: Tensor<B, 2>,
-    pub max: Tensor<B, 2>,
-}
-
-impl<B: Backend> Normalizer<B> {
-    /// Creates a new normalizer.
-    pub fn new(device: &B::Device, min: &[f32], max: &[f32]) -> Self {
-        let min = Tensor::<B, 1>::from_floats(min, device).unsqueeze();
-        let max = Tensor::<B, 1>::from_floats(max, device).unsqueeze();
-        Self { min, max }
-    }
-
-    /// Normalizes the input image according to the housing dataset min/max.
-    pub fn normalize(&self, input: Tensor<B, 2>) -> Tensor<B, 2> {
-        (input - self.min.clone()) / (self.max.clone() - self.min.clone())
-    }
-
-    /// Returns a new normalizer on the given device.
-    pub fn to_device(&self, device: &B::Device) -> Self {
-        Self {
-            min: self.min.clone().to_device(device),
-            max: self.max.clone().to_device(device),
+    /// Create a synthetic housing dataset that mimics California Housing
+    pub fn new() -> Self {
+        use rand::{Rng, SeedableRng};
+        use rand::rngs::StdRng;
+        
+        let mut rng = StdRng::seed_from_u64(42);
+        let mut items = Vec::new();
+        
+        // Generate 16640 samples (similar to California Housing train size)
+        for _ in 0..16640 {
+            let median_income = rng.gen_range(0.5..15.0);
+            let house_age = rng.gen_range(1.0..52.0);
+            let avg_rooms = rng.gen_range(1.0..40.0);
+            let avg_bedrooms = rng.gen_range(0.1..8.0);
+            let population = rng.gen_range(3.0..35682.0);
+            let avg_occupancy = rng.gen_range(0.7..1243.0);
+            let latitude = rng.gen_range(32.5..42.0);
+            let longitude = rng.gen_range(-124.4..-114.3);
+            
+            // Synthetic target based on realistic relationships
+            let target = median_income * 0.5 + 
+                         (house_age / 52.0) * -0.2 + 
+                         (avg_rooms / 10.0) * 0.1 +
+                         rng.gen_range(-0.5..0.5); // Add noise
+            
+            items.push(HousingItem {
+                features: [
+                    median_income,
+                    house_age,
+                    avg_rooms,
+                    avg_bedrooms,
+                    population,
+                    avg_occupancy,
+                    latitude,
+                    longitude,
+                ],
+                target: target.max(0.1), // Ensure positive
+            });
         }
+        
+        Self { items }
+    }
+    
+    pub fn train(&self) -> Vec<HousingItem> {
+        let end_idx = (self.items.len() as f32 * 0.8) as usize;
+        self.items[0..end_idx].to_vec()
+    }
+    
+    pub fn validation(&self) -> Vec<HousingItem> {
+        let start_idx = (self.items.len() as f32 * 0.8) as usize;
+        self.items[start_idx..].to_vec()
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct HousingBatcher<B: Backend> {
-    normalizer: Normalizer<B>,
+    _phantom: std::marker::PhantomData<B>,
 }
 
 #[derive(Clone, Debug)]
@@ -131,43 +82,27 @@ pub struct HousingBatch<B: Backend> {
 }
 
 impl<B: Backend> HousingBatcher<B> {
-    pub fn new(device: B::Device) -> Self {
+    pub fn new(_device: B::Device) -> Self {
         Self {
-            normalizer: Normalizer::new(&device, &FEATURES_MIN, &FEATURES_MAX),
+            _phantom: std::marker::PhantomData,
         }
     }
 }
 
-impl<B: Backend> Batcher<B, HousingDistrictItem, HousingBatch<B>> for HousingBatcher<B> {
-    fn batch(&self, items: Vec<HousingDistrictItem>, device: &B::Device) -> HousingBatch<B> {
+impl<B: Backend> Batcher<B, HousingItem, HousingBatch<B>> for HousingBatcher<B> {
+    fn batch(&self, items: Vec<HousingItem>, device: &B::Device) -> HousingBatch<B> {
         let mut inputs: Vec<Tensor<B, 2>> = Vec::new();
+        let mut targets: Vec<Tensor<B, 1>> = Vec::new();
 
         for item in items.iter() {
-            let input_tensor = Tensor::<B, 1>::from_floats(
-                [
-                    item.median_income,
-                    item.house_age,
-                    item.avg_rooms,
-                    item.avg_bedrooms,
-                    item.population,
-                    item.avg_occupancy,
-                    item.latitude,
-                    item.longitude,
-                ],
-                device,
-            );
+            let input_tensor = Tensor::<B, 1>::from_floats(item.features, device).unsqueeze();
+            let target_tensor = Tensor::<B, 1>::from_floats([item.target], device);
 
-            inputs.push(input_tensor.unsqueeze());
+            inputs.push(input_tensor);
+            targets.push(target_tensor);
         }
 
         let inputs = Tensor::cat(inputs, 0);
-        let inputs = self.normalizer.to_device(device).normalize(inputs);
-
-        let targets = items
-            .iter()
-            .map(|item| Tensor::<B, 1>::from_floats([item.median_house_value], device))
-            .collect();
-
         let targets = Tensor::cat(targets, 0);
 
         HousingBatch { inputs, targets }

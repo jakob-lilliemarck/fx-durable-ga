@@ -8,7 +8,7 @@ use rgb::RGB8;
 use textplots::{Chart, ColorPlot, Shape};
 
 use crate::{
-    dataset::{HousingBatcher, HousingDataset, HousingDistrictItem},
+    dataset::{HousingBatcher, HousingDataset, HousingItem},
     model::{RegressionModelConfig, RegressionModelRecord},
 };
 
@@ -21,9 +21,10 @@ pub fn infer<B: Backend>(artifact_dir: &str, device: B::Device) {
         .init(&device)
         .load_record(record);
 
-    // Use a sample of 1000 items from the test split
-    let dataset = HousingDataset::test();
-    let items: Vec<HousingDistrictItem> = dataset.iter().take(1000).collect();
+    // Use a sample of 1000 items from the validation split (we don't have test)
+    let full_dataset = HousingDataset::new();
+    let items = full_dataset.validation();
+    let items: Vec<HousingItem> = items.into_iter().take(1000).collect();
 
     let batcher = HousingBatcher::new(device.clone());
     let batch = batcher.batch(items.clone(), &device);
@@ -31,7 +32,7 @@ pub fn infer<B: Backend>(artifact_dir: &str, device: B::Device) {
     let targets = batch.targets;
 
     // Display the predicted vs expected values
-    let predicted = predicted.squeeze_dim::<1>(1).into_data();
+    let predicted = predicted.squeeze_dims::<1>(&[1]).into_data();
     let expected = targets.into_data();
 
     let points = predicted
