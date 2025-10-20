@@ -18,13 +18,50 @@ fn decay_exponential(upper: f64, lower: f64, progress: f64, multiplier: f64, exp
 // ============================================================
 
 /// Strategy for decaying parameter values over optimization progress.
+///
+/// Decay strategies control how parameters like temperature and mutation rate change
+/// as the genetic algorithm progresses. This allows the algorithm to start with
+/// exploratory behavior (high values) and gradually shift to exploitative behavior
+/// (low values) as it converges on optimal solutions.
+///
+/// # Examples
+///
+/// ```rust
+/// use fx_durable_ga::models::{Temperature, MutationRate};
+///
+/// // Start aggressive, end conservative
+/// let temp = Temperature::linear(0.8, 0.1, 1.0)?;
+///
+/// // Exponential cooling for faster convergence
+/// let rate = MutationRate::exponential(0.5, 0.05, 1.0, 3)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Decay {
+    /// Parameter remains unchanged throughout optimization.
+    /// 
+    /// Use when you want consistent behavior or when you're unsure
+    /// about the optimal decay strategy for your problem.
     Constant,
+    
+    /// Parameter decreases linearly from upper to lower bound.
+    /// 
+    /// Formula: `lower + (upper - lower) * (1.0 - progress * multiplier)`
+    /// 
+    /// - `lower`: Final value when fully converged (progress = 1.0)
+    /// - `multiplier`: Controls decay speed (1.0 = normal, >1.0 = faster, <1.0 = slower)
     Linear {
         lower: f64,
         multiplier: f64,
     },
+    
+    /// Parameter decreases exponentially, providing rapid early decay that slows over time.
+    /// 
+    /// Formula: `lower + (upper - lower) * (1.0 - progress * multiplier)^exponent`
+    /// 
+    /// - `lower`: Final value when fully converged
+    /// - `multiplier`: Controls decay timing (higher = faster initial decay)
+    /// - `exponent`: Controls curve steepness (higher = more aggressive early decay)
     Exponential {
         lower: f64,
         multiplier: f64,
@@ -53,7 +90,39 @@ impl Decay {
 // Temperature
 // ============================================================
 
-/// Controls mutation step size - higher temperature allows larger jumps in the search space.
+/// Controls mutation step size in the genetic algorithm.
+///
+/// Temperature determines how large the mutations can be when modifying genes.
+/// Higher temperatures allow larger jumps in the search space (exploration),
+/// while lower temperatures make smaller, more refined changes (exploitation).
+///
+/// # When to Use Different Values
+///
+/// - **High (0.7-1.0)**: Early exploration, large search spaces, getting unstuck from local optima
+/// - **Medium (0.3-0.7)**: Balanced exploration/exploitation, most general-purpose scenarios  
+/// - **Low (0.0-0.3)**: Fine-tuning, convergence phase, small search spaces
+///
+/// # Decay Strategies
+///
+/// - **Constant**: Consistent behavior throughout optimization
+/// - **Linear**: Gradual transition from exploration to exploitation
+/// - **Exponential**: Rapid early exploration followed by fine-tuning
+///
+/// # Examples
+///
+/// ```rust
+/// use fx_durable_ga::models::Temperature;
+///
+/// // Simple constant temperature
+/// let temp = Temperature::constant(0.5)?;
+///
+/// // Start exploratory, end conservative
+/// let temp = Temperature::linear(0.9, 0.1, 1.0)?;
+///
+/// // Aggressive early exploration with rapid cooling
+/// let temp = Temperature::exponential(0.8, 0.05, 1.2, 3)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Temperature {
     value: f64,
@@ -69,7 +138,24 @@ pub enum TemperatureError {
 }
 
 impl Temperature {
-    /// Creates a constant temperature that doesn't change with progress.
+    /// Creates a constant temperature that remains unchanged throughout optimization.
+    ///
+    /// # Parameters
+    /// - `value`: Temperature value in [0.0, 1.0]. Higher values enable larger mutation steps.
+    ///
+    /// # When to Use
+    /// - Simple optimization problems
+    /// - When you want predictable, consistent mutation behavior
+    /// - Testing and debugging genetic algorithms
+    ///
+    /// # Examples
+/// ```rust
+/// use fx_durable_ga::models::Temperature;
+///
+/// let low_temp = Temperature::constant(0.2)?;    // Conservative mutations
+/// let high_temp = Temperature::constant(0.8)?;   // Aggressive mutations
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
     pub fn constant(value: f64) -> Result<Self, TemperatureError> {
         let value = Self::validate(value)?;
 
@@ -88,7 +174,35 @@ impl Temperature {
         Ok(value)
     }
 
-    /// Creates a temperature that decays linearly with optimization progress.
+    /// Creates a temperature that decays linearly from high to low values.
+    ///
+    /// Linear decay provides a smooth, predictable transition from exploration
+    /// to exploitation as the algorithm progresses.
+    ///
+    /// # Parameters
+    /// - `upper`: Starting temperature (0.0-1.0) for early exploration
+    /// - `lower`: Ending temperature (0.0-1.0) for final convergence  
+    /// - `multiplier`: Decay speed (1.0 = normal, >1.0 = faster, <1.0 = slower)
+    ///
+    /// # When to Use
+    /// - Most general-purpose optimization problems
+    /// - When you want predictable exploration-to-exploitation transition
+    /// - Medium to large search spaces where gradual refinement helps
+    ///
+    /// # Examples
+    /// ```rust
+/// use fx_durable_ga::models::Temperature;
+    ///
+    /// // Standard linear cooling
+    /// let temp = Temperature::linear(0.8, 0.1, 1.0)?;
+    ///
+    /// // Slower cooling for complex problems
+    /// let temp = Temperature::linear(0.7, 0.2, 0.5)?;
+    ///
+    /// // Faster cooling for quick convergence
+    /// let temp = Temperature::linear(0.9, 0.05, 1.5)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn linear(upper: f64, lower: f64, multiplier: f64) -> Result<Self, TemperatureError> {
         let upper = Self::validate(upper)?;
         let lower = Self::validate(lower)?;
@@ -103,7 +217,38 @@ impl Temperature {
         })
     }
 
-    /// Creates a temperature that decays exponentially with optimization progress.
+    /// Creates a temperature that decays exponentially for rapid early cooling.
+    ///
+    /// Exponential decay provides aggressive early exploration followed by
+    /// fine-tuned exploitation. The algorithm quickly transitions from broad
+    /// search to focused refinement.
+    ///
+    /// # Parameters
+    /// - `upper`: Starting temperature (0.0-1.0) for initial exploration
+    /// - `lower`: Ending temperature (0.0-1.0) for final fine-tuning
+    /// - `multiplier`: Controls when decay begins (higher = earlier/faster)
+    /// - `exponent`: Controls decay curve steepness (higher = more aggressive)
+    ///
+    /// # When to Use
+    /// - Complex landscapes with many local optima
+    /// - When you need rapid convergence after initial exploration
+    /// - Problems where early diversity is crucial
+    /// - Time-constrained optimization
+    ///
+    /// # Examples
+    /// ```rust
+/// use fx_durable_ga::models::Temperature;
+    ///
+    /// // Moderate exponential cooling
+    /// let temp = Temperature::exponential(0.8, 0.1, 1.0, 2)?;
+    ///
+    /// // Aggressive early exploration
+    /// let temp = Temperature::exponential(0.9, 0.05, 1.2, 4)?;
+    ///
+    /// // Gentle exponential curve
+    /// let temp = Temperature::exponential(0.6, 0.2, 0.8, 2)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn exponential(
         upper: f64,
         lower: f64,
@@ -137,7 +282,38 @@ impl Temperature {
 // MutationRate
 // ============================================================
 
-/// Controls the probability that each gene will be mutated.
+/// Controls the probability that each gene will be mutated during reproduction.
+///
+/// Mutation rate determines how frequently genes are changed when creating offspring.
+/// Higher rates provide more genetic diversity but may disrupt good solutions,
+/// while lower rates preserve good solutions but may limit exploration.
+///
+/// # When to Use Different Values
+///
+/// - **High (0.7-1.0)**: Dense problems, escaping local optima, early exploration
+/// - **Medium (0.3-0.7)**: Balanced search, most general-purpose applications
+/// - **Low (0.0-0.3)**: Preserving good solutions, fine-tuning, convergence phase
+///
+/// # Interaction with Population Size
+///
+/// - **Small populations**: Use higher mutation rates to maintain diversity
+/// - **Large populations**: Can use lower mutation rates as diversity emerges naturally
+///
+/// # Examples
+///
+/// ```rust
+/// use fx_durable_ga::models::MutationRate;
+///
+/// // Conservative mutation for stable problems
+/// let rate = MutationRate::constant(0.1)?;
+///
+/// // Start diverse, converge to precision
+/// let rate = MutationRate::linear(0.6, 0.05, 1.0)?;
+///
+/// // Rapid diversity reduction
+/// let rate = MutationRate::exponential(0.8, 0.02, 1.5, 3)?;
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MutationRate {
     value: f64,
@@ -153,7 +329,26 @@ pub enum MutationRateError {
 }
 
 impl MutationRate {
-    /// Creates a constant mutation rate that doesn't change with progress.
+    /// Creates a constant mutation rate that remains unchanged throughout optimization.
+    ///
+    /// # Parameters
+    /// - `value`: Mutation probability per gene in [0.0, 1.0]. Higher values increase genetic diversity.
+    ///
+    /// # When to Use
+    /// - Simple problems with stable optima
+    /// - Baseline testing and comparison
+    /// - When optimal mutation rate is already known
+    /// - Problems requiring consistent exploration level
+    ///
+    /// # Examples
+    /// ```rust
+/// use fx_durable_ga::models::MutationRate;
+    ///
+    /// let conservative = MutationRate::constant(0.05)?;  // 5% mutation chance
+    /// let balanced = MutationRate::constant(0.3)?;       // 30% mutation chance
+    /// let aggressive = MutationRate::constant(0.7)?;     // 70% mutation chance
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn constant(value: f64) -> Result<Self, MutationRateError> {
         let value = Self::validate(value)?;
 
@@ -172,7 +367,36 @@ impl MutationRate {
         Ok(value)
     }
 
-    /// Creates a mutation rate that decays linearly with optimization progress.
+    /// Creates a mutation rate that decays linearly to reduce disruption over time.
+    ///
+    /// Linear decay starts with high genetic diversity and gradually reduces
+    /// mutations to preserve promising solutions as they emerge.
+    ///
+    /// # Parameters
+    /// - `upper`: Starting mutation rate (0.0-1.0) for early diversity
+    /// - `lower`: Ending mutation rate (0.0-1.0) for solution preservation
+    /// - `multiplier`: Decay speed (1.0 = normal, >1.0 = faster, <1.0 = slower)
+    ///
+    /// # When to Use
+    /// - Most optimization problems benefit from this approach
+    /// - When good solutions emerge gradually over time
+    /// - Problems where early diversity and later stability both matter
+    /// - Balanced exploration-exploitation scenarios
+    ///
+    /// # Examples
+    /// ```rust
+/// use fx_durable_ga::models::MutationRate;
+    ///
+    /// // Standard diversity-to-stability transition
+    /// let rate = MutationRate::linear(0.5, 0.1, 1.0)?;
+    ///
+    /// // Slower transition for complex problems
+    /// let rate = MutationRate::linear(0.6, 0.2, 0.7)?;
+    ///
+    /// // Rapid stabilization
+    /// let rate = MutationRate::linear(0.8, 0.05, 1.4)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn linear(upper: f64, lower: f64, multiplier: f64) -> Result<Self, MutationRateError> {
         let upper = Self::validate(upper)?;
         let lower = Self::validate(lower)?;
@@ -187,7 +411,38 @@ impl MutationRate {
         })
     }
 
-    /// Creates a mutation rate that decays exponentially with optimization progress.
+    /// Creates a mutation rate that decays exponentially for rapid convergence.
+    ///
+    /// Exponential decay maintains high genetic diversity initially, then rapidly
+    /// reduces mutations to lock in promising solutions. This provides an intense
+    /// early search followed by strong solution preservation.
+    ///
+    /// # Parameters
+    /// - `upper`: Starting mutation rate (0.0-1.0) for initial diversity
+    /// - `lower`: Ending mutation rate (0.0-1.0) for final stability
+    /// - `multiplier`: Controls timing of decay (higher = earlier/faster reduction)
+    /// - `exponent`: Controls decay aggressiveness (higher = more dramatic curve)
+    ///
+    /// # When to Use
+    /// - Time-constrained optimization requiring fast convergence
+    /// - Problems with clear early vs. late phases
+    /// - When disruption of good solutions is particularly costly
+    /// - Search spaces where early exploration is critical
+    ///
+    /// # Examples
+    /// ```rust
+/// use fx_durable_ga::models::MutationRate;
+    ///
+    /// // Rapid diversity reduction
+    /// let rate = MutationRate::exponential(0.7, 0.05, 1.0, 3)?;
+    ///
+    /// // Extreme early diversity, quick stabilization
+    /// let rate = MutationRate::exponential(0.9, 0.01, 1.3, 4)?;
+    ///
+    /// // Gentler exponential curve
+    /// let rate = MutationRate::exponential(0.5, 0.1, 0.8, 2)?;
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn exponential(
         upper: f64,
         lower: f64,
@@ -221,7 +476,67 @@ impl MutationRate {
 // Mutagen
 // ============================================================
 
-/// Combines temperature and mutation rate to control genetic mutation behavior.
+/// Orchestrates genetic mutation by combining temperature and mutation rate strategies.
+///
+/// The `Mutagen` is the core component that controls how genetic algorithms modify
+/// candidate solutions. It combines two key parameters:
+///
+/// - **Temperature**: Controls mutation step size (how big changes can be)
+/// - **Mutation Rate**: Controls mutation frequency (how often changes occur)
+///
+/// Together, these parameters determine the exploration/exploitation balance
+/// throughout the optimization process.
+///
+/// # Key Concepts
+///
+/// ## Exploration vs. Exploitation
+/// - **High temperature + High mutation rate**: Aggressive exploration
+/// - **Low temperature + Low mutation rate**: Focused exploitation  
+/// - **Mixed strategies**: Balanced search behavior
+///
+/// ## Common Patterns
+/// - **Simulated Annealing**: Start hot and diverse, end cool and stable
+/// - **Constant Search**: Maintain consistent behavior throughout
+/// - **Rapid Convergence**: Quickly transition from exploration to exploitation
+///
+/// # Configuration Examples
+///
+/// ```rust
+/// use fx_durable_ga::models::{Mutagen, Temperature, MutationRate};
+///
+/// // Simple constant behavior - good for testing
+/// let simple = Mutagen::constant(0.3, 0.1)?;
+///
+/// // Classic simulated annealing approach
+/// let annealing = Mutagen::new(
+///     Temperature::exponential(0.8, 0.1, 1.0, 2)?,
+///     MutationRate::linear(0.5, 0.05, 1.0)?
+/// );
+///
+/// // Balanced linear decay for most problems
+/// let balanced = Mutagen::new(
+///     Temperature::linear(0.6, 0.2, 1.0)?,
+///     MutationRate::linear(0.4, 0.1, 1.0)?
+/// );
+///
+/// // Rapid early exploration, then fine-tuning
+/// let rapid = Mutagen::new(
+///     Temperature::exponential(0.9, 0.05, 1.2, 3)?,
+///     MutationRate::exponential(0.7, 0.02, 1.1, 3)?
+/// );
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Choosing the Right Strategy
+///
+/// | Problem Type | Temperature | Mutation Rate | Rationale |
+/// |--------------|-------------|---------------|----------|
+/// | Simple/Known | Constant | Constant | Predictable behavior |
+/// | General Purpose | Linear decay | Linear decay | Balanced approach |
+/// | Complex/Time-constrained | Exponential | Exponential | Rapid convergence |
+/// | Large search space | High initial | High initial | Need exploration |
+/// | Fine-tuning | Low constant | Low constant | Preserve solutions |
+///
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mutagen {
     mutation_rate: MutationRate,
@@ -237,7 +552,26 @@ pub enum MutagenError {
 }
 
 impl Mutagen {
-    /// Creates a new mutagen with the given temperature and mutation rate strategies.
+    /// Creates a new mutagen by combining temperature and mutation rate strategies.
+    ///
+    /// This is the primary constructor for creating sophisticated mutation behaviors
+    /// by combining different decay strategies for temperature and mutation rate.
+    ///
+    /// # Parameters
+    /// - `temperature`: Controls mutation step size over time
+    /// - `mutation_rate`: Controls mutation frequency over time
+    ///
+    /// # Examples
+    /// ```rust
+/// use fx_durable_ga::models::{Mutagen, Temperature, MutationRate};
+    ///
+    /// // Mixed strategies: exponential temperature, linear mutation rate
+    /// let mutagen = Mutagen::new(
+    ///     Temperature::exponential(0.8, 0.1, 1.0, 2)?,
+    ///     MutationRate::linear(0.4, 0.05, 1.0)?
+    /// );
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn new(temperature: Temperature, mutation_rate: MutationRate) -> Self {
         Self {
             temperature,
@@ -246,7 +580,30 @@ impl Mutagen {
     }
 
     /// Creates a mutagen with constant temperature and mutation rate values.
-    /// For more advanced behavior, use Mutagen::new() with Temperature/MutationRate constructors.
+    ///
+    /// This convenience method creates the simplest possible mutagen configuration
+    /// with unchanging parameters. Use this for baseline testing, simple problems,
+    /// or when you want predictable mutation behavior.
+    ///
+    /// # Parameters
+    /// - `temperature_value`: Fixed temperature in [0.0, 1.0] for mutation step size
+    /// - `mutation_rate_value`: Fixed mutation rate in [0.0, 1.0] for gene change frequency
+    ///
+    /// # When to Use
+    /// - Testing and debugging genetic algorithms
+    /// - Simple optimization problems with known characteristics  
+    /// - Baseline comparisons against adaptive strategies
+    /// - When optimal parameters are already determined
+    ///
+    /// # Examples
+    /// ```rust
+/// use fx_durable_ga::models::Mutagen;
+    ///
+    /// let conservative = Mutagen::constant(0.2, 0.05)?;  // Small, rare mutations
+    /// let balanced = Mutagen::constant(0.5, 0.3)?;       // Medium mutations
+    /// let aggressive = Mutagen::constant(0.8, 0.7)?;     // Large, frequent mutations
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn constant(
         temperature_value: f64,
         mutation_rate_value: f64,

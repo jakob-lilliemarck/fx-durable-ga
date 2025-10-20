@@ -46,6 +46,222 @@ impl Service {
         }
     }
 
+    /// Creates a new genetic algorithm optimization request.
+    ///
+    /// This is the main entry point for starting genetic algorithm optimization.
+    /// It configures and initiates an evolutionary process that will attempt
+    /// to find optimal solutions for your problem type.
+    ///
+    /// # Parameters
+    ///
+    /// * `type_name` - Human-readable name of the type being optimized (from `Encodeable::NAME`)
+    /// * `type_hash` - Unique hash identifying the type structure (from `Encodeable::HASH`)
+    /// * `goal` - Optimization objective and stopping criteria
+    /// * `schedule` - Controls generation timing and population lifecycle
+    /// * `selector` - Parent selection strategy for breeding operations
+    /// * `mutagen` - Mutation behavior including temperature and rate schedules
+    /// * `crossover` - Genetic recombination method for combining parents
+    /// * `distribution` - Initial population generation strategy
+    ///
+    /// # Optimization Goal
+    ///
+    /// The `goal` parameter defines when optimization should stop:
+    /// - `FitnessGoal::maximize(0.95)` - Stop when fitness reaches 95% or higher
+    /// - `FitnessGoal::minimize(0.1)` - Stop when fitness drops to 10% or lower
+    ///
+    /// # Population Management
+    ///
+    /// The `schedule` controls generation timing and resource allocation:
+    /// - `Schedule::generational(100, 50)` - 100 generations, 50 individuals each
+    /// - `Schedule::rolling(5000, 100, 10)` - 5000 total evaluations, 100 max population, breed 10 at a time
+    ///
+    /// # Parent Selection
+    ///
+    /// The `selector` determines how parents are chosen for breeding:
+    /// - `Selector::tournament(3, 100)` - Tournament selection (size 3) from 100 candidates
+    /// - `Selector::roulette(100)` - Fitness-proportionate selection from 100 candidates
+    ///
+    /// # Mutation Strategy
+    ///
+    /// The `mutagen` combines temperature (step size) and mutation rate (frequency):
+    /// - `Mutagen::constant(0.5, 0.3)` - Fixed 50% temperature, 30% mutation rate
+    /// - Adaptive strategies use `Temperature::linear()` and `MutationRate::exponential()`
+    ///
+    /// # Genetic Recombination
+    ///
+    /// The `crossover` method combines genetic material from parents:
+    /// - `Crossover::uniform(0.5)` - Each gene has 50% chance from first parent
+    /// - `Crossover::single_point()` - Cut genome at random point, swap tails
+    ///
+    /// # Initial Population
+    ///
+    /// The `distribution` strategy affects initial diversity and convergence:
+    /// - `Distribution::latin_hypercube(50)` - Structured sampling for better coverage
+    /// - `Distribution::random(50)` - Pure random sampling
+    ///
+    /// # Common Configurations
+    ///
+    /// ## Quick Convergence (Time-Constrained)
+    /// ```rust,no_run
+    /// use fx_durable_ga::models::*;
+    /// # use fx_durable_ga::services::optimization::Service;
+    /// # #[derive(Debug)] struct MyType;
+    /// # impl Encodeable for MyType {
+    /// #     const NAME: &'static str = "MyType";
+    /// #     type Phenotype = MyType;
+    /// #     fn morphology() -> Vec<GeneBounds> { vec![] }
+    /// #     fn encode(&self) -> Vec<i64> { vec![] }
+    /// #     fn decode(_: &[i64]) -> Self::Phenotype { MyType }
+    /// # }
+    /// # async fn example(service: &Service) -> Result<(), Box<dyn std::error::Error>> {
+    ///
+    /// service.new_optimization_request(
+    ///     MyType::NAME,
+    ///     MyType::HASH,
+    ///     FitnessGoal::maximize(0.90)?,                    // Modest target
+    ///     Schedule::generational(20, 30),                 // Small, fast generations
+    ///     Selector::tournament(5, 50),                    // Strong selection pressure
+    ///     Mutagen::new(
+    ///         Temperature::exponential(0.8, 0.1, 1.2, 3)?, // Rapid cooling
+    ///         MutationRate::exponential(0.6, 0.05, 1.1, 2)?
+    ///     ),
+    ///     Crossover::uniform(0.6)?,                       // High recombination
+    ///     Distribution::latin_hypercube(30)
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// ## Balanced Search (General Purpose)
+    /// ```rust,no_run
+    /// use fx_durable_ga::models::*;
+    /// # use fx_durable_ga::services::optimization::Service;
+    /// # #[derive(Debug)] struct MyType;
+    /// # impl Encodeable for MyType {
+    /// #     const NAME: &'static str = "MyType";
+    /// #     type Phenotype = MyType;
+    /// #     fn morphology() -> Vec<GeneBounds> { vec![] }
+    /// #     fn encode(&self) -> Vec<i64> { vec![] }
+    /// #     fn decode(_: &[i64]) -> Self::Phenotype { MyType }
+    /// # }
+    /// # async fn example(service: &Service) -> Result<(), Box<dyn std::error::Error>> {
+    ///
+    /// service.new_optimization_request(
+    ///     MyType::NAME,
+    ///     MyType::HASH, 
+    ///     FitnessGoal::maximize(0.95)?,                    // High-quality target
+    ///     Schedule::generational(50, 50),                 // Moderate generations
+    ///     Selector::tournament(3, 100),                   // Balanced selection
+    ///     Mutagen::new(
+    ///         Temperature::linear(0.7, 0.2, 1.0)?,         // Gradual cooling
+    ///         MutationRate::linear(0.4, 0.1, 1.0)?
+    ///     ),
+    ///     Crossover::uniform(0.5)?,                       // Balanced recombination
+    ///     Distribution::latin_hypercube(50)
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// ## Thorough Exploration (Complex Problems)
+    /// ```rust,no_run
+    /// use fx_durable_ga::models::*;
+    /// # use fx_durable_ga::services::optimization::Service;
+    /// # #[derive(Debug)] struct MyType;
+    /// # impl Encodeable for MyType {
+    /// #     const NAME: &'static str = "MyType";
+    /// #     type Phenotype = MyType;
+    /// #     fn morphology() -> Vec<GeneBounds> { vec![] }
+    /// #     fn encode(&self) -> Vec<i64> { vec![] }
+    /// #     fn decode(_: &[i64]) -> Self::Phenotype { MyType }
+    /// # }
+    /// # async fn example(service: &Service) -> Result<(), Box<dyn std::error::Error>> {
+    ///
+    /// service.new_optimization_request(
+    ///     MyType::NAME,
+    ///     MyType::HASH,
+    ///     FitnessGoal::maximize(0.99)?,                    // High precision target
+    ///     Schedule::rolling(10000, 200, 20),              // Large budget
+    ///     Selector::tournament(2, 150),                   // Low selection pressure
+    ///     Mutagen::constant(0.6, 0.4)?,                   // Sustained exploration
+    ///     Crossover::single_point(),                      // Conservative recombination
+    ///     Distribution::latin_hypercube(100)              // High initial diversity
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Parameter Interactions
+    ///
+    /// Key relationships to consider:
+    /// - **High selection pressure + Low mutation**: Fast convergence, may get stuck
+    /// - **Low selection pressure + High mutation**: Slow convergence, good exploration
+    /// - **Large populations + Tournament selection**: Better genetic diversity
+    /// - **Small populations + Roulette selection**: Risk of premature convergence
+    /// - **Exponential decay + Generational schedule**: Classic simulated annealing
+    /// - **Linear decay + Rolling schedule**: Steady refinement over time
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the optimization request was successfully created and scheduled.
+    /// The actual optimization runs asynchronously via the event/job system.
+    ///
+    /// # Errors
+    ///
+    /// - Returns error if the specified type hasn't been registered with an evaluator
+    /// - Returns error if database operations fail
+    /// - Parameter validation errors are caught at construction time (e.g., `FitnessGoal::maximize(1.5)` fails)
+    ///
+    /// # Example Usage
+    ///
+    /// ```rust,no_run
+    /// use fx_durable_ga::models::*;
+    /// # use fx_durable_ga::services::optimization::Service;
+    ///
+    /// // Define your problem type
+    /// #[derive(Debug)]
+    /// struct Point { x: f64, y: f64 }
+    ///
+    /// impl Encodeable for Point {
+    ///     const NAME: &'static str = "Point";
+    ///     type Phenotype = Point;
+    ///     fn morphology() -> Vec<GeneBounds> {
+    ///         vec![
+    ///             GeneBounds::decimal(0.0, 10.0, 1000, 3).unwrap(),
+    ///             GeneBounds::decimal(0.0, 10.0, 1000, 3).unwrap(),
+    ///         ]
+    ///     }
+    ///     fn encode(&self) -> Vec<i64> {
+    ///         let bounds = Self::morphology();
+    ///         vec![
+    ///             bounds[0].from_sample(self.x / 10.0),
+    ///             bounds[1].from_sample(self.y / 10.0),
+    ///         ]
+    ///     }
+    ///     fn decode(genes: &[i64]) -> Self::Phenotype {
+    ///         let bounds = Self::morphology();
+    ///         Point {
+    ///             x: bounds[0].to_f64(genes[0]),
+    ///             y: bounds[1].to_f64(genes[1]),
+    ///         }
+    ///     }
+    /// }
+    ///
+    /// # async fn example(service: &Service) -> Result<(), Box<dyn std::error::Error>> {
+    /// // Start optimization
+    /// service.new_optimization_request(
+    ///     Point::NAME,
+    ///     Point::HASH,
+    ///     FitnessGoal::maximize(0.95)?,
+    ///     Schedule::generational(50, 50),
+    ///     Selector::tournament(3, 100),
+    ///     Mutagen::constant(0.5, 0.3)?,
+    ///     Crossover::uniform(0.5)?,
+    ///     Distribution::latin_hypercube(50)
+    /// ).await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     #[instrument(level = "debug", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen, crossover = ?crossover))]
     pub async fn new_optimization_request(
         &self,

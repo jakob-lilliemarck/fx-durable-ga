@@ -1,3 +1,92 @@
+//! Parent selection strategies for genetic algorithms.
+//!
+//! This module provides configurable selection methods that determine how parent
+//! pairs are chosen from the candidate population for breeding operations. The
+//! selection strategy significantly affects the evolutionary dynamics and convergence
+//! behavior of the genetic algorithm.
+//!
+//! # Selection Methods
+//!
+//! ## Tournament Selection
+//!
+//! Tournament selection runs competitions between randomly chosen candidates,
+//! selecting the fittest from each group. This method provides:
+//!
+//! - **Consistent selection pressure** regardless of fitness distribution
+//! - **Tunable pressure** via tournament size parameter
+//! - **Robustness** to fitness scaling and outliers
+//! - **Computational efficiency** with O(k) comparisons per selection
+//!
+//! Tournament size guidelines:
+//! - **Size 2-3**: Balanced exploration and exploitation
+//! - **Size 4-5**: Moderate selection pressure for steady convergence
+//! - **Size 6+**: High pressure for rapid convergence (risk of premature convergence)
+//!
+//! ## Roulette Wheel Selection
+//!
+//! Roulette wheel selection chooses candidates with probability proportional
+//! to their fitness values. This method provides:
+//!
+//! - **Proportional selection** based on exact fitness ratios
+//! - **Predictable probabilities** directly reflecting fitness differences
+//! - **Smooth selection pressure** without discrete competition
+//!
+//! Best used when fitness values represent meaningful proportional differences
+//! and have reasonable dynamic range.
+//!
+//! # Configuration Examples
+//!
+//! ## Basic Usage
+//!
+//! ```rust
+//! use fx_durable_ga::models::Selector;
+//!
+//! // Tournament selection with moderate pressure
+//! let tournament = Selector::tournament(3, 100);
+//!
+//! // Roulette wheel selection
+//! let roulette = Selector::roulette(100);
+//! ```
+//!
+//! ## Problem-Specific Configurations
+//!
+//! ```rust
+//! use fx_durable_ga::models::Selector;
+//!
+//! // High exploration for complex, multimodal problems
+//! let exploratory = Selector::tournament(2, 200);
+//!
+//! // Balanced search for general optimization
+//! let balanced = Selector::tournament(4, 150);
+//!
+//! // Strong exploitation for fine-tuning near optima
+//! let exploitative = Selector::tournament(7, 80);
+//!
+//! // Proportional selection when fitness ratios are meaningful
+//! let proportional = Selector::roulette(120);
+//! ```
+//!
+//! # Selection Pressure Comparison
+//!
+//! | Method | Pressure | Best For | Considerations |
+//! |--------|----------|----------|-----------------|
+//! | Tournament (size 2-3) | Low-Moderate | Complex search spaces, early generations | High exploration, slower convergence |
+//! | Tournament (size 4-5) | Moderate | General optimization | Balanced exploration/exploitation |
+//! | Tournament (size 6+) | High | Fine-tuning, late generations | Fast convergence, premature convergence risk |
+//! | Roulette | Variable | Problems with meaningful fitness ratios | Requires non-negative fitness, sensitive to scaling |
+//!
+//! # Sample Size Considerations
+//!
+//! The `sample_size` parameter affects:
+//! - **Genetic diversity**: Larger samples better represent population fitness distribution
+//! - **Computational cost**: More candidates require more fitness evaluations
+//! - **Selection quality**: Better samples lead to more effective parent selection
+//!
+//! Recommended sample sizes:
+//! - **50-100**: Small populations or rapid prototyping
+//! - **100-200**: Standard optimization problems
+//! - **200+**: Complex problems requiring high genetic diversity
+
 use crate::models::Genotype;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
@@ -240,37 +329,174 @@ fn tournament_selection<'a>(
     Ok(parent_pairs)
 }
 
-/// Parent selection strategy configuration for genetic algorithms.
+/// Configuration for parent selection in genetic algorithms.
+/// 
+/// The selector determines how parent pairs are chosen from the candidate population
+/// for breeding operations. Different selection methods bias toward higher-fitness
+/// candidates to varying degrees, affecting the evolutionary pressure.
+/// 
+/// # Selection Pressure
+/// 
+/// **Tournament Selection**: Moderate to high selection pressure. Larger tournament 
+/// sizes increase pressure by making it more likely that high-fitness candidates win.
+/// 
+/// **Roulette Selection**: Proportional selection pressure. Candidates are chosen
+/// with probability proportional to their fitness values.
+/// 
+/// # Examples
+/// 
+/// ```rust
+/// use fx_durable_ga::models::Selector;
+/// 
+/// // Tournament selection with size 3 (moderate selection pressure)
+/// let tournament_selector = Selector::tournament(3, 100);
+/// 
+/// // Roulette wheel selection (fitness-proportionate)
+/// let roulette_selector = Selector::roulette(100);
+/// 
+/// // High selection pressure tournament
+/// let elite_selector = Selector::tournament(7, 50);
+/// ```
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct Selector {
+    /// The selection algorithm to use for choosing parent pairs
     pub method: SelectionMethod,
+    /// Number of candidates to sample from the population for selection
     pub sample_size: usize,
 }
 
-/// The specific selection algorithm to use for parent selection.
+/// Selection algorithms available for parent selection.
+/// 
+/// Each method has different characteristics and is suitable for different
+/// optimization scenarios.
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(Clone, PartialEq, Eq))]
 pub enum SelectionMethod {
-    Tournament { size: usize },
+    /// Tournament selection runs competitions between randomly selected candidates.
+    /// 
+    /// Winners are chosen based on fitness comparison. Larger tournament sizes
+    /// increase selection pressure, making it more likely that high-fitness
+    /// candidates are selected.
+    /// 
+    /// **Best for**: Problems where you want consistent convergence with
+    /// adjustable selection pressure. Works well with any fitness distribution.
+    /// 
+    /// **Tournament size guidelines**:
+    /// - Size 2-3: Low to moderate selection pressure, good exploration
+    /// - Size 4-5: Moderate selection pressure, balanced exploration/exploitation  
+    /// - Size 6+: High selection pressure, strong exploitation
+    Tournament { 
+        /// Number of candidates that compete in each tournament.
+        /// Must be at least 1. Requires at least `size * 2` evaluated candidates.
+        size: usize 
+    },
+    
+    /// Roulette wheel selection chooses candidates with probability proportional to fitness.
+    /// 
+    /// Also known as fitness-proportionate selection. Candidates with higher
+    /// fitness values have proportionally higher chances of being selected.
+    /// 
+    /// **Best for**: Problems where fitness values are meaningful as proportions
+    /// and you want selection probability to directly reflect fitness differences.
+    /// 
+    /// **Requirements**: 
+    /// - All fitness values must be non-negative
+    /// - At least one candidate must have positive fitness
+    /// - Works best when fitness values have reasonable range (not too extreme)
     Roulette,
 }
 
+/// Errors that can occur during parent selection.
+/// 
+/// These errors help diagnose configuration or data issues that prevent 
+/// successful parent selection for breeding operations.
 #[derive(Debug, thiserror::Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum SelectionError {
+    /// No candidates with fitness values are available for selection.
+    /// 
+    /// This occurs when all candidates in the population have `None` fitness values,
+    /// meaning no candidates have been evaluated yet.
+    /// 
+    /// **Solution**: Ensure candidates are evaluated before attempting selection.
     #[error("No valid parents available for selection")]
     NoValidParents,
+    
+    /// Tournament selection requires more candidates than are available.
+    /// 
+    /// Tournament selection needs at least `tournament_size * 2` evaluated candidates
+    /// to run two separate tournaments (one for each parent).
+    /// 
+    /// **Solutions**:
+    /// - Reduce the tournament size
+    /// - Increase the population size
+    /// - Ensure more candidates are evaluated before selection
     #[error("Insufficient candidates for tournament selection: need {needed}, got {available}")]
     InsufficientCandidates { needed: usize, available: usize },
+    
+    /// Roulette selection cannot proceed due to invalid fitness values.
+    /// 
+    /// This error occurs when:
+    /// - Any candidate has negative fitness (< 0.0)
+    /// - All candidates have zero fitness (total fitness = 0.0)
+    /// 
+    /// **Solutions**:
+    /// - Ensure all fitness values are non-negative
+    /// - Verify that at least some candidates have positive fitness
+    /// - Consider fitness normalization if needed
+    /// - Switch to tournament selection if fitness scaling is problematic
     #[error("All candidates have zero or negative fitness for roulette selection")]
     InvalidFitnessForRoulette,
+    
+    /// Internal roulette wheel algorithm failure.
+    /// 
+    /// This should not occur under normal conditions and indicates a bug
+    /// in the roulette selection implementation.
     #[error("Internal error: roulette wheel failed to select candidate")]
     RouletteSelectionFailed,
 }
 
 impl Selector {
-    /// Creates a tournament selector that runs tournaments of the given size.
+    /// Creates a tournament selector with the specified tournament size.
+    /// 
+    /// Tournament selection randomly selects groups of candidates and chooses
+    /// the fittest from each group. This provides consistent selection pressure
+    /// that can be tuned via the tournament size.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `tournament_size` - Number of candidates competing in each tournament.
+    ///   Larger values increase selection pressure. Must be at least 1.
+    /// * `sample_size` - Number of candidates to sample from the population.
+    ///   Should be large enough to provide genetic diversity.
+    /// 
+    /// # Selection Pressure Guide
+    /// 
+    /// * **Size 2**: Weak selection pressure, high exploration
+    /// * **Size 3-4**: Moderate selection pressure, balanced search  
+    /// * **Size 5-7**: Strong selection pressure, focused exploitation
+    /// * **Size 8+**: Very strong selection pressure, may cause premature convergence
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use fx_durable_ga::models::Selector;
+    /// 
+    /// // Balanced exploration and exploitation
+    /// let balanced = Selector::tournament(3, 100);
+    /// 
+    /// // High exploration for complex search spaces
+    /// let exploratory = Selector::tournament(2, 150);
+    /// 
+    /// // Strong exploitation for fine-tuning
+    /// let exploitative = Selector::tournament(6, 80);
+    /// ```
+    /// 
+    /// # Requirements
+    /// 
+    /// The population must have at least `tournament_size * 2` evaluated candidates
+    /// to perform selection, as each parent pair requires two separate tournaments.
     pub fn tournament(tournament_size: usize, sample_size: usize) -> Self {
         Self {
             method: SelectionMethod::Tournament {
@@ -281,6 +507,48 @@ impl Selector {
     }
 
     /// Creates a roulette wheel selector for fitness-proportionate selection.
+    /// 
+    /// Roulette selection chooses candidates with probability directly proportional 
+    /// to their fitness values. This means a candidate with fitness 6.0 is twice 
+    /// as likely to be selected as one with fitness 3.0.
+    /// 
+    /// # Parameters
+    /// 
+    /// * `sample_size` - Number of candidates to sample from the population.
+    ///   Larger samples provide better representation of the fitness distribution.
+    /// 
+    /// # When to Use
+    /// 
+    /// Roulette selection works best when:
+    /// * Fitness values represent meaningful proportional differences
+    /// * You want selection probability to directly reflect fitness ratios  
+    /// * The fitness landscape has reasonable dynamic range (not too extreme)
+    /// * You need predictable selection behavior based on fitness distributions
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use fx_durable_ga::models::Selector;
+    /// 
+    /// // Standard roulette selection
+    /// let roulette = Selector::roulette(100);
+    /// 
+    /// // Larger sample for better fitness representation
+    /// let large_sample = Selector::roulette(200);
+    /// ```
+    /// 
+    /// # Fitness Requirements
+    /// 
+    /// * All fitness values must be non-negative (≥ 0.0)
+    /// * At least one candidate must have positive fitness (> 0.0)
+    /// * Total fitness across all candidates must be positive
+    /// 
+    /// # Performance Considerations
+    /// 
+    /// Roulette selection may struggle with:
+    /// * Fitness values with extreme ranges (e.g., 0.001 vs 1000.0)
+    /// * Populations where most candidates have very similar fitness
+    /// * Scenarios requiring rapid convergence
     pub fn roulette(sample_size: usize) -> Self {
         Self {
             method: SelectionMethod::Roulette,
@@ -306,7 +574,29 @@ impl Selector {
         }
     }
 
-    /// Returns the sample size for this selector.
+    /// Returns the configured sample size for this selector.
+    /// 
+    /// The sample size determines how many candidates are drawn from the 
+    /// population before performing selection. Larger sample sizes provide
+    /// better representation of the population's fitness distribution but
+    /// may increase computational cost.
+    /// 
+    /// # Returns
+    /// 
+    /// The sample size as a signed integer for compatibility with database
+    /// query operations.
+    /// 
+    /// # Examples
+    /// 
+    /// ```rust
+    /// use fx_durable_ga::models::Selector;
+    /// 
+    /// let selector = Selector::tournament(3, 150);
+    /// assert_eq!(selector.sample_size(), 150);
+    /// 
+    /// let roulette = Selector::roulette(75);
+    /// assert_eq!(roulette.sample_size(), 75);
+    /// ```
     pub fn sample_size(&self) -> i64 {
         self.sample_size as i64
     }
