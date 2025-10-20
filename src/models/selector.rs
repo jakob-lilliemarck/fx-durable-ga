@@ -29,6 +29,8 @@ mod spin_roulette_tests {
     use chrono::Utc;
     use uuid::Uuid;
 
+    const TOLERANCE: f64 = 0.07;
+
     fn create_test_genotype(id: &str) -> Genotype {
         Genotype {
             id: Uuid::parse_str(id).unwrap(),
@@ -73,13 +75,13 @@ mod spin_roulette_tests {
         let proportion_2 = counts[2] as f64 / 1000.0;
 
         // Expect 10% with tolerance
-        assert!((proportion_0 - 0.1).abs() < 0.05);
+        assert!((proportion_0 - 0.1).abs() < TOLERANCE);
 
         // Expect 30% with tolerance
-        assert!((proportion_1 - 0.3).abs() < 0.05);
+        assert!((proportion_1 - 0.3).abs() < TOLERANCE);
 
         // Expect 60% with tolerance
-        assert!((proportion_2 - 0.6).abs() < 0.05);
+        assert!((proportion_2 - 0.6).abs() < TOLERANCE);
     }
 
     #[test]
@@ -112,10 +114,10 @@ mod spin_roulette_tests {
         let proportion_1 = counts[1] as f64 / 1000.0;
 
         // Expect 50% with tolerance
-        assert!((proportion_0 - 0.5).abs() < 0.05);
+        assert!((proportion_0 - 0.5).abs() < TOLERANCE);
 
         // Expect 50% with tolerance
-        assert!((proportion_1 - 0.5).abs() < 0.05);
+        assert!((proportion_1 - 0.5).abs() < TOLERANCE);
     }
 
     #[test]

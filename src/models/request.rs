@@ -72,7 +72,8 @@ pub(crate) struct RequestConclusion {
 mod tests {
     use super::*;
     use crate::models::{
-        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector, Temperature,
+        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector,
+        Temperature,
     };
 
     fn create_test_request(goal: FitnessGoal) -> Request {

@@ -117,17 +117,17 @@ mod tests {
 
         // No fitness data = no progress
         assert_eq!(goal.calculate_progress(None), 0.0);
-        
+
         // Progress from 0.0 to threshold
-        assert_eq!(goal.calculate_progress(Some(0.0)), 0.0);   // 0/0.8 = 0.0
-        assert_eq!(goal.calculate_progress(Some(0.4)), 0.5);   // 0.4/0.8 = 0.5
-        assert_eq!(goal.calculate_progress(Some(0.8)), 1.0);   // 0.8/0.8 = 1.0
-        
+        assert_eq!(goal.calculate_progress(Some(0.0)), 0.0); // 0/0.8 = 0.0
+        assert_eq!(goal.calculate_progress(Some(0.4)), 0.5); // 0.4/0.8 = 0.5
+        assert_eq!(goal.calculate_progress(Some(0.8)), 1.0); // 0.8/0.8 = 1.0
+
         // Exceeding threshold should clamp to 1.0
-        assert_eq!(goal.calculate_progress(Some(1.0)), 1.0);   // Clamped
-        
+        assert_eq!(goal.calculate_progress(Some(1.0)), 1.0); // Clamped
+
         // Negative values should clamp to 0.0
-        assert_eq!(goal.calculate_progress(Some(-0.1)), 0.0);  // Clamped
+        assert_eq!(goal.calculate_progress(Some(-0.1)), 0.0); // Clamped
     }
 
     #[test]
@@ -136,18 +136,18 @@ mod tests {
 
         // No fitness data = no progress
         assert_eq!(goal.calculate_progress(None), 0.0);
-        
+
         // Progress formula: (1.0 - current) / (1.0 - threshold)
         // With threshold 0.2: (1.0 - current) / 0.8
-        assert_eq!(goal.calculate_progress(Some(1.0)), 0.0);   // (1.0-1.0)/0.8 = 0.0
-        assert_eq!(goal.calculate_progress(Some(0.6)), 0.5);   // (1.0-0.6)/0.8 = 0.5
-        assert_eq!(goal.calculate_progress(Some(0.2)), 1.0);   // (1.0-0.2)/0.8 = 1.0
-        
+        assert_eq!(goal.calculate_progress(Some(1.0)), 0.0); // (1.0-1.0)/0.8 = 0.0
+        assert_eq!(goal.calculate_progress(Some(0.6)), 0.5); // (1.0-0.6)/0.8 = 0.5
+        assert_eq!(goal.calculate_progress(Some(0.2)), 1.0); // (1.0-0.2)/0.8 = 1.0
+
         // Better than threshold should clamp to 1.0
-        assert_eq!(goal.calculate_progress(Some(0.1)), 1.0);   // Clamped
-        
+        assert_eq!(goal.calculate_progress(Some(0.1)), 1.0); // Clamped
+
         // Worse than 1.0 should clamp to 0.0
-        assert_eq!(goal.calculate_progress(Some(1.1)), 0.0);   // Clamped
+        assert_eq!(goal.calculate_progress(Some(1.1)), 0.0); // Clamped
     }
 
     #[test]
@@ -156,7 +156,7 @@ mod tests {
         let min_goal_edge = FitnessGoal::minimize(1.0).unwrap();
         assert_eq!(min_goal_edge.calculate_progress(Some(0.5)), 1.0); // Special case
         assert_eq!(min_goal_edge.calculate_progress(Some(1.0)), 1.0); // Special case
-        
+
         // Edge case: maximize with threshold very close to 0
         let max_goal_edge = FitnessGoal::maximize(0.001).unwrap();
         assert_eq!(max_goal_edge.calculate_progress(Some(0.0005)), 0.5); // 0.0005/0.001 = 0.5

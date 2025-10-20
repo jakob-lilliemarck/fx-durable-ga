@@ -304,9 +304,9 @@ mod tests {
         assert!(MutationRate::exponential(1.5, 0.0, 1.0, 2).is_err());
 
         // Lower > upper validation for MutationRate
-        assert!(MutationRate::linear(0.3, 0.5, 1.0).is_err()); 
+        assert!(MutationRate::linear(0.3, 0.5, 1.0).is_err());
         assert!(MutationRate::exponential(0.2, 0.4, 1.0, 2).is_err());
-        
+
         // Lower > upper validation for Temperature
         assert!(Temperature::linear(0.3, 0.5, 1.0).is_err());
         assert!(Temperature::exponential(0.2, 0.4, 1.0, 2).is_err());
@@ -428,11 +428,11 @@ mod tests {
         // Test temperature validation error
         assert!(Mutagen::constant(-0.1, 0.5).is_err());
         assert!(Mutagen::constant(1.5, 0.5).is_err());
-        
+
         // Test mutation rate validation error
         assert!(Mutagen::constant(0.5, -0.1).is_err());
         assert!(Mutagen::constant(0.5, 1.5).is_err());
-        
+
         // Test successful case
         assert!(Mutagen::constant(0.5, 0.3).is_ok());
     }
