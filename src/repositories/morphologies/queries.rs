@@ -4,6 +4,8 @@ use crate::models::Morphology;
 use sqlx::PgExecutor;
 use tracing::instrument;
 
+/// Inserts a new morphology into the database.
+/// Returns the inserted morphology with database-generated fields.
 #[instrument(level = "debug", skip(tx), fields(type_name = %morphology.type_name, type_hash = morphology.type_hash))]
 pub(crate) async fn new_morphology<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -92,6 +94,8 @@ mod new_morphology_tests {
     }
 }
 
+/// Retrieves a morphology by its type hash.
+/// Returns NotFound error if the morphology doesn't exist.
 #[instrument(level = "debug", skip(tx), fields(type_hash = type_hash))]
 pub(crate) async fn get_morphology<'tx, E: PgExecutor<'tx>>(
     tx: E,

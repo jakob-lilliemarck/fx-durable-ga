@@ -1,25 +1,29 @@
 use super::{Error, TxRepository};
 use crate::models::{Genotype, Population};
 use crate::repositories::chainable::{Chain, ToTx, TxType};
-use futures::future::BoxFuture;
+use futures::{Future, future::BoxFuture};
 use sqlx::{PgPool, PgTransaction};
 use tracing::instrument;
 use uuid::Uuid;
 
+/// Repository for genotype and fitness data operations.
 pub(crate) struct Repository {
     pool: PgPool,
 }
 
 impl Repository {
+    /// Creates a new genotypes repository with the given database pool.
     pub(crate) fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
+    /// Retrieves a genotype by its ID.
     #[instrument(level = "debug", skip(self), fields(genotype_id = %id))]
     pub(crate) async fn get_genotype(&self, id: &Uuid) -> Result<Genotype, Error> {
         super::queries::get_genotype(&self.pool, id).await
     }
 
+    /// Gets population statistics for an optimization request.
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) fn get_population(
         &self,
@@ -28,6 +32,7 @@ impl Repository {
         super::queries::get_population(&self.pool, request_id)
     }
 
+    /// Searches genotypes with filtering and ordering options.
     #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
     pub(crate) fn search_genotypes(
         &self,
@@ -37,6 +42,7 @@ impl Repository {
         super::queries::search_genotypes(&self.pool, filter, limit)
     }
 
+    /// Finds which genome hashes already exist for deduplication.
     #[instrument(level = "debug", skip(self), fields(filter = %request_id))]
     pub(crate) fn get_intersection(
         &self,
@@ -46,6 +52,8 @@ impl Repository {
         super::queries::get_intersection(&self.pool, request_id, hashes)
     }
 
+    /// Checks if any genotypes exist for the given request and generation.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id, generation_id = generation_id))]
     pub(crate) fn check_if_generation_exists(
         &self,
         request_id: Uuid,
@@ -61,6 +69,7 @@ impl<'tx> TxType<'tx> for Repository {
 }
 
 impl<'tx> Chain<'tx> for Repository {
+    /// Executes a function within a database transaction.
     #[instrument(level = "debug", skip(self, f))]
     fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
     where

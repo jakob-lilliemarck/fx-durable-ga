@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 use tracing::instrument;
 use uuid::Uuid;
 
+/// Database representation of a request with JSON-serialized configuration fields.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
 pub(super) struct DbRequest {
@@ -22,6 +23,7 @@ pub(super) struct DbRequest {
 impl TryFrom<Request> for DbRequest {
     type Error = Error;
 
+    /// Converts domain request to database model by serializing configuration to JSON.
     #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let schedule_json = serde_json::to_value(request.schedule)?;
@@ -49,6 +51,7 @@ impl TryFrom<Request> for DbRequest {
 impl TryFrom<DbRequest> for Request {
     type Error = Error;
 
+    /// Converts database request to domain model by deserializing configuration from JSON.
     #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
     fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
         let schedule = serde_json::from_value(request.schedule)?;

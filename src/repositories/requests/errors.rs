@@ -1,3 +1,4 @@
+/// Errors that can occur in requests repository operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Database error: {0}")]

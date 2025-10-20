@@ -1,3 +1,4 @@
+/// Errors that can occur in morphologies repository operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("Database error: {0}")]

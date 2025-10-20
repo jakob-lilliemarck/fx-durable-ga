@@ -4,6 +4,8 @@ use std::fmt::Display;
 use tracing::instrument;
 use uuid::Uuid;
 
+/// Inserts multiple genotypes into the database in a single transaction.
+/// Returns the inserted genotypes with database-generated fields.
 #[instrument(level = "debug", skip(tx), fields(genotypes_count = genotypes.len()))]
 pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -132,6 +134,7 @@ mod new_genotypes_tests {
     }
 }
 
+/// Checks if any genotypes exist for the given request and generation.
 #[instrument(level = "debug", skip(tx), fields(request_id = %request_id, generation_id=%generation_id))]
 pub(crate) async fn check_if_generation_exists<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -226,6 +229,7 @@ mod check_if_generation_exists_tests {
     }
 }
 
+/// Retrieves a single genotype by its ID.
 #[instrument(level = "debug", skip(tx), fields(genotype_id = %id))]
 pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -310,6 +314,7 @@ mod get_genotype_tests {
     }
 }
 
+/// Records a fitness evaluation result for a genotype.
 #[instrument(level = "debug", skip(tx), fields(fitness = ?fitness))]
 pub(crate) async fn record_fitness<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -407,6 +412,8 @@ mod record_fitness_tests {
     }
 }
 
+/// Gets population statistics for an optimization request.
+/// Returns default values if no genotypes exist yet.
 #[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
 pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -593,6 +600,7 @@ mod get_population_tests {
     }
 }
 
+/// SQL sort order for query results.
 #[derive(Debug)]
 enum SortOrder {
     Asc,
@@ -608,6 +616,7 @@ impl Display for SortOrder {
     }
 }
 
+/// Query ordering options for genotype searches.
 #[derive(Debug)]
 enum Order {
     Random,
@@ -623,6 +632,7 @@ impl Display for Order {
     }
 }
 
+/// Filter criteria for searching genotypes with various conditions.
 #[derive(Debug)]
 pub(crate) struct Filter {
     request_id: Option<Uuid>,
@@ -643,6 +653,7 @@ impl Default for Filter {
 }
 
 impl Filter {
+    /// Filters genotypes by request ID.
     pub(crate) fn with_request_id(mut self, request_id: Uuid) -> Self {
         self.request_id = Some(request_id);
         self
@@ -654,6 +665,7 @@ impl Filter {
         self
     }
 
+    /// Filters genotypes based on whether they have fitness evaluations.
     pub(crate) fn with_fitness(mut self, has_fitness: bool) -> Self {
         self.has_fitness = Some(has_fitness);
         self
@@ -677,6 +689,8 @@ impl Filter {
     }
 }
 
+/// Searches genotypes with optional filtering, ordering, and limits.
+/// Returns genotypes paired with their fitness values (if available).
 #[instrument(level = "debug", skip(tx), fields(filter = ?filter))]
 pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -982,6 +996,8 @@ mod search_genotypes_tests {
     }
 }
 
+/// Finds which genome hashes already exist for a given request.
+/// Used for deduplication during breeding to avoid creating duplicate genomes.
 #[instrument(level = "debug", skip(tx), fields(request_id=?request_id))]
 pub(crate) async fn get_intersection<'tx, E: PgExecutor<'tx>>(
     tx: E,

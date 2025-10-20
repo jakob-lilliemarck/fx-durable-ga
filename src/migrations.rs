@@ -1,4 +1,5 @@
 use sqlx::{Acquire, Postgres};
+use tracing::instrument;
 
 // Embed the migrations directory at compile time
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
@@ -15,6 +16,7 @@ static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!();
 /// # Errors
 ///
 /// Returns `sqlx::Error` if schema creation or migration execution fails.
+#[instrument(level = "debug", skip(conn))]
 pub async fn run_migrations<'a, A>(conn: A) -> Result<(), sqlx::Error>
 where
     A: Acquire<'a, Database = Postgres>,

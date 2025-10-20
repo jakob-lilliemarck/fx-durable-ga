@@ -2,26 +2,30 @@ use super::Error;
 use super::repository_tx::TxRepository;
 use crate::models::{Request, RequestConclusion};
 use crate::repositories::chainable::{Chain, FromOther, ToTx, TxType};
-use futures::future::BoxFuture;
+use futures::future::{BoxFuture, Future};
 use sqlx::{PgPool, PgTransaction};
 use tracing::instrument;
 use uuid::Uuid;
 
+/// Repository for managing genetic algorithm requests and their conclusions.
 #[derive(Debug, Clone)]
 pub(crate) struct Repository {
     pool: PgPool,
 }
 
 impl Repository {
+    /// Creates a new Repository instance with the given database pool.
     pub(crate) fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
+    /// Retrieves a request by its ID.
     #[instrument(level = "debug", skip(self), fields(request_id = %id))]
     pub(crate) async fn get_request(&self, id: Uuid) -> Result<Request, Error> {
         super::queries::get_request(&self.pool, &id).await
     }
 
+    /// Retrieves a request conclusion by request ID. Returns None if no conclusion exists.
     #[instrument(level = "debug", skip(self), fields(request_id = %id))]
     pub(crate) fn get_request_conclusion(
         &self,
@@ -30,6 +34,7 @@ impl Repository {
         super::queries::get_request_conclusion(&self.pool, id)
     }
 
+    /// Creates a new request conclusion record in the database.
     #[instrument(level = "debug", skip(self), fields(request_id = %request_conclusion.request_id, concluded_at = %request_conclusion.concluded_at, concluded_with = ?request_conclusion.concluded_with))]
     pub(crate) fn new_request_conclusion(
         &self,

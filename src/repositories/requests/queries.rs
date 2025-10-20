@@ -5,6 +5,9 @@ use sqlx::PgExecutor;
 use tracing::instrument;
 use uuid::Uuid;
 
+/// Creates a new request record in the database.
+/// 
+/// Returns the created request with database-assigned fields populated.
 #[instrument(level = "debug", skip(tx), fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash, goal = ?request.goal))]
 pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -126,6 +129,7 @@ mod new_request_tests {
     }
 }
 
+/// Retrieves a request record from the database by ID.
 #[instrument(level = "debug", skip(tx), fields(request_id = %id))]
 pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -214,6 +218,9 @@ mod get_request_tests {
     }
 }
 
+/// Creates a request conclusion record in the database.
+/// 
+/// Returns the created conclusion with database-assigned fields populated.
 #[instrument(level = "debug", skip(tx), fields(request_id = %request_conclusion.request_id, concluded_at = %request_conclusion.concluded_at, concluded_with=?request_conclusion))]
 pub(crate) async fn new_request_conclusion<'tx, E: PgExecutor<'tx>>(
     tx: E,
@@ -356,6 +363,9 @@ mod new_request_conclusion_conclusion_tests {
     }
 }
 
+/// Retrieves a request conclusion from the database by request ID.
+/// 
+/// Returns None if no conclusion exists for the given request.
 #[instrument(level = "debug", skip(tx), fields(id = %id))]
 pub(crate) async fn get_request_conclusion<'tx, E: PgExecutor<'tx>>(
     tx: E,

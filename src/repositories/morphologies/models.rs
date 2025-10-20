@@ -4,6 +4,7 @@ use crate::models::Morphology;
 use chrono::{DateTime, Utc};
 use tracing::instrument;
 
+/// Database representation of a morphology with JSON-serialized gene bounds.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
 pub(super) struct DBMorphology {
@@ -16,6 +17,7 @@ pub(super) struct DBMorphology {
 impl TryFrom<DBMorphology> for Morphology {
     type Error = Error;
 
+    /// Converts database morphology to domain model by deserializing gene bounds.
     #[instrument(level = "debug", fields(type_name = %db_morphology.type_name, type_hash = db_morphology.type_hash))]
     fn try_from(db_morphology: DBMorphology) -> Result<Self, Self::Error> {
         let gene_bounds: Vec<GeneBounds> = serde_json::from_value(db_morphology.gene_bounds)?;
@@ -32,6 +34,7 @@ impl TryFrom<DBMorphology> for Morphology {
 impl TryFrom<Morphology> for DBMorphology {
     type Error = Error;
 
+    /// Converts domain morphology to database model by serializing gene bounds to JSON.
     #[instrument(level = "debug", fields(type_name = %morphology.type_name, type_hash = morphology.type_hash))]
     fn try_from(morphology: Morphology) -> Result<Self, Self::Error> {
         let gene_bounds_json = serde_json::to_value(&morphology.gene_bounds)?;
