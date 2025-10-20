@@ -1,8 +1,12 @@
 use crate::models::{Genotype, Morphology, Request};
+use tracing::instrument;
 
+/// Handles the breeding process by combining crossover and mutation operations.
 pub(crate) struct Breeder;
 
 impl Breeder {
+    /// Creates a single child from two parents using crossover and mutation.
+    #[instrument(level = "debug", skip(request, morphology, parent1, parent2, rng), fields(parent1_id = %parent1.id, parent2_id = %parent2.id, generation_id = next_generation_id, progress = progress))]
     fn breed_child(
         request: &Request,
         morphology: &Morphology,
@@ -21,7 +25,7 @@ impl Breeder {
             next_generation_id,
         );
 
-        // progress passed in by service or future ProgressCalculator
+        // Apply mutation based on current optimization progress
         request
             .mutagen
             .mutate(rng, &mut child, morphology, progress);
@@ -29,6 +33,8 @@ impl Breeder {
         child
     }
 
+    /// Creates multiple children from parent pairs using crossover and mutation.
+    #[instrument(level = "debug", skip(request, morphology, parent_pairs, rng), fields(num_pairs = parent_pairs.len(), generation_id = next_generation_id, progress = progress))]
     pub(crate) fn breed_batch(
         request: &Request,
         morphology: &Morphology,

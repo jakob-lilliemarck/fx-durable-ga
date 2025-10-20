@@ -1,11 +1,14 @@
 use crate::models::{Genotype, Morphology};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
+/// Applies linear decay from upper to lower bounds based on progress.
 fn decay_linear(upper: f64, lower: f64, progress: f64, multiplier: f64) -> f64 {
     lower + (upper - lower) * (1.0 - progress * multiplier).max(0.0)
 }
 
+/// Applies exponential decay from upper to lower bounds based on progress.
 fn decay_exponential(upper: f64, lower: f64, progress: f64, multiplier: f64, exponent: i32) -> f64 {
     lower + (upper - lower) * (1.0 - progress * multiplier).max(0.0).powi(exponent)
 }
@@ -13,6 +16,8 @@ fn decay_exponential(upper: f64, lower: f64, progress: f64, multiplier: f64, exp
 // ============================================================
 // Decay
 // ============================================================
+
+/// Strategy for decaying parameter values over optimization progress.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Decay {
     Constant,
@@ -28,6 +33,7 @@ pub enum Decay {
 }
 
 impl Decay {
+    /// Applies the decay strategy to get the current parameter value.
     fn apply(&self, upper: f64, progress: f64) -> f64 {
         match self {
             Decay::Constant => upper,
@@ -46,6 +52,8 @@ impl Decay {
 // ============================================================
 // Temperature
 // ============================================================
+
+/// Controls mutation step size - higher temperature allows larger jumps in the search space.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Temperature {
     value: f64,
@@ -61,6 +69,7 @@ pub enum TemperatureError {
 }
 
 impl Temperature {
+    /// Creates a constant temperature that doesn't change with progress.
     pub fn constant(value: f64) -> Result<Self, TemperatureError> {
         let value = Self::validate(value)?;
 
@@ -70,6 +79,7 @@ impl Temperature {
         })
     }
 
+    /// Validates that temperature value is within [0.0, 1.0].
     fn validate(value: f64) -> Result<f64, TemperatureError> {
         if !(0.0..=1.0).contains(&value) {
             return Err(TemperatureError::ValueOutOfRange(value));
@@ -78,6 +88,7 @@ impl Temperature {
         Ok(value)
     }
 
+    /// Creates a temperature that decays linearly with optimization progress.
     pub fn linear(upper: f64, lower: f64, multiplier: f64) -> Result<Self, TemperatureError> {
         let upper = Self::validate(upper)?;
         let lower = Self::validate(lower)?;
@@ -92,6 +103,7 @@ impl Temperature {
         })
     }
 
+    /// Creates a temperature that decays exponentially with optimization progress.
     pub fn exponential(
         upper: f64,
         lower: f64,
@@ -115,6 +127,7 @@ impl Temperature {
         })
     }
 
+    /// Gets the current temperature value based on optimization progress.
     fn get(&self, progress: f64) -> f64 {
         self.decay.apply(self.value, progress)
     }
@@ -123,6 +136,8 @@ impl Temperature {
 // ============================================================
 // MutationRate
 // ============================================================
+
+/// Controls the probability that each gene will be mutated.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MutationRate {
     value: f64,
@@ -138,6 +153,7 @@ pub enum MutationRateError {
 }
 
 impl MutationRate {
+    /// Creates a constant mutation rate that doesn't change with progress.
     pub fn constant(value: f64) -> Result<Self, MutationRateError> {
         let value = Self::validate(value)?;
 
@@ -147,6 +163,7 @@ impl MutationRate {
         })
     }
 
+    /// Validates that mutation rate value is within [0.0, 1.0].
     fn validate(value: f64) -> Result<f64, MutationRateError> {
         if !(0.0..=1.0).contains(&value) {
             return Err(MutationRateError::ValueOutOfRange(value));
@@ -155,6 +172,7 @@ impl MutationRate {
         Ok(value)
     }
 
+    /// Creates a mutation rate that decays linearly with optimization progress.
     pub fn linear(upper: f64, lower: f64, multiplier: f64) -> Result<Self, MutationRateError> {
         let upper = Self::validate(upper)?;
         let lower = Self::validate(lower)?;
@@ -169,6 +187,7 @@ impl MutationRate {
         })
     }
 
+    /// Creates a mutation rate that decays exponentially with optimization progress.
     pub fn exponential(
         upper: f64,
         lower: f64,
@@ -192,6 +211,7 @@ impl MutationRate {
         })
     }
 
+    /// Gets the current mutation rate value based on optimization progress.
     fn get(&self, progress: f64) -> f64 {
         self.decay.apply(self.value, progress)
     }
@@ -200,6 +220,8 @@ impl MutationRate {
 // ============================================================
 // Mutagen
 // ============================================================
+
+/// Combines temperature and mutation rate to control genetic mutation behavior.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Mutagen {
     mutation_rate: MutationRate,
@@ -215,6 +237,7 @@ pub enum MutagenError {
 }
 
 impl Mutagen {
+    /// Creates a new mutagen with the given temperature and mutation rate strategies.
     pub fn new(temperature: Temperature, mutation_rate: MutationRate) -> Self {
         Self {
             temperature,
@@ -222,7 +245,8 @@ impl Mutagen {
         }
     }
 
-    /// Helper method for backward compatibility - use Mutagen::new() with Temperature/MutationRate constructors instead
+    /// Creates a mutagen with constant temperature and mutation rate values.
+    /// For more advanced behavior, use Mutagen::new() with Temperature/MutationRate constructors.
     pub fn constant(
         temperature_value: f64,
         mutation_rate_value: f64,
@@ -233,6 +257,8 @@ impl Mutagen {
         ))
     }
 
+    /// Mutates a genotype in place based on current temperature and mutation rate.
+    #[instrument(level = "debug", skip(self, rng, genotype, morphology), fields(progress = progress, genotype_id = %genotype.id))]
     pub(crate) fn mutate<R: Rng>(
         &self,
         rng: &mut R,
@@ -248,16 +274,16 @@ impl Mutagen {
             .iter_mut()
             .zip(morphology.gene_bounds.iter())
         {
-            // Should we mutate this gene?
+            // Apply mutation based on current mutation rate
             if rng.random_range(0.0..1.0) < mutation_rate {
-                // Temperature controls mutation step: higher = larger jumps
+                // Temperature controls mutation step size: higher = larger jumps
                 let max_step = (1.0 + (bounds.steps() as f64 * temperature)) as i64;
 
-                // Choose direction and step size
+                // Choose random direction and step size
                 let direction = if rng.random_bool(0.5) { 1 } else { -1 };
                 let step = rng.random_range(1..=max_step);
 
-                // Apply mutation and clamp
+                // Apply mutation and clamp to valid range
                 *gene = (*gene + direction * step).clamp(0, bounds.steps() as i64 - 1);
             }
         }

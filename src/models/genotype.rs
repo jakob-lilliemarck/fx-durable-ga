@@ -5,8 +5,11 @@ use std::hash::{Hash, Hasher};
 use tracing::instrument;
 use uuid::Uuid;
 
+/// A single gene value in a genome, represented as a 64-bit integer.
 pub type Gene = i64;
 
+/// Represents an individual genotype in the genetic algorithm population.
+/// Contains the genome data and metadata for tracking through generations.
 #[derive(Debug, Clone, FromRow)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct Genotype {
@@ -23,6 +26,7 @@ pub(crate) struct Genotype {
 }
 
 impl Genotype {
+    /// Creates a new genotype with the given genome and metadata.
     #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, genome_length = genome.len()))]
     pub(crate) fn new(
         type_name: &str,
@@ -45,7 +49,7 @@ impl Genotype {
         }
     }
 
-    // Fast hash function for Vec<Gene>
+    /// Computes a fast hash of the genome for deduplication and comparison.
     pub(crate) fn compute_genome_hash(genome: &[Gene]) -> i64 {
         let mut hasher = DefaultHasher::new();
         genome.hash(&mut hasher);
@@ -99,6 +103,7 @@ mod tests {
     }
 }
 
+/// Represents a fitness evaluation result for a genotype.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct Fitness {
@@ -108,6 +113,8 @@ pub(crate) struct Fitness {
 }
 
 impl Fitness {
+    /// Creates a new fitness record for a genotype.
+    #[instrument(level = "debug", fields(genotype_id = %genotype_id, fitness = fitness))]
     pub(crate) fn new(genotype_id: Uuid, fitness: f64) -> Self {
         Self {
             genotype_id,

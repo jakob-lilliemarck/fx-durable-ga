@@ -1,8 +1,12 @@
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
+/// Defines the optimization objective and termination criteria for a genetic algorithm.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum FitnessGoal {
+    /// Minimize fitness values, stopping when fitness drops to or below the threshold.
     Minimize { threshold: f64 },
+    /// Maximize fitness values, stopping when fitness reaches or exceeds the threshold.
     Maximize { threshold: f64 },
 }
 
@@ -11,18 +15,22 @@ pub enum FitnessGoal {
 pub struct ThresholdOutOfRange(f64);
 
 impl FitnessGoal {
+    /// Creates a minimization goal with the given threshold.
     pub fn minimize(threshold: f64) -> Result<Self, ThresholdOutOfRange> {
         let threshold = Self::validate(threshold)?;
 
         Ok(Self::Minimize { threshold })
     }
 
+    /// Creates a maximization goal with the given threshold.
     pub fn maximize(threshold: f64) -> Result<Self, ThresholdOutOfRange> {
         let threshold = Self::validate(threshold)?;
 
         Ok(Self::Maximize { threshold })
     }
 
+    /// Checks if the given fitness value has reached the goal threshold.
+    #[instrument(level = "debug", skip(self), fields(goal = ?self, fitness = fitness))]
     pub(crate) fn is_reached(&self, fitness: f64) -> bool {
         match self {
             FitnessGoal::Minimize { threshold } => fitness <= *threshold,
@@ -30,8 +38,9 @@ impl FitnessGoal {
         }
     }
 
-    /// Calculate optimization progress from 0.0 (no progress) to 1.0 (goal reached)
-    /// Returns 0.0 if best_fitness is None
+    /// Calculates optimization progress from 0.0 (no progress) to 1.0 (goal reached).
+    /// Returns 0.0 if best_fitness is None.
+    #[instrument(level = "debug", skip(self), fields(goal = ?self, best_fitness = ?best_fitness))]
     pub(crate) fn calculate_progress(&self, best_fitness: Option<f64>) -> f64 {
         let best_fitness = match best_fitness {
             Some(fitness) => fitness,
@@ -40,21 +49,20 @@ impl FitnessGoal {
 
         match self {
             FitnessGoal::Maximize { threshold } => {
-                // For maximize: progress = current_fitness / threshold
-                // Clamp to [0.0, 1.0] in case fitness exceeds threshold
+                // Progress = current_fitness / threshold, clamped to [0.0, 1.0]
                 (best_fitness / threshold).min(1.0).max(0.0)
             }
             FitnessGoal::Minimize { threshold } => {
-                // For minimize: progress = (1.0 - current_fitness) / (1.0 - threshold)
-                // This assumes fitness is in [0.0, 1.0] range (as enforced by threshold validation)
+                // Progress = (1.0 - current_fitness) / (1.0 - threshold)
                 if *threshold >= 1.0 {
-                    return 1.0; // Edge case: threshold is 1.0, any fitness <= 1.0 is complete progress
+                    return 1.0; // Edge case: threshold is 1.0
                 }
                 ((1.0 - best_fitness) / (1.0 - threshold)).min(1.0).max(0.0)
             }
         }
     }
 
+    /// Validates that the threshold is within the valid range [0.0, 1.0].
     fn validate(threshold: f64) -> Result<f64, ThresholdOutOfRange> {
         if !(0.0..=1.0).contains(&threshold) {
             return Err(ThresholdOutOfRange(threshold));

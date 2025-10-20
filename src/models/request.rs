@@ -3,6 +3,8 @@ use chrono::{DateTime, Utc};
 use tracing::instrument;
 use uuid::Uuid;
 
+/// Represents an optimization request with all genetic algorithm parameters.
+/// Contains the complete configuration needed to run an optimization.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
 pub(crate) struct Request {
@@ -22,6 +24,7 @@ pub(crate) struct Request {
 pub enum RequestValidationError {}
 
 impl Request {
+    /// Creates a new optimization request with the given parameters.
     #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen))]
     pub(crate) fn new(
         type_name: &str,
@@ -47,12 +50,14 @@ impl Request {
         })
     }
 
+    /// Checks if the optimization request is completed based on the given fitness value.
     #[instrument(level = "debug", fields(request_id = %self.id, fitness = fitness, goal = ?self.goal))]
     pub(crate) fn is_completed(&self, fitness: f64) -> bool {
         self.goal.is_reached(fitness)
     }
 }
 
+/// The reason why an optimization request was concluded.
 #[derive(Debug, sqlx::Type, Clone, Copy, PartialEq, Eq)]
 #[sqlx(type_name = "fx_durable_ga.conclusion", rename_all = "lowercase")]
 pub(crate) enum Conclusion {
@@ -60,6 +65,7 @@ pub(crate) enum Conclusion {
     Terminated,
 }
 
+/// Records the conclusion of an optimization request.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
 pub(crate) struct RequestConclusion {

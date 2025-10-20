@@ -3,6 +3,7 @@ use rand::{Rng, rngs::ThreadRng};
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
+/// Errors that can occur when creating gene bounds.
 #[derive(Debug, thiserror::Error)]
 pub enum GeneBoundError {
     #[error(
@@ -16,6 +17,7 @@ pub enum GeneBoundError {
 }
 
 impl GeneBoundError {
+    /// Creates a steps overflow error.
     pub(crate) fn steps_overflow(steps: u32) -> Self {
         Self::StepsOverflow {
             steps,
@@ -23,15 +25,19 @@ impl GeneBoundError {
         }
     }
 
+    /// Creates an invalid bound error.
     pub(crate) fn invalid_bound(lower: f64, upper: f64) -> Self {
         Self::InvalidBound { lower, upper }
     }
 
+    /// Creates a zero steps error.
     pub(crate) fn zero_steps() -> Self {
         Self::ZeroSteps
     }
 }
 
+/// Defines the bounds and discretization for a single gene in the search space.
+/// Uses fixed-point arithmetic for precise decimal handling.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GeneBounds {
@@ -46,8 +52,8 @@ pub struct GeneBounds {
 }
 
 impl GeneBounds {
-    /// Create bounds with decimal precision using fixed-point arithmetic
-    /// precision: number of decimal places (e.g., 6 for microsecond precision)
+    /// Creates bounds with decimal precision using fixed-point arithmetic.
+    /// Precision specifies the number of decimal places (e.g., 6 for microsecond precision).
     #[instrument(level = "debug", fields(lower = lower, upper = upper, steps = steps, precision = precision))]
     pub fn decimal(
         lower: f64,
@@ -69,7 +75,7 @@ impl GeneBounds {
         })
     }
 
-    /// Create integer-only bounds for backward compatibility
+    /// Creates integer-only bounds with no fractional precision.
     #[instrument(level = "debug", fields(lower = lower, upper = upper, steps = steps))]
     pub fn integer(lower: i32, upper: i32, steps: u32) -> Result<Self, GeneBoundError> {
         Self::validate_bounds(lower, upper, steps)?;
@@ -83,6 +89,7 @@ impl GeneBounds {
         })
     }
 
+    /// Validates that bounds are sensible and within system limits.
     fn validate_bounds<T>(lower: T, upper: T, steps: u32) -> Result<(), GeneBoundError>
     where
         T: PartialOrd + Copy + Into<f64>,
@@ -106,24 +113,25 @@ impl GeneBounds {
         Ok(())
     }
 
-    /// Convert gene to decimal value
+    /// Converts a discrete gene value to its corresponding decimal value in the real range.
     pub fn to_f64(&self, gene: Gene) -> f64 {
         let range = self.upper_scaled - self.lower_scaled;
         let scaled_value = self.lower_scaled + (gene * range) / (self.steps - 1) as i64;
         scaled_value as f64 / self.scale_factor as f64
     }
 
-    /// Generate a random gene (0 to steps-1)
+    /// Generates a random gene value within the discrete range [0, steps-1].
     #[instrument(level = "debug", skip(rng), fields(steps = self.steps))]
     pub(crate) fn random(&self, rng: &mut ThreadRng) -> Gene {
         rng.random_range(0..self.steps as i64)
     }
 
+    /// Returns the number of discrete steps as an i32.
     pub(crate) fn steps(&self) -> i32 {
         self.steps as i32
     }
 
-    /// Convert a [0,1] sample to a gene index (0 to steps-1)
+    /// Converts a normalized [0,1] sample to a discrete gene index [0, steps-1].
     pub(crate) fn from_sample(&self, sample: f64) -> Gene {
         // Map [0,1] sample to discrete gene index [0, steps-1]
         (sample * (self.steps - 1) as f64).round() as Gene

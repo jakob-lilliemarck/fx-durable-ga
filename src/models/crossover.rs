@@ -1,7 +1,10 @@
 use crate::models::{Gene, Genotype};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
+/// Performs uniform crossover by selecting genes from each parent with the given probability.
+#[instrument(level = "debug", skip(rng, lhs, rhs), fields(genome_length = lhs.genome.len(), probability = probability))]
 fn crossover_uniform<R: Rng>(
     rng: &mut R,
     lhs: &Genotype,
@@ -21,6 +24,8 @@ fn crossover_uniform<R: Rng>(
         .collect()
 }
 
+/// Performs single-point crossover at the specified cut point.
+#[instrument(level = "debug", skip(lhs, rhs), fields(genome_length = lhs.genome.len(), cut_point = point))]
 fn crossover_single_point(lhs: &Genotype, rhs: &Genotype, point: usize) -> Vec<Gene> {
     let mut genome = Vec::with_capacity(lhs.genome.len());
 
@@ -29,9 +34,12 @@ fn crossover_single_point(lhs: &Genotype, rhs: &Genotype, point: usize) -> Vec<G
     genome
 }
 
+/// Crossover strategy for combining genetic material from two parents.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Crossover {
+    /// Uniform crossover selects each gene from either parent with the given probability.
     Uniform { probability: f64 },
+    /// Single-point crossover cuts genomes at a random point and swaps the tails.
     SinglePoint,
 }
 
@@ -40,6 +48,7 @@ pub enum Crossover {
 pub struct ProbabilityOutOfRangeError(f64);
 
 impl Crossover {
+    /// Creates a uniform crossover with the given probability for selecting from the first parent.
     pub fn uniform(probability: f64) -> Result<Self, ProbabilityOutOfRangeError> {
         if !(0.0..=1.0).contains(&probability) {
             return Err(ProbabilityOutOfRangeError(probability));
@@ -48,10 +57,13 @@ impl Crossover {
         Ok(Self::Uniform { probability })
     }
 
+    /// Creates a single-point crossover strategy.
     pub fn single_point() -> Self {
         Self::SinglePoint
     }
 
+    /// Applies the crossover operation to two parent genotypes, producing a new genome.
+    #[instrument(level = "debug", skip(self, rng, lhs, rhs), fields(crossover_type = ?self, genome_length = lhs.genome.len()))]
     pub(crate) fn apply<R: Rng>(&self, rng: &mut R, lhs: &Genotype, rhs: &Genotype) -> Vec<Gene> {
         match self {
             Self::Uniform { probability } => crossover_uniform(rng, lhs, rhs, *probability),

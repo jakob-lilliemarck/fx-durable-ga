@@ -2,6 +2,8 @@ use crate::models::{Gene, GeneBounds};
 use chrono::{DateTime, Utc};
 use tracing::instrument;
 
+/// Defines the structure and constraints of the search space for a specific type.
+/// Contains gene bounds that determine how genomes are generated and validated.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct Morphology {
@@ -12,6 +14,7 @@ pub struct Morphology {
 }
 
 impl Morphology {
+    /// Creates a new morphology definition for a type.
     #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, gene_bounds_count = gene_bounds.len()))]
     pub(crate) fn new(type_name: &str, type_hash: i32, gene_bounds: Vec<GeneBounds>) -> Self {
         Self {
@@ -22,6 +25,7 @@ impl Morphology {
         }
     }
 
+    /// Generates a random genome within the bounds defined by this morphology.
     #[instrument(level = "debug", fields(type_name = %self.type_name, type_hash = self.type_hash, gene_bounds_count = self.gene_bounds.len()))]
     pub(crate) fn random(&self) -> Vec<Gene> {
         let mut rng = rand::rng();

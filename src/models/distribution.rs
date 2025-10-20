@@ -1,21 +1,29 @@
 use crate::models::{Gene, Morphology};
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
+/// Initial population distribution strategy for genetic algorithms.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Distribution {
+    /// Latin Hypercube sampling for better space coverage with fewer samples.
     LatinHypercube { population_size: u32 },
+    /// Pure random sampling across the search space.
     Random { population_size: u32 },
 }
 
 impl Distribution {
+    /// Creates a Latin Hypercube distribution strategy.
     pub fn latin_hypercube(population_size: u32) -> Self {
         Distribution::LatinHypercube { population_size }
     }
 
+    /// Creates a random distribution strategy.
     pub fn random(population_size: u32) -> Self {
         Distribution::Random { population_size }
     }
 
+    /// Generates initial population genomes according to this distribution strategy.
+    #[instrument(level = "debug", skip(self, morphology), fields(distribution = ?self, morphology_dimensions = morphology.gene_bounds.len()))]
     pub(crate) fn distribute(&self, morphology: &Morphology) -> Vec<Vec<Gene>> {
         match self {
             Distribution::LatinHypercube { population_size } => {
@@ -28,6 +36,8 @@ impl Distribution {
     }
 }
 
+/// Generates genomes using pure random sampling.
+#[instrument(level = "debug", skip(morphology), fields(n_samples = n_samples, n_dimensions = morphology.gene_bounds.len()))]
 fn random_distribution(n_samples: usize, morphology: &Morphology) -> Vec<Vec<Gene>> {
     let mut genomes = Vec::with_capacity(n_samples);
 
@@ -39,6 +49,8 @@ fn random_distribution(n_samples: usize, morphology: &Morphology) -> Vec<Vec<Gen
     genomes
 }
 
+/// Generates genomes using Latin Hypercube sampling for better space coverage.
+#[instrument(level = "debug", skip(morphology), fields(n_samples = n_samples, n_dimensions = morphology.gene_bounds.len()))]
 fn latin_hypercube(n_samples: usize, morphology: &Morphology) -> Vec<Vec<Gene>> {
     use rand::seq::SliceRandom;
 
@@ -52,21 +64,19 @@ fn latin_hypercube(n_samples: usize, morphology: &Morphology) -> Vec<Vec<Gene>> 
     for dim_idx in 0..n_dimensions {
         let gene_bound = &morphology.gene_bounds[dim_idx];
 
-        // 1. Create n_samples intervals at center points (deterministic)
+        // Create evenly spaced intervals and shuffle for decorrelation
         let mut intervals: Vec<f64> = (0..n_samples)
             .map(|i| (i as f64 + 0.5) / n_samples as f64) // Center of each interval
             .collect();
-
-        // 2. Shuffle the intervals to decorrelate dimensions
         intervals.shuffle(&mut rng);
 
-        // 3. Convert [0,1] samples to actual gene values using gene bounds
+        // Convert normalized samples to actual gene values
         let gene_values: Vec<Gene> = intervals
             .iter()
             .map(|&sample| gene_bound.from_sample(sample))
             .collect();
 
-        // 4. Assign to genomes (transpose operation)
+        // Assign gene values to genomes (transpose operation)
         for (genome_idx, &gene_value) in gene_values.iter().enumerate() {
             if dim_idx == 0 {
                 // First dimension: create new genomes

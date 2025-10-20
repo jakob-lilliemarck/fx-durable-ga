@@ -1,8 +1,9 @@
 use crate::models::Genotype;
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
-/// Pure function for single roulette wheel spin (borrowed)
+/// Performs a single roulette wheel spin to select a candidate index.
 fn spin_roulette(
     candidates: &[(&Genotype, f64)],
     total_fitness: f64,
@@ -133,7 +134,8 @@ mod spin_roulette_tests {
     }
 }
 
-/// Pure function for roulette selection
+/// Selects parent pairs using fitness-proportionate roulette wheel selection.
+#[instrument(level = "debug", skip(candidates_with_fitness, rng), fields(num_pairs = num_pairs, num_candidates = candidates_with_fitness.len()))]
 fn roulette_selection<'a>(
     num_pairs: usize,
     candidates_with_fitness: &'a [(Genotype, Option<f64>)],
@@ -182,7 +184,8 @@ fn roulette_selection<'a>(
     Ok(parent_pairs)
 }
 
-/// Pure function for tournament selection
+/// Selects parent pairs using tournament selection with the given tournament size.
+#[instrument(level = "debug", skip(candidates_with_fitness, rng), fields(num_pairs = num_pairs, tournament_size = tournament_size, num_candidates = candidates_with_fitness.len()))]
 fn tournament_selection<'a>(
     num_pairs: usize,
     tournament_size: usize,
@@ -237,6 +240,7 @@ fn tournament_selection<'a>(
     Ok(parent_pairs)
 }
 
+/// Parent selection strategy configuration for genetic algorithms.
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct Selector {
@@ -244,6 +248,7 @@ pub struct Selector {
     pub sample_size: usize,
 }
 
+/// The specific selection algorithm to use for parent selection.
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(Clone, PartialEq, Eq))]
 pub enum SelectionMethod {
@@ -265,6 +270,7 @@ pub enum SelectionError {
 }
 
 impl Selector {
+    /// Creates a tournament selector that runs tournaments of the given size.
     pub fn tournament(tournament_size: usize, sample_size: usize) -> Self {
         Self {
             method: SelectionMethod::Tournament {
@@ -274,6 +280,7 @@ impl Selector {
         }
     }
 
+    /// Creates a roulette wheel selector for fitness-proportionate selection.
     pub fn roulette(sample_size: usize) -> Self {
         Self {
             method: SelectionMethod::Roulette,
@@ -281,7 +288,8 @@ impl Selector {
         }
     }
 
-    /// Select parent pairs from candidates with fitness
+    /// Selects parent pairs from candidates using the configured selection method.
+    #[instrument(level = "debug", skip(self, candidates_with_fitness), fields(method = ?self.method, num_pairs = num_pairs, num_candidates = candidates_with_fitness.len()))]
     pub(crate) fn select_parents<'a>(
         &self,
         num_pairs: usize,
@@ -298,6 +306,7 @@ impl Selector {
         }
     }
 
+    /// Returns the sample size for this selector.
     pub fn sample_size(&self) -> i64 {
         self.sample_size as i64
     }

@@ -1,5 +1,7 @@
 use uuid::Uuid;
 
+/// Represents the current state of a genetic algorithm population.
+/// Tracks progress and statistics for an optimization request.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 pub(crate) struct Population {

@@ -1,6 +1,9 @@
 use super::Population;
 use serde::{Deserialize, Serialize};
+use tracing::instrument;
 
+/// Controls when new generations are bred during optimization.
+/// Supports both generational and rolling breeding strategies.
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(Clone, PartialEq))]
 pub struct Schedule {
@@ -9,6 +12,7 @@ pub struct Schedule {
     pub selection_interval: u32,
 }
 
+/// Decision about what action to take based on current population state.
 #[derive(Debug, PartialEq)]
 pub enum ScheduleDecision {
     /// Wait - not ready to breed yet
@@ -23,7 +27,7 @@ pub enum ScheduleDecision {
 }
 
 impl Schedule {
-    /// Create a generational schedule (breeds entire population each generation)
+    /// Creates a generational schedule that breeds the entire population each generation.
     pub fn generational(max_generations: u32, population_size: u32) -> Self {
         Self {
             max_evaluations: max_generations * population_size,
@@ -32,7 +36,7 @@ impl Schedule {
         }
     }
 
-    /// Create a rolling schedule (breeds in smaller batches)
+    /// Creates a rolling schedule that breeds in smaller batches at regular intervals.
     pub fn rolling(max_evaluations: u32, population_size: u32, selection_interval: u32) -> Self {
         Self {
             max_evaluations,
@@ -41,23 +45,24 @@ impl Schedule {
         }
     }
 
-    /// Determine what action to take based on current population state
+    /// Determines what action to take based on current population state.
+    #[instrument(level = "debug", skip(self, population), fields(evaluated = population.evaluated_genotypes, live = population.live_genotypes, generation = population.current_generation, max_evaluations = self.max_evaluations))]
     pub(crate) fn should_breed(&self, population: &Population) -> ScheduleDecision {
-        // Guard: Reached evaluation budget - terminate
+        // Check if evaluation budget is exhausted
         if population.evaluated_genotypes >= (self.max_evaluations as i64) {
             return ScheduleDecision::Terminate;
         }
 
-        // Guard: Population busy, can't breed yet - wait
-        // For generational: wait while live_genotypes > 0 (current generation still evaluating)
-        // For rolling: wait while not enough slots available for new batch
+        // Check if population has capacity for new genotypes
+        // Generational: wait while any genotypes are still evaluating
+        // Rolling: wait while not enough slots available for new batch
         if population.live_genotypes > (self.population_size - self.selection_interval) as i64 {
             return ScheduleDecision::Wait;
         }
 
-        // Happy path: breed new genotypes
-        // For generational: breed entire new population (selection_interval == population_size)
-        // For rolling: breed small batch to fill available slots (selection_interval < population_size)
+        // Ready to breed new genotypes
+        // Generational: breeds entire population at once
+        // Rolling: breeds smaller batches continuously
         ScheduleDecision::Breed {
             num_offspring: self.selection_interval as usize,
             next_generation_id: population.current_generation + 1,
