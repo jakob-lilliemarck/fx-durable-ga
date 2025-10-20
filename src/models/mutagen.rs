@@ -543,10 +543,69 @@ pub struct Mutagen {
     temperature: Temperature,
 }
 
+/// Errors that can occur when configuring genetic algorithm mutation parameters.
+///
+/// These errors provide specific feedback about invalid configuration values,
+/// helping you quickly identify and fix parameter setup issues.
+///
+/// # Common Scenarios
+///
+/// - **Out of Range**: Parameter values must be within [0.0, 1.0]
+/// - **Invalid Bounds**: Lower bounds must be ≤ upper bounds for decay strategies
+/// - **Configuration Conflicts**: Incompatible parameter combinations
+///
+/// # Examples
+///
+/// ```rust
+/// use fx_durable_ga::models::{Mutagen, Temperature, MutationRate};
+///
+/// // This will return MutagenError::Temperature
+/// let result = Mutagen::constant(1.5, 0.3); // temperature > 1.0
+/// assert!(result.is_err());
+///
+/// // This will return MutagenError::MutationRate 
+/// let result = Mutagen::constant(0.5, -0.1); // negative mutation rate
+/// assert!(result.is_err());
+///
+/// // Invalid bounds in decay strategies
+/// let result = Temperature::linear(0.2, 0.8, 1.0); // lower > upper
+/// assert!(result.is_err());
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
+///
+/// # Error Handling
+///
+/// ```rust
+/// use fx_durable_ga::models::{Mutagen, MutagenError};
+///
+/// match Mutagen::constant(1.5, 0.3) {
+///     Ok(mutagen) => {
+///         // Use the configured mutagen
+///     }
+///     Err(MutagenError::Temperature(e)) => {
+///         eprintln!("Temperature configuration error: {e}");
+///         // Handle temperature-specific error
+///     }
+///     Err(MutagenError::MutationRate(e)) => {
+///         eprintln!("Mutation rate configuration error: {e}");
+///         // Handle mutation rate-specific error  
+///     }
+/// }
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, thiserror::Error)]
 pub enum MutagenError {
+    /// Mutation rate parameter configuration is invalid.
+    /// 
+    /// This occurs when mutation rate values are outside [0.0, 1.0] or when
+    /// decay strategy bounds are inconsistent (lower > upper).
     #[error("Mutation rate error: {0}")]
     MutationRate(#[from] MutationRateError),
+    
+    /// Temperature parameter configuration is invalid.
+    /// 
+    /// This occurs when temperature values are outside [0.0, 1.0] or when
+    /// decay strategy bounds are inconsistent (lower > upper).
     #[error("Temperature error: {0}")]
     Temperature(#[from] TemperatureError),
 }

@@ -36,8 +36,33 @@ impl GeneBoundError {
     }
 }
 
-/// Defines the bounds and discretization for a single gene in the search space.
-/// Uses fixed-point arithmetic for precise decimal handling.
+/// Defines the search space bounds and discretization for a single gene parameter.
+/// 
+/// Each gene in a genetic algorithm represents one optimization parameter. `GeneBounds`
+/// specifies the valid range of values and how finely to discretize that range.
+/// Uses fixed-point arithmetic internally for precise decimal handling without floating-point errors.
+/// 
+/// # Discretization
+/// 
+/// The genetic algorithm works with discrete gene values (integers from 0 to steps-1).
+/// These are mapped to continuous values in your specified range. More steps provide
+/// finer resolution but increase the search space size.
+/// 
+/// # Examples
+/// 
+/// ```rust
+/// use fx_durable_ga::models::GeneBounds;
+/// 
+/// // Trading strategy parameter: risk tolerance from 0.1% to 2.5% with 0.01% precision
+/// let risk_bounds = GeneBounds::decimal(0.001, 0.025, 241, 5)?;
+/// 
+/// // Portfolio allocation: 0% to 100% in 1% increments
+/// let allocation_bounds = GeneBounds::decimal(0.0, 1.0, 101, 2)?;
+/// 
+/// // Discrete choice: algorithm variant selection (4 options)
+/// let variant_bounds = GeneBounds::integer(0, 3, 4)?;
+/// # Ok::<(), fx_durable_ga::models::GeneBoundError>(())
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct GeneBounds {
