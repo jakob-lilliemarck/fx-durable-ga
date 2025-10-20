@@ -46,7 +46,7 @@ impl Service {
         }
     }
 
-    #[instrument(level = "info", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen, crossover = ?crossover))]
+    #[instrument(level = "debug", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen, crossover = ?crossover))]
     pub async fn new_optimization_request(
         &self,
         type_name: &str,
@@ -163,8 +163,6 @@ impl Service {
         request_id: Uuid,
         genotype_id: Uuid,
     ) -> Result<(), Error> {
-        tracing::info!("Evaluating genotype");
-
         // Get the genotype from the database
         let genotype = self
             .genotypes

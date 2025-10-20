@@ -132,7 +132,7 @@ impl GeneBounds {
     }
 
     /// Converts a normalized [0,1] sample to a discrete gene index [0, steps-1].
-    pub(crate) fn from_sample(&self, sample: f64) -> Gene {
+    pub fn from_sample(&self, sample: f64) -> Gene {
         // Map [0,1] sample to discrete gene index [0, steps-1]
         (sample * (self.steps - 1) as f64).round() as Gene
     }
