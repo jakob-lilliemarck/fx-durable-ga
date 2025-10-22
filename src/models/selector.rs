@@ -87,7 +87,7 @@
 //! - **100-200**: Standard optimization problems
 //! - **200+**: Complex problems requiring high genetic diversity
 
-use crate::models::Genotype;
+use crate::models::{FitnessGoal, Genotype};
 use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 use tracing::instrument;
@@ -228,33 +228,51 @@ mod spin_roulette_tests {
 fn roulette_selection<'a>(
     num_pairs: usize,
     candidates_with_fitness: &'a [(Genotype, Option<f64>)],
+    goal: &FitnessGoal,
     rng: &mut impl rand::Rng,
 ) -> Result<Vec<(&'a Genotype, &'a Genotype)>, SelectionError> {
     let mut parent_pairs = Vec::with_capacity(num_pairs);
 
-    // Filter out genotypes without fitness (borrowed)
-    let evaluated_candidates: Vec<(&Genotype, f64)> = candidates_with_fitness
+    // Filter out genotypes without fitness and calculate sum
+    let raw_fitness_pairs: Vec<(&Genotype, f64)> = candidates_with_fitness
         .iter()
         .filter_map(|(genotype, fitness_opt)| fitness_opt.map(|fitness| (genotype, fitness)))
         .collect();
 
-    if evaluated_candidates.is_empty() {
+    if raw_fitness_pairs.is_empty() {
         return Err(SelectionError::NoValidParents);
     }
 
-    // Check for negative fitness values
-    if evaluated_candidates
-        .iter()
-        .any(|(_, fitness)| *fitness < 0.0)
-    {
+    let sum_fitness: f64 = raw_fitness_pairs.iter().map(|(_, fitness)| *fitness).sum();
+    if sum_fitness <= 0.0 {
         return Err(SelectionError::InvalidFitnessForRoulette);
     }
 
-    // Calculate total fitness
-    let total_fitness: f64 = evaluated_candidates
+    // FIXME: For maximize goals, check for negative fitness values (not allowed in roulette)
+    // TODO: Scale/shift values to handle negative fitness properly in the future
+    if matches!(goal, FitnessGoal::Maximize { .. }) {
+        if raw_fitness_pairs.iter().any(|(_, fitness)| *fitness < 0.0) {
+            return Err(SelectionError::InvalidFitnessForRoulette);
+        }
+    }
+
+    // Transform fitness values for roulette wheel based on goal
+    let evaluated_candidates: Vec<(&Genotype, f64)> = raw_fitness_pairs
         .iter()
-        .map(|(_, fitness)| *fitness)
-        .sum();
+        .map(|(genotype, fitness)| {
+            let weight = match goal {
+                FitnessGoal::Maximize { .. } => *fitness,
+                FitnessGoal::Minimize { .. } => {
+                    // Invert: smaller fitness values get larger weights
+                    1.0 - (fitness / sum_fitness)
+                }
+            };
+            (*genotype, weight)
+        })
+        .collect();
+
+    // Calculate total fitness for roulette wheel
+    let total_fitness: f64 = evaluated_candidates.iter().map(|(_, weight)| *weight).sum();
 
     if total_fitness <= 0.0 {
         return Err(SelectionError::InvalidFitnessForRoulette);
@@ -279,6 +297,7 @@ fn tournament_selection<'a>(
     num_pairs: usize,
     tournament_size: usize,
     candidates_with_fitness: &'a [(Genotype, Option<f64>)],
+    goal: &FitnessGoal,
     rng: &mut impl rand::Rng,
 ) -> Result<Vec<(&'a Genotype, &'a Genotype)>, SelectionError> {
     let mut parent_pairs = Vec::with_capacity(num_pairs);
@@ -305,8 +324,10 @@ fn tournament_selection<'a>(
         // Tournament for parent 1
         let mut parent1_idx = indices[0];
         for &idx in &indices[0..tournament_size] {
-            // First iteration compares indices[0] with itself (harmless, always false)
-            if evaluated_candidates[idx].1 > evaluated_candidates[parent1_idx].1 {
+            if goal.is_better(
+                evaluated_candidates[idx].1,
+                evaluated_candidates[parent1_idx].1,
+            ) {
                 parent1_idx = idx;
             }
         }
@@ -314,8 +335,10 @@ fn tournament_selection<'a>(
         // Tournament for parent 2
         let mut parent2_idx = indices[tournament_size];
         for &idx in &indices[tournament_size..(tournament_size * 2)] {
-            // First iteration compares indices[tournament_size] with itself (harmless, always false)
-            if evaluated_candidates[idx].1 > evaluated_candidates[parent2_idx].1 {
+            if goal.is_better(
+                evaluated_candidates[idx].1,
+                evaluated_candidates[parent2_idx].1,
+            ) {
                 parent2_idx = idx;
             }
         }
@@ -330,30 +353,30 @@ fn tournament_selection<'a>(
 }
 
 /// Configuration for parent selection in genetic algorithms.
-/// 
+///
 /// The selector determines how parent pairs are chosen from the candidate population
 /// for breeding operations. Different selection methods bias toward higher-fitness
 /// candidates to varying degrees, affecting the evolutionary pressure.
-/// 
+///
 /// # Selection Pressure
-/// 
-/// **Tournament Selection**: Moderate to high selection pressure. Larger tournament 
+///
+/// **Tournament Selection**: Moderate to high selection pressure. Larger tournament
 /// sizes increase pressure by making it more likely that high-fitness candidates win.
-/// 
+///
 /// **Roulette Selection**: Proportional selection pressure. Candidates are chosen
 /// with probability proportional to their fitness values.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```rust
 /// use fx_durable_ga::models::Selector;
-/// 
+///
 /// // Tournament selection with size 3 (moderate selection pressure)
 /// let tournament_selector = Selector::tournament(3, 100);
-/// 
+///
 /// // Roulette wheel selection (fitness-proportionate)
 /// let roulette_selector = Selector::roulette(100);
-/// 
+///
 /// // High selection pressure tournament
 /// let elite_selector = Selector::tournament(7, 50);
 /// ```
@@ -367,40 +390,40 @@ pub struct Selector {
 }
 
 /// Selection algorithms available for parent selection.
-/// 
+///
 /// Each method has different characteristics and is suitable for different
 /// optimization scenarios.
 #[derive(Debug, Deserialize, Serialize)]
 #[cfg_attr(test, derive(Clone, PartialEq, Eq))]
 pub enum SelectionMethod {
     /// Tournament selection runs competitions between randomly selected candidates.
-    /// 
+    ///
     /// Winners are chosen based on fitness comparison. Larger tournament sizes
     /// increase selection pressure, making it more likely that high-fitness
     /// candidates are selected.
-    /// 
+    ///
     /// **Best for**: Problems where you want consistent convergence with
     /// adjustable selection pressure. Works well with any fitness distribution.
-    /// 
+    ///
     /// **Tournament size guidelines**:
     /// - Size 2-3: Low to moderate selection pressure, good exploration
-    /// - Size 4-5: Moderate selection pressure, balanced exploration/exploitation  
+    /// - Size 4-5: Moderate selection pressure, balanced exploration/exploitation
     /// - Size 6+: High selection pressure, strong exploitation
-    Tournament { 
+    Tournament {
         /// Number of candidates that compete in each tournament.
         /// Must be at least 1. Requires at least `size * 2` evaluated candidates.
-        size: usize 
+        size: usize,
     },
-    
+
     /// Roulette wheel selection chooses candidates with probability proportional to fitness.
-    /// 
+    ///
     /// Also known as fitness-proportionate selection. Candidates with higher
     /// fitness values have proportionally higher chances of being selected.
-    /// 
+    ///
     /// **Best for**: Problems where fitness values are meaningful as proportions
     /// and you want selection probability to directly reflect fitness differences.
-    /// 
-    /// **Requirements**: 
+    ///
+    /// **Requirements**:
     /// - All fitness values must be non-negative
     /// - At least one candidate must have positive fitness
     /// - Works best when fitness values have reasonable range (not too extreme)
@@ -408,39 +431,39 @@ pub enum SelectionMethod {
 }
 
 /// Errors that can occur during parent selection.
-/// 
-/// These errors help diagnose configuration or data issues that prevent 
+///
+/// These errors help diagnose configuration or data issues that prevent
 /// successful parent selection for breeding operations.
 #[derive(Debug, thiserror::Error)]
 #[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum SelectionError {
     /// No candidates with fitness values are available for selection.
-    /// 
+    ///
     /// This occurs when all candidates in the population have `None` fitness values,
     /// meaning no candidates have been evaluated yet.
-    /// 
+    ///
     /// **Solution**: Ensure candidates are evaluated before attempting selection.
     #[error("No valid parents available for selection")]
     NoValidParents,
-    
+
     /// Tournament selection requires more candidates than are available.
-    /// 
+    ///
     /// Tournament selection needs at least `tournament_size * 2` evaluated candidates
     /// to run two separate tournaments (one for each parent).
-    /// 
+    ///
     /// **Solutions**:
     /// - Reduce the tournament size
     /// - Increase the population size
     /// - Ensure more candidates are evaluated before selection
     #[error("Insufficient candidates for tournament selection: need {needed}, got {available}")]
     InsufficientCandidates { needed: usize, available: usize },
-    
+
     /// Roulette selection cannot proceed due to invalid fitness values.
-    /// 
+    ///
     /// This error occurs when:
     /// - Any candidate has negative fitness (< 0.0)
     /// - All candidates have zero fitness (total fitness = 0.0)
-    /// 
+    ///
     /// **Solutions**:
     /// - Ensure all fitness values are non-negative
     /// - Verify that at least some candidates have positive fitness
@@ -448,9 +471,9 @@ pub enum SelectionError {
     /// - Switch to tournament selection if fitness scaling is problematic
     #[error("All candidates have zero or negative fitness for roulette selection")]
     InvalidFitnessForRoulette,
-    
+
     /// Internal roulette wheel algorithm failure.
-    /// 
+    ///
     /// This should not occur under normal conditions and indicates a bug
     /// in the roulette selection implementation.
     #[error("Internal error: roulette wheel failed to select candidate")]
@@ -459,42 +482,42 @@ pub enum SelectionError {
 
 impl Selector {
     /// Creates a tournament selector with the specified tournament size.
-    /// 
+    ///
     /// Tournament selection randomly selects groups of candidates and chooses
     /// the fittest from each group. This provides consistent selection pressure
     /// that can be tuned via the tournament size.
-    /// 
+    ///
     /// # Parameters
-    /// 
+    ///
     /// * `tournament_size` - Number of candidates competing in each tournament.
     ///   Larger values increase selection pressure. Must be at least 1.
     /// * `sample_size` - Number of candidates to sample from the population.
     ///   Should be large enough to provide genetic diversity.
-    /// 
+    ///
     /// # Selection Pressure Guide
-    /// 
+    ///
     /// * **Size 2**: Weak selection pressure, high exploration
-    /// * **Size 3-4**: Moderate selection pressure, balanced search  
+    /// * **Size 3-4**: Moderate selection pressure, balanced search
     /// * **Size 5-7**: Strong selection pressure, focused exploitation
     /// * **Size 8+**: Very strong selection pressure, may cause premature convergence
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use fx_durable_ga::models::Selector;
-    /// 
+    ///
     /// // Balanced exploration and exploitation
     /// let balanced = Selector::tournament(3, 100);
-    /// 
+    ///
     /// // High exploration for complex search spaces
     /// let exploratory = Selector::tournament(2, 150);
-    /// 
+    ///
     /// // Strong exploitation for fine-tuning
     /// let exploitative = Selector::tournament(6, 80);
     /// ```
-    /// 
+    ///
     /// # Requirements
-    /// 
+    ///
     /// The population must have at least `tournament_size * 2` evaluated candidates
     /// to perform selection, as each parent pair requires two separate tournaments.
     pub fn tournament(tournament_size: usize, sample_size: usize) -> Self {
@@ -507,44 +530,44 @@ impl Selector {
     }
 
     /// Creates a roulette wheel selector for fitness-proportionate selection.
-    /// 
-    /// Roulette selection chooses candidates with probability directly proportional 
-    /// to their fitness values. This means a candidate with fitness 6.0 is twice 
+    ///
+    /// Roulette selection chooses candidates with probability directly proportional
+    /// to their fitness values. This means a candidate with fitness 6.0 is twice
     /// as likely to be selected as one with fitness 3.0.
-    /// 
+    ///
     /// # Parameters
-    /// 
+    ///
     /// * `sample_size` - Number of candidates to sample from the population.
     ///   Larger samples provide better representation of the fitness distribution.
-    /// 
+    ///
     /// # When to Use
-    /// 
+    ///
     /// Roulette selection works best when:
     /// * Fitness values represent meaningful proportional differences
-    /// * You want selection probability to directly reflect fitness ratios  
+    /// * You want selection probability to directly reflect fitness ratios
     /// * The fitness landscape has reasonable dynamic range (not too extreme)
     /// * You need predictable selection behavior based on fitness distributions
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use fx_durable_ga::models::Selector;
-    /// 
+    ///
     /// // Standard roulette selection
     /// let roulette = Selector::roulette(100);
-    /// 
+    ///
     /// // Larger sample for better fitness representation
     /// let large_sample = Selector::roulette(200);
     /// ```
-    /// 
+    ///
     /// # Fitness Requirements
-    /// 
+    ///
     /// * All fitness values must be non-negative (≥ 0.0)
     /// * At least one candidate must have positive fitness (> 0.0)
     /// * Total fitness across all candidates must be positive
-    /// 
+    ///
     /// # Performance Considerations
-    /// 
+    ///
     /// Roulette selection may struggle with:
     /// * Fitness values with extreme ranges (e.g., 0.001 vs 1000.0)
     /// * Populations where most candidates have very similar fitness
@@ -562,38 +585,39 @@ impl Selector {
         &self,
         num_pairs: usize,
         candidates_with_fitness: &'a [(Genotype, Option<f64>)],
+        goal: &FitnessGoal,
     ) -> Result<Vec<(&'a Genotype, &'a Genotype)>, SelectionError> {
         let mut rng = rand::rng();
         match self.method {
             SelectionMethod::Tournament { size } => {
-                tournament_selection(num_pairs, size, candidates_with_fitness, &mut rng)
+                tournament_selection(num_pairs, size, candidates_with_fitness, goal, &mut rng)
             }
             SelectionMethod::Roulette => {
-                roulette_selection(num_pairs, candidates_with_fitness, &mut rng)
+                roulette_selection(num_pairs, candidates_with_fitness, goal, &mut rng)
             }
         }
     }
 
     /// Returns the configured sample size for this selector.
-    /// 
-    /// The sample size determines how many candidates are drawn from the 
+    ///
+    /// The sample size determines how many candidates are drawn from the
     /// population before performing selection. Larger sample sizes provide
     /// better representation of the population's fitness distribution but
     /// may increase computational cost.
-    /// 
+    ///
     /// # Returns
-    /// 
+    ///
     /// The sample size as a signed integer for compatibility with database
     /// query operations.
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use fx_durable_ga::models::Selector;
-    /// 
+    ///
     /// let selector = Selector::tournament(3, 150);
     /// assert_eq!(selector.sample_size(), 150);
-    /// 
+    ///
     /// let roulette = Selector::roulette(75);
     /// assert_eq!(roulette.sample_size(), 75);
     /// ```
@@ -666,7 +690,8 @@ mod selector_tests {
             ),
         ];
 
-        let result = tournament_selection(2, 2, &candidates, &mut rng);
+        let goal = &crate::models::FitnessGoal::maximize(0.9).unwrap();
+        let result = tournament_selection(2, 2, &candidates, goal, &mut rng);
         assert!(result.is_ok());
 
         let pairs = result.unwrap();
@@ -699,7 +724,8 @@ mod selector_tests {
             ),
         ];
 
-        let result = selector.select_parents(2, &candidates);
+        let goal = &crate::models::FitnessGoal::maximize(0.9).unwrap();
+        let result = selector.select_parents(2, &candidates, goal);
         assert!(result.is_ok());
 
         let pairs = result.unwrap();
@@ -721,7 +747,8 @@ mod selector_tests {
             Some(1.0),
         )];
 
-        let result = selector.select_parents(1, &candidates);
+        let goal = &crate::models::FitnessGoal::maximize(0.9).unwrap();
+        let result = selector.select_parents(1, &candidates, goal);
         assert_eq!(
             result,
             Err(SelectionError::InsufficientCandidates {
@@ -740,7 +767,8 @@ mod selector_tests {
             None,
         )];
 
-        let result = selector.select_parents(1, &candidates);
+        let goal = &crate::models::FitnessGoal::maximize(0.9).unwrap();
+        let result = selector.select_parents(1, &candidates, goal);
         assert_eq!(result, Err(SelectionError::NoValidParents));
     }
 
@@ -759,7 +787,8 @@ mod selector_tests {
             ),
         ];
 
-        let result = selector.select_parents(1, &candidates);
+        let goal = &crate::models::FitnessGoal::maximize(0.9).unwrap();
+        let result = selector.select_parents(1, &candidates, goal);
         assert_eq!(result, Err(SelectionError::InvalidFitnessForRoulette));
     }
 
@@ -772,7 +801,8 @@ mod selector_tests {
             Some(0.0),
         )];
 
-        let result = selector.select_parents(1, &candidates);
+        let goal = &crate::models::FitnessGoal::maximize(0.9).unwrap();
+        let result = selector.select_parents(1, &candidates, goal);
         assert_eq!(result, Err(SelectionError::InvalidFitnessForRoulette));
     }
 

@@ -43,3 +43,7 @@ tracing-subscriber = { version = "0.3.19", features = ["json"] }
 [[example]]
 name = "point-search"
 path = "examples/point_search.rs"
+
+[[example]]
+name = "neural-architecture-search"
+path = "examples/neural_architecture_search/examples/neural_architecture_search.rs"

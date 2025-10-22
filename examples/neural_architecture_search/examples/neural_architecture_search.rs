@@ -3,7 +3,7 @@
 //! This example demonstrates how to use the fx_durable_ga crate to optimize neural network
 //! architectures for regression tasks. We search over architectural parameters like:
 //! - Hidden layer size
-//! - Number of hidden layers  
+//! - Number of hidden layers
 //! - Activation function type
 //! - Whether to use bias
 //! - Learning rate
@@ -12,7 +12,7 @@
 //! and returns the validation loss as fitness (lower loss = better fitness).
 
 use anyhow::Result;
-use burn::backend::{ndarray::NdArray, Autodiff};
+use burn::backend::{Autodiff, ndarray::NdArray};
 use fx_durable_ga::{
     bootstrap::bootstrap,
     models::{
@@ -33,6 +33,10 @@ use std::{env, sync::Arc};
 use uuid::Uuid;
 
 type Backend = Autodiff<NdArray>;
+
+const EPOCHS: usize = 50;
+const TIMEOUT_SECONDS: u64 = 1800;
+const FITNESS_TARGET: f64 = 0.05;
 
 /// Neural network architecture representation for GA optimization.
 ///
@@ -59,17 +63,17 @@ impl Encodeable for NeuralArchitecture {
     /// Defines the search space for each architectural parameter.
     ///
     /// Gene 0: hidden_size (32, 64, 128, 256) -> encoded as 0-3
-    /// Gene 1: num_hidden_layers (1, 2, 3) -> encoded as 0-2  
+    /// Gene 1: num_hidden_layers (1, 2, 3) -> encoded as 0-2
     /// Gene 2: activation_fn (ReLU, GELU, Sigmoid) -> encoded as 0-2
     /// Gene 3: use_bias (false, true) -> encoded as 0-1
     /// Gene 4: learning_rate (1e-4, 1e-3, 1e-2) -> encoded as 0-2
     fn morphology() -> Vec<GeneBounds> {
         vec![
-            GeneBounds::integer(0, 3, 4).unwrap(),   // hidden_size: 4 options (32, 64, 128, 256)
-            GeneBounds::integer(0, 2, 3).unwrap(),   // num_hidden_layers: 3 options (1, 2, 3)
-            GeneBounds::integer(0, 2, 3).unwrap(),   // activation_fn: 3 options (ReLU, GELU, Sigmoid)
-            GeneBounds::integer(0, 1, 2).unwrap(),   // use_bias: 2 options (false, true)
-            GeneBounds::integer(0, 2, 3).unwrap(),   // learning_rate: 3 options (1e-4, 1e-3, 1e-2)
+            GeneBounds::integer(0, 3, 4).unwrap(), // hidden_size: 4 options (32, 64, 128, 256)
+            GeneBounds::integer(0, 2, 3).unwrap(), // num_hidden_layers: 3 options (1, 2, 3)
+            GeneBounds::integer(0, 2, 3).unwrap(), // activation_fn: 3 options (ReLU, GELU, Sigmoid)
+            GeneBounds::integer(0, 1, 2).unwrap(), // use_bias: 2 options (false, true)
+            GeneBounds::integer(0, 2, 3).unwrap(), // learning_rate: 3 options (1e-4, 1e-3, 1e-2)
         ]
     }
 
@@ -77,7 +81,7 @@ impl Encodeable for NeuralArchitecture {
     fn encode(&self) -> Vec<i64> {
         let hidden_size_idx = match self.hidden_size {
             32 => 0,
-            64 => 1, 
+            64 => 1,
             128 => 2,
             256 => 3,
             _ => 1, // Default to 64
@@ -101,7 +105,13 @@ impl Encodeable for NeuralArchitecture {
             2
         };
 
-        vec![hidden_size_idx, layers_idx, activation_idx, bias_idx, lr_idx]
+        vec![
+            hidden_size_idx,
+            layers_idx,
+            activation_idx,
+            bias_idx,
+            lr_idx,
+        ]
     }
 
     /// Converts genotype (integer genes) to phenotype (NeuralArchitecture).
@@ -158,7 +168,7 @@ impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
         Box::pin(async move {
             if terminated.is_terminated().await {
-                return Ok(0.0); // Return poor fitness if terminated
+                return Ok(f64::MAX);
             }
 
             // Convert to Burn model config
@@ -172,26 +182,8 @@ impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
             // Create device
             let device: <Backend as burn::prelude::Backend>::Device = Default::default();
 
-            // Train the architecture and get validation loss
-            // Use fewer epochs for speed (3-5 epochs should be enough to see differences)
-            let validation_loss = train_silent::<Backend>(model_config, device, 3);
-
-            // Convert loss to fitness: lower loss = higher fitness
-            // Use exponential decay to reward significantly better architectures
-            let fitness = (-validation_loss as f64).exp().min(1.0).max(0.001);
-
-            println!(
-                "Architecture: hidden_size={}, layers={}, activation={:?}, bias={}, lr={:.0e} -> loss={:.4}, fitness={:.4}",
-                phenotype.hidden_size,
-                phenotype.num_hidden_layers, 
-                phenotype.activation_fn,
-                phenotype.use_bias,
-                phenotype.learning_rate,
-                validation_loss,
-                fitness
-            );
-
-            Ok(fitness)
+            let validation_loss = train_silent::<Backend>(model_config, device, EPOCHS);
+            Ok(validation_loss as f64)
         })
     }
 }
@@ -202,7 +194,7 @@ async fn main() -> Result<()> {
 
     // Initialize logging to see optimization progress
     tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
+        .with_max_level(tracing::Level::DEBUG)
         .init();
 
     println!("🧠 Neural Architecture Search with Genetic Algorithms");
@@ -245,7 +237,7 @@ async fn main() -> Result<()> {
 
     // Setup job handling and initiate workers
     let host_id = Uuid::parse_str("00000000-0000-0000-0000-123456789abc").expect("valid uuid");
-    let hold_for = Duration::from_secs(300);
+    let hold_for = Duration::from_secs(600);
     let mut jobs_listener = fx_mq_jobs::Listener::new(
         pool.clone(),
         optimization::register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
@@ -259,34 +251,25 @@ async fn main() -> Result<()> {
         Ok::<(), anyhow::Error>(())
     });
 
-    // Start neural architecture search optimization
-    println!("🚀 Starting neural architecture search...");
-    
     service
         .new_optimization_request(
             NeuralArchitecture::NAME,
             NeuralArchitecture::HASH,
-            FitnessGoal::maximize(0.95)?, // Stop when fitness reaches 95% (very good architecture found)
-            Schedule::generational(50, 5), // 50 generations, 5 parallel evaluations
-            Selector::tournament(3, 20),   // Tournament selection (size 3, population 20)
-            Mutagen::new(
-                Temperature::exponential(0.9, 0.1, 0.9, 3)?, // Cooling schedule for mutations
-                MutationRate::exponential(0.4, 0.1, 0.9, 3)?, // Adaptive mutation rate
-            ),
-            Crossover::uniform(0.6)?, // 60% uniform crossover rate
-            Distribution::random(20), // Random initial population of 20 architectures
+            FitnessGoal::minimize(FITNESS_TARGET)?,
+            Schedule::generational(10, 10),
+            Selector::tournament(5, 15),
+            Mutagen::new(Temperature::constant(0.8)?, MutationRate::constant(0.4)?),
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(15),
         )
         .await?;
 
-    println!("✅ Neural architecture search started!");
-    println!("⏱️  This will run for a maximum of 5 minutes to find optimal architectures...");
-
-    // Run for a maximum of 5 minutes
-    let timeout_duration = Duration::from_secs(300);
+    // Run for a maximum of 60 minutes
+    let timeout_duration = Duration::from_secs(3600);
     let start_time = std::time::Instant::now();
 
     loop {
-        tokio::time::sleep(Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(TIMEOUT_SECONDS)).await;
 
         // Check if we've exceeded the timeout
         if start_time.elapsed() >= timeout_duration {
@@ -299,7 +282,7 @@ async fn main() -> Result<()> {
     }
 
     println!("🎯 Check the logs above to see which architectures performed best!");
-    println!("💡 Lower validation loss with higher fitness indicates better architectures.");
+    println!("💡 Lower validation loss indicates better architectures.");
 
     Ok(())
 }

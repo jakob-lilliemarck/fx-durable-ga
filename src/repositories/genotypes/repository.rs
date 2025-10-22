@@ -31,7 +31,6 @@ impl Repository {
     ) -> impl Future<Output = Result<Population, Error>> {
         super::queries::get_population(&self.pool, request_id)
     }
-
     /// Searches genotypes with filtering and ordering options.
     #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
     pub(crate) fn search_genotypes(

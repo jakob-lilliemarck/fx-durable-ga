@@ -1,8 +1,8 @@
 //! # Point Optimization Example
 //!
 //! This example demonstrates how to use the fx_durable_ga crate to solve an optimization problem
-//! using genetic algorithms. We'll optimize 3D coordinates to find points that are at a specific
-//! target distance from the origin.
+//! using genetic algorithms. We'll optimize 3D coordinates to find points that are closest
+//! to a target point using unbounded fitness values (raw distance).
 //!
 //! ## Key Concepts
 //!
@@ -32,7 +32,7 @@ use uuid::Uuid;
 ///
 /// This struct defines how we encode/decode between genetic representation (integers)
 /// and the actual problem space (floating-point coordinates).
-#[derive(Debug)]
+#[derive(Debug, Copy, Clone)]
 struct Point {
     x: f64,
     y: f64,
@@ -89,42 +89,40 @@ impl Encodeable for Point {
     }
 }
 
-/// Fitness evaluator that rewards points at a specific distance from the origin.
+/// Fitness evaluator that finds points closest to the target point.
 ///
-/// The target distance is ~2.1943 (distance from origin to point (0.5, 0.75, 2.0)).
-/// Points closer to this target distance receive higher fitness scores.
-struct PointDistanceEvaluator;
+/// Returns the raw distance to target - lower distances are better (minimization problem).
+struct PointDistanceEvaluator {
+    target_point: Point,
+}
 
 impl Evaluator<Point> for PointDistanceEvaluator {
-    /// Calculates fitness based on how close a point's distance from origin matches the target.
+    /// Returns the raw distance to the target point.
     ///
-    /// Higher fitness (closer to 1.0) means the point is closer to the target distance.
+    /// Lower distances are better - this is a minimization problem.
     fn fitness<'a>(
         &self,
         phenotype: Point,
         terminated: &'a Box<dyn Terminated>,
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
+        let target = self.target_point;
         Box::pin(async move {
             if terminated.is_terminated().await {
-                // abort
+                return Ok(f64::MAX); // Return worst possible fitness if terminated
             }
 
-            // Calculate distance from origin
-            let dist =
-                (phenotype.x * phenotype.x + phenotype.y * phenotype.y + phenotype.z * phenotype.z)
-                    .sqrt();
+            // Calculate direct distance to target point
+            let dx = phenotype.x - target.x;
+            let dy = phenotype.y - target.y;
+            let dz = phenotype.z - target.z;
+            let distance = (dx * dx + dy * dy + dz * dz).sqrt();
 
-            // Target distance (distance from origin to optimal point (0.5, 0.75, 2.0))
-            let target_dist = (0.5_f64.powi(2) + 0.75_f64.powi(2) + 2.0_f64.powi(2)).sqrt(); // ≈ 2.1943
-
-            // Fitness 1.0 if distance matches target, decreases as we deviate
-            let distance_diff = (dist - target_dist).abs();
-            let fitness = 1.0 / (1.0 + distance_diff);
-
-            Ok(fitness)
+            Ok(distance) // Raw distance - lower is better
         })
     }
 }
+
+const TIMEOUT_SECONDS: u64 = 900;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -147,10 +145,16 @@ async fn main() -> Result<()> {
         .await?;
 
     // Bootstrap the optimization service and register our problem type
+    let target_point = Point {
+        x: 1.0,
+        y: 1.5,
+        z: 2.5,
+    }; // Target point to find
+    let evaluator = PointDistanceEvaluator { target_point };
     let service = Arc::new(
         bootstrap(pool.clone())
             .await?
-            .register::<Point, _>(PointDistanceEvaluator)
+            .register::<Point, _>(evaluator)
             .await?
             .build(),
     );
@@ -170,7 +174,7 @@ async fn main() -> Result<()> {
 
     // setup job handling and initiate workers
     let host_id = Uuid::parse_str("ba3a4752-c4ce-4129-aa1d-55a0b2107e68").expect("valid uuid");
-    let hold_for = Duration::from_secs(300);
+    let hold_for = Duration::from_secs(TIMEOUT_SECONDS);
     let mut jobs_listener = fx_mq_jobs::Listener::new(
         pool.clone(),
         optimization::register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
@@ -190,21 +194,17 @@ async fn main() -> Result<()> {
             .new_optimization_request(
                 Point::NAME,
                 Point::HASH,
-                FitnessGoal::maximize(0.99)?, // Stop when fitness reaches 99%
-                Schedule::generational(100, 10), // 100 generations, 10 parallel
-                Selector::tournament(3, 50),  // Tournament selection (size 3, pop 50)
-                Mutagen::new(
-                    Temperature::exponential(0.8, 0.4, 0.8, 2)?, // Cooling schedule
-                    MutationRate::exponential(0.5, 0.3, 0.8, 2)?, // Adaptive mutation rate
-                ),
-                Crossover::uniform(0.5)?, // 50% uniform crossover rate
-                Distribution::random(50), // Random initial population of 50
+                FitnessGoal::minimize(0.01)?, // Stop when distance ≤ 0.01
+                Schedule::generational(200, 30),
+                Selector::tournament(7, 100),
+                Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.2)?),
+                Crossover::uniform(0.5)?,
+                Distribution::latin_hypercube(750),
             )
             .await?;
     }
 
-    // Run for a maximum of 5 seconds
-    let timeout_duration = Duration::from_secs(60);
+    let timeout_duration = Duration::from_secs(TIMEOUT_SECONDS);
     let start_time = std::time::Instant::now();
 
     loop {

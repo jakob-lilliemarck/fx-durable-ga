@@ -7,7 +7,7 @@ use burn::{
     prelude::*,
     record::{CompactRecorder, NoStdTrainingRecorder},
     tensor::backend::AutodiffBackend,
-    train::{LearnerBuilder, metric::LossMetric},
+    train::{metric::LossMetric, LearnerBuilder},
 };
 
 #[derive(Config, Debug)]
@@ -103,10 +103,10 @@ pub fn train_silent<B: AutodiffBackend>(
     // Config for fast training
     let optimizer = AdamConfig::new();
     let mut config = ExpConfig::new(optimizer);
-    config.num_epochs = epochs.min(10); // Cap epochs for speed
+    config.num_epochs = epochs;
     config.batch_size = 128;
     config.num_workers = 1;
-    
+
     let model = model_config.init(&device);
     B::seed(&device, config.seed);
 
@@ -134,43 +134,46 @@ pub fn train_silent<B: AutodiffBackend>(
         .build(valid_dataset);
 
     // Create a temporary directory for this training run
-    let temp_dir = format!("/tmp/burn-silent-{}-{}", std::process::id(), rand::random::<u32>());
+    let temp_dir = format!(
+        "/tmp/burn-silent-{}-{}",
+        std::process::id(),
+        rand::random::<u32>()
+    );
     create_artifact_dir(&temp_dir);
 
-    // Minimal learner setup - this might still show brief TUI
     let learner = LearnerBuilder::new(&temp_dir)
-        .metric_train_numeric(LossMetric::new())
         .metric_valid_numeric(LossMetric::new())
-        .with_file_checkpointer(CompactRecorder::new())
         .learning_strategy(LearningStrategy::SingleDevice(device.clone()))
         .num_epochs(config.num_epochs)
-        // No .summary() call - should reduce TUI
         .build(model, config.optimizer.init(), 1e-3);
 
     let model_trained = learner.fit(dataloader_train, dataloader_test);
-    
-    // For now, return a loss that varies with architecture but represents training
-    // The actual training did happen, we're just not extracting the exact loss due to type complexity
-    // This gives us a baseline that varies with architecture complexity
-    let hidden_size = model_config.hidden_size;
-    
-    // Base loss varies with training epochs (fewer epochs = higher loss)
-    let epoch_factor = (epochs as f32) / 10.0;
-    let base_loss = 1.2 - (epoch_factor * 0.3).min(0.8);
-    
-    // Architecture complexity affects performance 
-    // Too small or too large networks perform worse
-    let optimal_size = 64.0;
-    let size_penalty = ((hidden_size as f32 - optimal_size) / optimal_size).abs() * 0.2;
-    
-    let final_loss = (base_loss + size_penalty).max(0.1);
-    
-    // Add some randomness to simulate actual training variance
-    let noise = (rand::random::<f32>() - 0.5) * 0.1;
-    let avg_loss = (final_loss + noise).max(0.1);
-    
-    // Clean up
+
+    let model = model_trained.model;
+
+    let mut total_loss = 0.0;
+    let mut num_batches = 0;
+
+    let valid_data = full_dataset.validation();
+    let valid_dataset = InMemDataset::new(valid_data);
+    let batcher = HousingBatcher::<B::InnerBackend>::new(device.clone());
+    let dataloader = DataLoaderBuilder::new(batcher)
+        .batch_size(config.batch_size)
+        .num_workers(1)
+        .build(valid_dataset);
+
+    for batch in dataloader.iter() {
+        let output = model.forward(batch.inputs);
+        let targets = batch.targets.unsqueeze_dim(1);
+        let loss = (output - targets).powf_scalar(2.0).mean();
+        let loss_value: f32 = loss.into_scalar().elem();
+        total_loss += loss_value;
+        num_batches += 1;
+    }
+
+    let avg_loss = total_loss / num_batches as f32;
+
     std::fs::remove_dir_all(&temp_dir).ok();
-    
+
     avg_loss
 }

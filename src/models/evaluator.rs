@@ -8,7 +8,7 @@ pub trait Terminated: Send + Sync {
 }
 
 /// Objective function that evaluates phenotypes and returns fitness scores.
-/// Fitness values should be between 0.0 and 1.0 for optimal selection performance.
+/// Fitness values can be any finite f64 values appropriate for your problem domain.
 pub trait Evaluator<P> {
     /// Evaluates a phenotype and returns its fitness score.
     /// Use the terminated checker for long-running evaluations to support early termination.

@@ -3,35 +3,35 @@ use serde::{Deserialize, Serialize};
 use tracing::instrument;
 
 /// Controls when new generations are bred during optimization.
-/// 
+///
 /// Schedule determines how the genetic algorithm progresses through generations,
 /// supporting both traditional generational and continuous rolling strategies.
-/// 
+///
 /// # Configuration Parameters
-/// 
+///
 /// - `max_evaluations`: Total number of genotype evaluations before termination
 /// - `population_size`: Maximum number of genotypes active at any time
 /// - `selection_interval`: Number of offspring bred per breeding cycle
-/// 
+///
 /// # Breeding Strategies
-/// 
+///
 /// **Generational**: Breeds entire population at once, waits for all to complete.
 /// Use when evaluations are fast or you need synchronized generations.
-/// 
+///
 /// **Rolling**: Breeds smaller batches continuously as slots become available.
 /// Use when evaluations are slow or you want faster iteration.
-/// 
+///
 /// # Examples
-/// 
+///
 /// ```rust
 /// use fx_durable_ga::models::Schedule;
-/// 
+///
 /// // Traditional generational approach: 10 generations of 50 genotypes each
 /// let generational = Schedule::generational(10, 50);
-/// 
+///
 /// // Rolling approach: breed 10 genotypes whenever 10 slots free up
 /// let rolling = Schedule::rolling(500, 50, 10);
-/// 
+///
 /// // Fast rolling: breed single genotypes continuously
 /// let continuous = Schedule::rolling(1000, 100, 1);
 /// ```
@@ -50,7 +50,7 @@ pub struct Schedule {
 }
 
 /// Decision about what action to take based on current population state.
-/// 
+///
 /// Returned by [`Schedule::should_breed`] to indicate the next optimization step.
 /// Used internally by the genetic algorithm engine to coordinate breeding cycles.
 #[derive(Debug, PartialEq)]
@@ -72,33 +72,33 @@ pub enum ScheduleDecision {
 
 impl Schedule {
     /// Creates a generational schedule that breeds the entire population each generation.
-    /// 
-    /// In generational mode, the algorithm waits for all genotypes in a generation 
-    /// to complete evaluation before breeding the next generation. This provides 
+    ///
+    /// In generational mode, the algorithm waits for all genotypes in a generation
+    /// to complete evaluation before breeding the next generation. This provides
     /// clear generational boundaries and ensures fair selection pressure.
-    /// 
+    ///
     /// # Parameters
-    /// 
+    ///
     /// - `max_generations`: Number of generations to evolve
     /// - `population_size`: Number of genotypes per generation
-    /// 
+    ///
     /// Total evaluations will be `max_generations * population_size`.
-    /// 
+    ///
     /// # When to Use
-    /// 
+    ///
     /// - Fast evaluation functions (< 1 second per genotype)
     /// - When you need synchronized generations for analysis
     /// - Traditional genetic algorithm behavior
     /// - Batch processing scenarios
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use fx_durable_ga::models::Schedule;
-    /// 
+    ///
     /// // Small test run: 5 generations of 20 genotypes = 100 total evaluations
     /// let test_schedule = Schedule::generational(5, 20);
-    /// 
+    ///
     /// // Production run: 50 generations of 100 genotypes = 5000 evaluations
     /// let production_schedule = Schedule::generational(50, 100);
     /// ```
@@ -111,49 +111,49 @@ impl Schedule {
     }
 
     /// Creates a rolling schedule that breeds in smaller batches at regular intervals.
-    /// 
+    ///
     /// In rolling mode, new genotypes are bred whenever slots become available,
     /// providing continuous optimization without waiting for full generations.
     /// This enables faster feedback and more efficient resource utilization.
-    /// 
+    ///
     /// # Parameters
-    /// 
+    ///
     /// - `max_evaluations`: Total evaluation budget
     /// - `population_size`: Maximum concurrent genotypes
     /// - `selection_interval`: Genotypes bred per cycle
-    /// 
+    ///
     /// # When to Use
-    /// 
+    ///
     /// - Slow evaluation functions (> 10 seconds per genotype)
     /// - Limited computational resources
     /// - When you want faster iteration and feedback
     /// - Distributed or asynchronous evaluation
-    /// 
+    ///
     /// # Parameter Guidelines
-    /// 
+    ///
     /// **Selection Interval Size:**
     /// - Small (1-5): Fastest feedback, more breeding overhead
     /// - Medium (10-25): Balanced performance and efficiency
     /// - Large (50+): Approaching generational behavior
-    /// 
+    ///
     /// **Population to Interval Ratio:**
-    /// - High ratio (10:1): More diversity, slower convergence  
+    /// - High ratio (10:1): More diversity, slower convergence
     /// - Low ratio (2:1): Faster convergence, less exploration
-    /// 
+    ///
     /// # Examples
-    /// 
+    ///
     /// ```rust
     /// use fx_durable_ga::models::Schedule;
-    /// 
+    ///
     /// // Fast iteration: breed 5 genotypes whenever 5 slots open
     /// let fast_rolling = Schedule::rolling(1000, 50, 5);
-    /// 
+    ///
     /// // Balanced: breed 20% of population at a time
     /// let balanced = Schedule::rolling(2000, 100, 20);
-    /// 
+    ///
     /// // Conservative: breed 10% with high diversity
     /// let conservative = Schedule::rolling(5000, 200, 20);
-    /// 
+    ///
     /// // Continuous: breed single genotypes as soon as possible
     /// let continuous = Schedule::rolling(1000, 100, 1);
     /// ```
@@ -199,14 +199,16 @@ mod tests {
         current_generation: i32,
         live_genotypes: i64,
         evaluated_genotypes: i64,
-        best_fitness: Option<f64>,
+        min_fitness: Option<f64>,
+        max_fitness: Option<f64>,
     ) -> Population {
         Population {
             request_id: Uuid::now_v7(),
             current_generation,
             live_genotypes,
             evaluated_genotypes,
-            best_fitness,
+            min_fitness,
+            max_fitness,
         }
     }
 
@@ -231,7 +233,7 @@ mod tests {
     #[test]
     fn generational_should_wait_when_generation_still_evaluating() {
         let schedule = Schedule::generational(5, 100);
-        let population = create_test_population(1, 50, 100, Some(0.5));
+        let population = create_test_population(1, 50, 100, Some(0.5), Some(0.0));
 
         // live_genotypes > 0, so should wait
         assert_eq!(schedule.should_breed(&population), ScheduleDecision::Wait);
@@ -240,7 +242,7 @@ mod tests {
     #[test]
     fn generational_should_breed_when_generation_complete() {
         let schedule = Schedule::generational(5, 100);
-        let population = create_test_population(1, 0, 200, Some(0.6));
+        let population = create_test_population(1, 0, 200, Some(0.6), Some(0.0));
 
         // live_genotypes == 0 and under budget, so should breed
         let decision = schedule.should_breed(&population);
@@ -256,7 +258,7 @@ mod tests {
     #[test]
     fn generational_should_terminate_when_budget_reached() {
         let schedule = Schedule::generational(5, 100); // max_evaluations = 500
-        let population = create_test_population(5, 0, 500, Some(0.8));
+        let population = create_test_population(5, 0, 500, Some(0.8), Some(0.0));
 
         // evaluated_genotypes >= max_evaluations, so should terminate
         assert_eq!(
@@ -268,7 +270,7 @@ mod tests {
     #[test]
     fn rolling_should_wait_when_not_enough_slots() {
         let schedule = Schedule::rolling(1000, 100, 20);
-        let population = create_test_population(3, 81, 300, Some(0.7));
+        let population = create_test_population(3, 81, 300, Some(0.7), Some(0.0));
 
         // live_genotypes (81) > population_size - selection_interval (80), so should wait
         assert_eq!(schedule.should_breed(&population), ScheduleDecision::Wait);
@@ -277,7 +279,7 @@ mod tests {
     #[test]
     fn rolling_should_breed_when_slots_available() {
         let schedule = Schedule::rolling(1000, 100, 20);
-        let population = create_test_population(3, 80, 300, Some(0.7));
+        let population = create_test_population(3, 80, 300, Some(0.7), Some(0.0));
 
         // live_genotypes (80) <= population_size - selection_interval (80), so should breed
         let decision = schedule.should_breed(&population);
@@ -293,7 +295,7 @@ mod tests {
     #[test]
     fn rolling_should_terminate_when_budget_reached() {
         let schedule = Schedule::rolling(1000, 100, 20);
-        let population = create_test_population(10, 60, 1000, Some(0.9));
+        let population = create_test_population(10, 60, 1000, Some(0.9), Some(0.0));
 
         // evaluated_genotypes >= max_evaluations, so should terminate
         assert_eq!(
@@ -307,11 +309,11 @@ mod tests {
         let schedule = Schedule::rolling(500, 100, 100); // selection_interval == population_size
 
         // Should wait while any genotypes are evaluating (like generational)
-        let population = create_test_population(1, 1, 150, Some(0.5));
+        let population = create_test_population(1, 1, 150, Some(0.5), Some(0.0));
         assert_eq!(schedule.should_breed(&population), ScheduleDecision::Wait);
 
         // Should breed entire population when none are evaluating (like generational)
-        let population = create_test_population(2, 0, 250, Some(0.7));
+        let population = create_test_population(2, 0, 250, Some(0.7), Some(0.0));
         let decision = schedule.should_breed(&population);
         assert_eq!(
             decision,

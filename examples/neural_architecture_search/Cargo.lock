@@ -1603,7 +1603,6 @@ dependencies = [
 [[package]]
 name = "fx-durable-ga"
 version = "0.1.0"
-source = "git+https://github.com/jakob-lilliemarck/fx-durable-ga#cf26f64bc2c67cc9d57278633aee74005af0be33"
 dependencies = [
  "anyhow",
  "chrono",

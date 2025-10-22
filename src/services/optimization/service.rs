@@ -434,206 +434,221 @@ impl Service {
         num_offspring: usize,
         next_generation_id: i32,
     ) -> Result<(), Error> {
-        let key = format!("request_{}", request.id);
-        let ret = self
-            .locking
-            .lock_while(&key, || async {
-                // Early return if generation already exists (prevents duplicate work)
-                let exists = self.genotypes.check_if_generation_exists(request.id, next_generation_id).await?;
-                if exists {
-                    return Ok(())
+        // Early return if generation already exists (prevents duplicate work)
+        let exists = self
+            .genotypes
+            .check_if_generation_exists(request.id, next_generation_id)
+            .await?;
+        if exists {
+            return Ok(());
+        }
+
+        tracing::info!("Breeding genotypes");
+        // Get candidates with fitness from populations repository
+        let candidates_with_fitness = self
+            .genotypes
+            .search_genotypes(
+                &genotypes::Filter::default()
+                    .with_request_id(request.id)
+                    .with_fitness(true)
+                    .with_order_random(),
+                request.selector.sample_size(),
+            )
+            .await?;
+
+        // Get morphology for mutation bounds
+        let morphology = self.morphologies.get_morphology(request.type_hash).await?;
+
+        // Get current population to calculate optimization progress
+        let population = self.genotypes.get_population(&request.id).await?;
+
+        let best_fitness = *request
+            .goal
+            .best_fitness(&population.min_fitness, &population.max_fitness);
+
+        // Iterative breeding with deduplication to avoid creating duplicate genomes
+        let mut final_genotypes = Vec::with_capacity(num_offspring);
+        let mut generated_hashes = HashSet::new();
+        let mut deduplication_attempts = 0;
+
+        while final_genotypes.len() < num_offspring
+            && deduplication_attempts < self.max_deduplication_attempts
+        {
+            let needed = num_offspring - final_genotypes.len();
+
+            // Re-select parents for this iteration (borrowed refs)
+            let parent_pairs = request
+                .selector
+                .select_parents(needed, &candidates_with_fitness, &request.goal)
+                .map_err(|e| Error::SelectionError(e))?;
+
+            // Breed using Breeder (before async operations)
+            let batch_genotypes = {
+                let mut rng = rand::rng();
+                Breeder::breed_batch(
+                    &request,
+                    &morphology,
+                    &parent_pairs,
+                    next_generation_id,
+                    request.goal.calculate_progress(best_fitness),
+                    &mut rng,
+                )
+            };
+
+            // Collect hashes from this batch
+            let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash).collect();
+
+            // Check database for intersections
+            let intersecting_hashes = self
+                .genotypes
+                .get_intersection(request.id, &batch_hashes)
+                .await?
+                .into_iter()
+                .collect::<HashSet<i64>>();
+
+            // Filter out duplicates (database + already generated)
+            let mut unique_count = 0;
+            for genotype in batch_genotypes {
+                if !intersecting_hashes.contains(&genotype.genome_hash)
+                    && !generated_hashes.contains(&genotype.genome_hash)
+                {
+                    generated_hashes.insert(genotype.genome_hash);
+                    final_genotypes.push(genotype);
+                    unique_count += 1;
                 }
+            }
 
-                tracing::info!("Breeding genotypes");
-                // Get candidates with fitness from populations repository
-                let candidates_with_fitness = self
-                    .genotypes
-                    .search_genotypes(
-                        &genotypes::Filter::default()
-                            .with_request_id(request.id)
-                            .with_fitness(true)
-                            .with_order_random(),
-                        request.selector.sample_size(),
-                    )
-                    .await?;
+            if unique_count < num_offspring {
+                // Inform of duplicate generation. This is an indication that request params may require tuning.
+                tracing::info!(
+                    "Breeding generated {} non-unique genomes during attempt {}",
+                    num_offspring - unique_count,
+                    deduplication_attempts
+                );
+            }
 
-                // Get morphology for mutation bounds
-                let morphology = self.morphologies.get_morphology(request.type_hash).await?;
+            // Update deduplication_attempts counter
+            if unique_count == 0 {
+                deduplication_attempts += 1;
+            } else {
+                deduplication_attempts = 0;
+            }
+        }
 
-                // Get current population to calculate optimization progress
-                let population = self.genotypes.get_population(&request.id).await?;
+        // Check if we exhausted max_deduplication_attempts progress iterations
+        if deduplication_attempts >= self.max_deduplication_attempts {
+            tracing::warn!(
+                "Breeding exhausted max_deduplication_attempts ({}) for request {}. Consider tuning selection parameters or increasing diversity.",
+                self.max_deduplication_attempts,
+                request.id
+            );
+        }
 
-                // Iterative breeding with deduplication to avoid creating duplicate genomes
-                let mut final_genotypes = Vec::with_capacity(num_offspring);
-                let mut generated_hashes = HashSet::new();
-                let mut deduplication_attempts = 0;
+        // If we couldn't generate enough unique genotypes, log a warning
+        if final_genotypes.len() < num_offspring {
+            tracing::warn!(
+                "Could only generate {} unique genotypes out of {} requested for request {}",
+                final_genotypes.len(),
+                num_offspring,
+                request.id
+            );
+        }
 
-                while final_genotypes.len() < num_offspring && deduplication_attempts < self.max_deduplication_attempts {
-                    let needed = num_offspring - final_genotypes.len();
+        // Update database (only if we have any genotypes)
+        if !final_genotypes.is_empty() {
+            // Create events for final genotypes
+            let events: Vec<GenotypeGenerated> = final_genotypes
+                .iter()
+                .map(|genotype| GenotypeGenerated::new(request.id, genotype.id))
+                .collect();
 
-                    // Re-select parents for this iteration (borrowed refs)
-                    let parent_pairs = request
-                        .selector
-                        .select_parents(needed, &candidates_with_fitness)
-                        .map_err(|e| Error::SelectionError(e))?;
+            self.genotypes
+                .chain(|mut tx_genotypes| {
+                    Box::pin(async move {
+                        let inserted_genotypes =
+                            tx_genotypes.new_genotypes(final_genotypes).await?;
 
-                    // Breed using Breeder (before async operations)
-                    let batch_genotypes = {
-                        let mut rng = rand::rng();
-                        Breeder::breed_batch(
-                            &request,
-                            &morphology,
-                            &parent_pairs,
-                            next_generation_id,
-                            request.goal.calculate_progress(population.best_fitness),
-                            &mut rng,
-                        )
-                    };
+                        // Only proceed if genotypes were actually inserted (no race condition)
+                        if !inserted_genotypes.is_empty() {
+                            let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+                            publisher.publish_many(&events).await?;
 
-                    // Collect hashes from this batch
-                    let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash).collect();
-
-                    // Check database for intersections
-                    let intersecting_hashes = self
-                        .genotypes
-                        .get_intersection(request.id, &batch_hashes)
-                        .await?
-                        .into_iter()
-                        .collect::<HashSet<i64>>();
-
-                    // Filter out duplicates (database + already generated)
-                    let mut unique_count = 0;
-                    for genotype in batch_genotypes {
-                        if !intersecting_hashes.contains(&genotype.genome_hash)
-                            && !generated_hashes.contains(&genotype.genome_hash)
-                        {
-                            generated_hashes.insert(genotype.genome_hash);
-                            final_genotypes.push(genotype);
-                            unique_count += 1;
+                            Ok((publisher, ()))
+                        } else {
+                            // Race condition occurred - another worker created the generation
+                            let publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+                            Ok((publisher, ()))
                         }
-                    }
+                    })
+                })
+                .await?;
+        }
 
-                    if unique_count < num_offspring {
-                        // Inform of duplicate generation. This is an indication that request params may require tuning.
-                        tracing::info!(
-                            "Breeding generated {} non-unique genomes during attempt {}",
-                            num_offspring - unique_count,
-                            deduplication_attempts
-                        );
-                    }
-
-                    // Update deduplication_attempts counter
-                    if unique_count == 0 {
-                        deduplication_attempts += 1;
-                    } else {
-                        deduplication_attempts = 0;
-                    }
-                }
-
-                // Check if we exhausted max_deduplication_attempts progress iterations
-                if deduplication_attempts >= self.max_deduplication_attempts {
-                    tracing::warn!(
-                        "Breeding exhausted max_deduplication_attempts ({}) for request {}. Consider tuning selection parameters or increasing diversity.",
-                        self.max_deduplication_attempts,
-                        request.id
-                    );
-                }
-
-                // If we couldn't generate enough unique genotypes, log a warning
-                if final_genotypes.len() < num_offspring {
-                    tracing::warn!(
-                        "Could only generate {} unique genotypes out of {} requested for request {}",
-                        final_genotypes.len(),
-                        num_offspring,
-                        request.id
-                    );
-                }
-
-                // Update database (only if we have any genotypes)
-                if !final_genotypes.is_empty() {
-                    // Create events for final genotypes
-                    let events: Vec<GenotypeGenerated> = final_genotypes
-                        .iter()
-                        .map(|genotype| GenotypeGenerated::new(request.id, genotype.id))
-                        .collect();
-
-                    self.genotypes
-                        .chain(|mut tx_genotypes| {
-                            Box::pin(async move {
-                                let inserted_genotypes = tx_genotypes
-                                    .new_genotypes(final_genotypes)
-                                    .await?;
-
-                                // Only proceed if genotypes were actually inserted (no race condition)
-                                if !inserted_genotypes.is_empty() {
-                                    let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
-                                    publisher.publish_many(&events).await?;
-
-                                    Ok((publisher, ()))
-                                } else {
-                                    // Race condition occurred - another worker created the generation
-                                    let publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
-                                    Ok((publisher, ()))
-                                }
-                            })
-                        })
-                        .await?;
-                }
-
-                Ok(())
-            }).await?;
-        ret
+        Ok(())
     }
 
     /// Maintains the population by checking completion status and scheduling breeding or termination.
     /// Called after each genotype evaluation to determine the next optimization step.
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) async fn maintain_population(&self, request_id: Uuid) -> Result<(), Error> {
-        // Get the request
-        let request = self.requests.get_request(request_id).await.map_err(|e| {
-            tracing::error!("Failed to fetch request with ID {}: {:?}", request_id, e);
-            e
-        })?;
+        let key = format!("maintain_population_{}", request_id);
+        self.locking
+            .lock_while(&key, || async {
+                // Check if request is already concluded - skip if so
+                if let Some(_) = self.requests.get_request_conclusion(&request_id).await? {
+                    tracing::debug!("Request already concluded, skipping maintenance");
+                    return Ok(());
+                }
 
-        // Get the population
-        let population = self.genotypes.get_population(&request.id).await?;
+                // Get the request
+                let request = self.requests.get_request(request_id).await.map_err(|e| {
+                    tracing::error!("Failed to fetch request with ID {}: {:?}", request_id, e);
+                    e
+                })?;
 
-        let best_fitness = match population.best_fitness {
-            Some(fitness) => fitness,
-            None => return Ok(()),
-        };
+                // Get the population
+                let population = self.genotypes.get_population(&request.id).await?;
 
-        if request.is_completed(best_fitness) {
-            // Publish RequestCompleted::new(request_id)
-            self.genotypes
-                .chain(|tx_genotypes| {
-                    Box::pin(async move {
-                        // Create publisher
-                        let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
+                let Some(best_fitness) = *request
+                    .goal
+                    .best_fitness(&population.min_fitness, &population.max_fitness)
+                else {
+                    return Ok(());
+                };
 
-                        // Publish completion event
-                        publisher
-                            .publish(RequestCompletedEvent::new(request.id))
-                            .await?;
+                if request.is_completed(best_fitness) {
+                    // Publish RequestCompleted::new(request_id)
+                    self.genotypes
+                        .chain(|tx_genotypes| {
+                            Box::pin(async move {
+                                // Create publisher
+                                let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
 
-                        Ok((publisher, ()))
-                    })
-                })
-                .await?;
-            return Ok(());
-        }
+                                // Publish completion event
+                                publisher
+                                    .publish(RequestCompletedEvent::new(request.id))
+                                    .await?;
 
-        match request.schedule.should_breed(&population) {
-            ScheduleDecision::Wait => Ok(()), // Do nothing
-            ScheduleDecision::Terminate => self.publish_terminated(request.id).await,
-            ScheduleDecision::Breed {
-                num_offspring,
-                next_generation_id,
-            } => {
-                self.breed_genotypes(&request, num_offspring, next_generation_id)
-                    .await
-            }
-        }
+                                Ok((publisher, ()))
+                            })
+                        })
+                        .await?;
+                    return Ok(());
+                }
+
+                match request.schedule.should_breed(&population) {
+                    ScheduleDecision::Wait => Ok(()), // Do nothing
+                    ScheduleDecision::Terminate => self.publish_terminated(request.id).await,
+                    ScheduleDecision::Breed {
+                        num_offspring,
+                        next_generation_id,
+                    } => {
+                        self.breed_genotypes(&request, num_offspring, next_generation_id)
+                            .await
+                    }
+                }
+            })
+            .await?
     }
 
     /// Records the conclusion of an optimization request to prevent duplicate processing.

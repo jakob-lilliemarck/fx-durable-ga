@@ -427,7 +427,8 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
                 evaluated_genotypes "evaluated_genotypes!:i64",
                 live_genotypes "live_genotypes!:i64",
                 current_generation "current_generation!:i32",
-                best_fitness "best_fitness"
+                min_fitness "min_fitness",
+                max_fitness "max_fitness"
             FROM fx_durable_ga.populations
             WHERE request_id = $1;
         "#,
@@ -442,7 +443,8 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
         evaluated_genotypes: 0,
         live_genotypes: 0,
         current_generation: 0,
-        best_fitness: None,
+        min_fitness: None,
+        max_fitness: None,
     }))
 }
 
@@ -495,7 +497,8 @@ mod get_population_tests {
                 evaluated_genotypes: 0,
                 live_genotypes: 3,
                 current_generation: 3,
-                best_fitness: None
+                min_fitness: None,
+                max_fitness: None,
             }
         );
 
@@ -515,7 +518,8 @@ mod get_population_tests {
                 evaluated_genotypes: 0,
                 live_genotypes: 0,
                 current_generation: 0,
-                best_fitness: None
+                min_fitness: None,
+                max_fitness: None,
             }
         );
 
@@ -592,7 +596,8 @@ mod get_population_tests {
                 evaluated_genotypes: 3,
                 live_genotypes: 0,
                 current_generation: 1,
-                best_fitness: Some(0.99)
+                min_fitness: Some(0.01),
+                max_fitness: Some(0.99),
             }
         );
 

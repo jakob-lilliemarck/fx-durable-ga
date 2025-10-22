@@ -10,5 +10,6 @@ pub(crate) struct Population {
     pub(crate) evaluated_genotypes: i64,
     pub(crate) live_genotypes: i64,
     pub(crate) current_generation: i32,
-    pub(crate) best_fitness: Option<f64>,
+    pub(crate) min_fitness: Option<f64>,
+    pub(crate) max_fitness: Option<f64>,
 }

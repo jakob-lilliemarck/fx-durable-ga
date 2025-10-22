@@ -21,7 +21,8 @@ SELECT
     COUNT(f.fitness) as evaluated_genotypes,
     COUNT(*) - COUNT(f.fitness) as live_genotypes,
     MAX(generation_id) as current_generation,
-    MAX(f.fitness) as best_fitness
+    MIN(f.fitness) as min_fitness,
+    MAX(f.fitness) as max_fitness
 FROM fx_durable_ga.genotypes g
 LEFT JOIN fx_durable_ga.fitness f ON g.id = f.genotype_id
 GROUP BY request_id;
