@@ -30,6 +30,7 @@ use neural_architecture_search::{
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use std::{env, sync::Arc};
+use tracing::Level;
 use uuid::Uuid;
 
 type Backend = Autodiff<NdArray>;
@@ -37,6 +38,7 @@ type Backend = Autodiff<NdArray>;
 const EPOCHS: usize = 50;
 const TIMEOUT_SECONDS: u64 = 1800;
 const FITNESS_TARGET: f64 = 0.05;
+const LOGLEVEL: Level = Level::INFO;
 
 /// Neural network architecture representation for GA optimization.
 ///
@@ -193,9 +195,7 @@ async fn main() -> Result<()> {
     dotenv::from_filename(".env.local").ok();
 
     // Initialize logging to see optimization progress
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .init();
+    tracing_subscriber::fmt().with_max_level(LOGLEVEL).init();
 
     println!("🧠 Neural Architecture Search with Genetic Algorithms");
     println!("Search space: 4 × 3 × 3 × 2 × 3 = 216 possible architectures");
@@ -213,7 +213,10 @@ async fn main() -> Result<()> {
     fx_mq_building_blocks::migrator::run_migrations(&pool, fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME)
         .await?;
 
+    println!("✓ Migrations complete");
+
     // Bootstrap the optimization service and register our architecture problem type
+    println!("Bootstrapping service...");
     let service = Arc::new(
         bootstrap(pool.clone())
             .await?
@@ -221,8 +224,10 @@ async fn main() -> Result<()> {
             .await?
             .build(),
     );
+    println!("✓ Service bootstrapped");
 
     // Setup event handling and spawn an event handling agent
+    println!("Setting up event listener...");
     let mut registry = fx_event_bus::EventHandlerRegistry::new();
     optimization::register_event_handlers(
         Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME)),
@@ -234,14 +239,16 @@ async fn main() -> Result<()> {
         listener.listen(None).await?;
         Ok::<(), sqlx::Error>(())
     });
+    println!("✓ Event listener spawned");
 
     // Setup job handling and initiate workers
+    println!("Setting up job listener...");
     let host_id = Uuid::parse_str("00000000-0000-0000-0000-123456789abc").expect("valid uuid");
     let hold_for = Duration::from_secs(600);
     let mut jobs_listener = fx_mq_jobs::Listener::new(
         pool.clone(),
         optimization::register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
-        4, // 4 workers for parallel architecture evaluation
+        4,
         host_id,
         hold_for,
     )
@@ -250,6 +257,7 @@ async fn main() -> Result<()> {
         jobs_listener.listen().await?;
         Ok::<(), anyhow::Error>(())
     });
+    println!("✓ Job listener spawned");
 
     service
         .new_optimization_request(

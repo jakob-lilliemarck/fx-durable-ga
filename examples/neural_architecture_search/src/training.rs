@@ -4,10 +4,11 @@ use burn::optim::AdamConfig;
 use burn::train::LearningStrategy;
 use burn::{
     data::{dataloader::DataLoaderBuilder, dataset::InMemDataset},
+    module::AutodiffModule,
     prelude::*,
     record::{CompactRecorder, NoStdTrainingRecorder},
     tensor::backend::AutodiffBackend,
-    train::{metric::LossMetric, LearnerBuilder},
+    train::{LearnerBuilder, metric::LossMetric},
 };
 
 #[derive(Config, Debug)]
@@ -76,7 +77,6 @@ pub fn run<B: AutodiffBackend>(artifact_dir: &str, device: B::Device) {
         .with_file_checkpointer(CompactRecorder::new())
         .learning_strategy(LearningStrategy::SingleDevice(device.clone()))
         .num_epochs(config.num_epochs)
-        .summary()
         .build(model, config.optimizer.init(), 1e-3);
 
     let model_trained = learner.fit(dataloader_train, dataloader_test);
@@ -95,74 +95,63 @@ pub fn run<B: AutodiffBackend>(artifact_dir: &str, device: B::Device) {
 }
 
 /// Silent training function for GA optimization - returns validation loss
+/// Uses custom training loop to avoid Learner's logging
+#[tracing::instrument(level = "info", skip(model_config, device))]
 pub fn train_silent<B: AutodiffBackend>(
     model_config: RegressionModelConfig,
     device: B::Device,
     epochs: usize,
 ) -> f32 {
-    // Config for fast training
-    let optimizer = AdamConfig::new();
-    let mut config = ExpConfig::new(optimizer);
-    config.num_epochs = epochs;
-    config.batch_size = 128;
-    config.num_workers = 1;
+    tracing::info!("Starting training");
+    let batch_size = 128;
+    let learning_rate = 1e-3;
+    let seed = 1337u64;
 
-    let model = model_config.init(&device);
-    B::seed(&device, config.seed);
+    use burn::optim::{GradientsParams, Optimizer};
 
-    // Create dataset and split it
+    let mut model = model_config.init(&device);
+    let mut optim = AdamConfig::new().init();
+    B::seed(&device, seed);
+
+    // Create dataset
     let full_dataset = HousingDataset::new();
     let train_data = full_dataset.train();
     let valid_data = full_dataset.validation();
 
-    let train_dataset = InMemDataset::new(train_data);
-    let valid_dataset = InMemDataset::new(valid_data);
-
     let batcher_train = HousingBatcher::<B>::new(device.clone());
-    let batcher_test = HousingBatcher::<B::InnerBackend>::new(device.clone());
+    let batcher_valid = HousingBatcher::<B::InnerBackend>::new(device.clone());
 
     let dataloader_train = DataLoaderBuilder::new(batcher_train)
-        .batch_size(config.batch_size)
-        .shuffle(config.seed)
-        .num_workers(config.num_workers)
-        .build(train_dataset);
+        .batch_size(batch_size)
+        .shuffle(seed)
+        .num_workers(1)
+        .build(InMemDataset::new(train_data));
 
-    let dataloader_test = DataLoaderBuilder::new(batcher_test)
-        .batch_size(config.batch_size)
-        .shuffle(config.seed)
-        .num_workers(config.num_workers)
-        .build(valid_dataset);
+    let dataloader_valid = DataLoaderBuilder::new(batcher_valid)
+        .batch_size(batch_size)
+        .num_workers(1)
+        .build(InMemDataset::new(valid_data));
 
-    // Create a temporary directory for this training run
-    let temp_dir = format!(
-        "/tmp/burn-silent-{}-{}",
-        std::process::id(),
-        rand::random::<u32>()
-    );
-    create_artifact_dir(&temp_dir);
+    // Custom training loop - no logging
+    for _epoch in 0..epochs {
+        // Training phase
+        for batch in dataloader_train.iter() {
+            let output = model.forward(batch.inputs);
+            let targets = batch.targets.unsqueeze_dim(1);
+            let loss = (output - targets).powf_scalar(2.0).mean();
 
-    let learner = LearnerBuilder::new(&temp_dir)
-        .metric_valid_numeric(LossMetric::new())
-        .learning_strategy(LearningStrategy::SingleDevice(device.clone()))
-        .num_epochs(config.num_epochs)
-        .build(model, config.optimizer.init(), 1e-3);
+            let grads = loss.backward();
+            let grads = GradientsParams::from_grads(grads, &model);
+            model = optim.step(learning_rate, model, grads);
+        }
+    }
 
-    let model_trained = learner.fit(dataloader_train, dataloader_test);
-
-    let model = model_trained.model;
-
+    // Validation phase - calculate final loss on inner backend
+    let model = model.valid();
     let mut total_loss = 0.0;
     let mut num_batches = 0;
 
-    let valid_data = full_dataset.validation();
-    let valid_dataset = InMemDataset::new(valid_data);
-    let batcher = HousingBatcher::<B::InnerBackend>::new(device.clone());
-    let dataloader = DataLoaderBuilder::new(batcher)
-        .batch_size(config.batch_size)
-        .num_workers(1)
-        .build(valid_dataset);
-
-    for batch in dataloader.iter() {
+    for batch in dataloader_valid.iter() {
         let output = model.forward(batch.inputs);
         let targets = batch.targets.unsqueeze_dim(1);
         let loss = (output - targets).powf_scalar(2.0).mean();
@@ -171,9 +160,7 @@ pub fn train_silent<B: AutodiffBackend>(
         num_batches += 1;
     }
 
-    let avg_loss = total_loss / num_batches as f32;
-
-    std::fs::remove_dir_all(&temp_dir).ok();
-
-    avg_loss
+    let result = total_loss / num_batches as f32;
+    tracing::info!(validation_loss = result, "Training completed");
+    result
 }
