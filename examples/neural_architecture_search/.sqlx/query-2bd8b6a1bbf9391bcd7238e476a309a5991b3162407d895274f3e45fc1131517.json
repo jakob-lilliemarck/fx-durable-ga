@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                generated_at,\n                type_name,\n                type_hash,\n                genome,\n                genome_hash,\n                request_id,\n                generation_id\n            FROM fx_durable_ga.genotypes\n            WHERE id = $1;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "generated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "type_hash",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "genome",
+        "type_info": "Int8Array"
+      },
+      {
+        "ordinal": 5,
+        "name": "genome_hash",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "request_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "generation_id",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2bd8b6a1bbf9391bcd7238e476a309a5991b3162407d895274f3e45fc1131517"
+}

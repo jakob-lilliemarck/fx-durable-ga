@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                request_id,\n                concluded_at,\n                concluded_with as \"concluded_with: Conclusion\"\n            FROM fx_durable_ga.request_conclusions\n            WHERE request_id = $1;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "concluded_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "concluded_with: Conclusion",
+        "type_info": {
+          "Custom": {
+            "name": "conclusion",
+            "kind": {
+              "Enum": [
+                "completed",
+                "terminated"
+              ]
+            }
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4e57d4ac97d1d6976b84b1ed9b8375df2f4a124bb0ec15ea168fadcfb8607b0e"
+}

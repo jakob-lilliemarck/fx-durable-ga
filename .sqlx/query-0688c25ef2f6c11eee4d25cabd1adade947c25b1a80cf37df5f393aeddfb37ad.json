@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SET LOCAL search_path TO fx_durable_ga;",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "0688c25ef2f6c11eee4d25cabd1adade947c25b1a80cf37df5f393aeddfb37ad"
+}
