@@ -61,7 +61,6 @@ pub fn train_silent<B: AutodiffBackend>(
     dataloader_valid: &ValidDataLoader<B::InnerBackend>,
 ) -> f32 {
     tracing::info!("Starting training");
-    let learning_rate = 1e-3;
 
     use burn::optim::{GradientsParams, Optimizer};
 
@@ -79,7 +78,7 @@ pub fn train_silent<B: AutodiffBackend>(
 
                 let grads = loss.backward();
                 let grads = GradientsParams::from_grads(grads, &model);
-                model = optim.step(learning_rate, model, grads);
+                model = optim.step(model_config.learning_rate, model, grads);
             }
         }
     }
@@ -102,11 +101,11 @@ pub fn train_silent<B: AutodiffBackend>(
     }
 
     let result = total_loss / num_batches as f32;
-    
+
     // Explicitly drop model and optimizer to ensure cleanup
     drop(model);
     drop(optim);
-    
+
     tracing::info!(validation_loss = result, "Training completed");
     result
 }

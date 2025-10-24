@@ -4,7 +4,6 @@
 //! hidden size, number of layers, activation function, bias usage, and learning rate.
 
 use anyhow::Result;
-use burn::backend::{ndarray::NdArray, Autodiff};
 use fx_durable_ga::{
     bootstrap::bootstrap,
     models::{
@@ -15,21 +14,32 @@ use fx_durable_ga::{
 };
 use fx_mq_building_blocks::queries::Queries;
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
-use neural_architecture_search::{
-    model::{ActivationFunction, RegressionModelConfig},
-    training::{create_dataloaders, train_silent, TrainDataLoader, ValidDataLoader},
-};
+use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use std::{env, sync::Arc};
 use tracing::Level;
 use uuid::Uuid;
 
-type Backend = Autodiff<NdArray>;
-
 const WORKERS: usize = 4;
-const EPOCHS: usize = 50;
 const FITNESS_TARGET: f64 = 0.05;
+
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub enum ActivationFunction {
+    Relu,
+    Gelu,
+    Sigmoid,
+}
+
+impl std::fmt::Display for ActivationFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Relu => write!(f, "relu"),
+            Self::Gelu => write!(f, "gelo"),
+            Self::Sigmoid => write!(f, "sigmoid"),
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
 struct NeuralArchitecture {
@@ -128,54 +138,43 @@ impl Encodeable for NeuralArchitecture {
     }
 }
 
-struct ArchitectureEvaluator {
-    dataloader_train: TrainDataLoader<Backend>,
-    dataloader_valid:
-        ValidDataLoader<<Backend as burn::tensor::backend::AutodiffBackend>::InnerBackend>,
-}
+struct ArchitectureEvaluator;
 
-impl ArchitectureEvaluator {
-    fn new() -> Self {
-        let device: <Backend as burn::prelude::Backend>::Device = Default::default();
-        let (dataloader_train, dataloader_valid) = create_dataloaders::<Backend>(device, 128, 1337);
-        Self {
-            dataloader_train,
-            dataloader_valid,
-        }
-    }
+#[derive(Deserialize)]
+struct ResultOutput {
+    validation_loss: f64,
 }
 
 impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
     fn fitness<'a>(
         &self,
         phenotype: NeuralArchitecture,
-        terminated: &'a Box<dyn Terminated>,
+        _: &'a Box<dyn Terminated>,
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
-        // Clone Arc pointers so they're owned by the async block
-        let dataloader_train = self.dataloader_train.clone();
-        let dataloader_valid = self.dataloader_valid.clone();
-
         Box::pin(async move {
-            if terminated.is_terminated().await {
-                return Ok(f64::MAX);
-            }
+            // Spawn the binary
+            let output = std::process::Command::new("fx-example-regression")
+                .args([
+                    "--hidden-size",
+                    &phenotype.hidden_size.to_string(),
+                    "--num-hidden-layers",
+                    &phenotype.num_hidden_layers.to_string(),
+                    "--activation-fn",
+                    &phenotype.activation_fn.to_string(),
+                    "--learning-rate",
+                    "0.001",
+                ])
+                .output()
+                .expect("Failed to run fx-example-regression");
 
-            let mut model_config = RegressionModelConfig::new();
-            model_config.hidden_size = phenotype.hidden_size;
-            model_config.num_hidden_layers = phenotype.num_hidden_layers;
-            model_config.activation_fn = phenotype.activation_fn;
-            model_config.use_bias = phenotype.use_bias;
-            model_config.learning_rate = phenotype.learning_rate;
+            // Print stderr logs (your tracing output)
+            eprintln!("{}", String::from_utf8_lossy(&output.stderr));
 
-            let device: <Backend as burn::prelude::Backend>::Device = Default::default();
-            let validation_loss = train_silent::<Backend>(
-                model_config,
-                device,
-                EPOCHS,
-                &dataloader_train,
-                &dataloader_valid,
-            );
-            Ok(validation_loss as f64)
+            // Parse stdout as JSON (the ResultOutput struct)
+            let result: ResultOutput =
+                serde_json::from_slice(&output.stdout).expect("Invalid JSON from training binary");
+
+            Ok(result.validation_loss)
         })
     }
 }
@@ -197,7 +196,7 @@ async fn main() -> Result<()> {
     let service = Arc::new(
         bootstrap(pool.clone())
             .await?
-            .register::<NeuralArchitecture, _>(ArchitectureEvaluator::new())
+            .register::<NeuralArchitecture, _>(ArchitectureEvaluator)
             .await?
             .build(),
     );
