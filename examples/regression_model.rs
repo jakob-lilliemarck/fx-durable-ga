@@ -35,7 +35,7 @@ impl std::fmt::Display for ActivationFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Relu => write!(f, "relu"),
-            Self::Gelu => write!(f, "gelo"),
+            Self::Gelu => write!(f, "gelu"),
             Self::Sigmoid => write!(f, "sigmoid"),
         }
     }
@@ -170,6 +170,7 @@ impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
             // Print stderr logs (your tracing output)
             eprintln!("{}", String::from_utf8_lossy(&output.stderr));
 
+            tracing::info!(message = "received JSON", output = ?output);
             // Parse stdout as JSON (the ResultOutput struct)
             let result: ResultOutput =
                 serde_json::from_slice(&output.stdout).expect("Invalid JSON from training binary");
