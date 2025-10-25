@@ -60,6 +60,10 @@ case "$part" in
         ;;
 esac
 
+# --- Dry-run publishing ---
+echo "Performing dry-run to check package..."
+cargo publish --dry-run
+
 new_version="$major.$minor.$patch"
 echo "Bumping version: $current_version → $new_version"
 
@@ -75,10 +79,6 @@ git commit -m "chore: bumped version from $current_version to $new_version"
 
 # --- Create git tag ---
 git tag "v$new_version" -m "Release v$new_version"
-
-# --- Dry-run publishing ---
-echo "Performing dry-run to check package..."
-cargo publish --dry-run
 
 # --- Confirm publishing ---
 read -p "Dry-run succeeded. Do you want to publish for real? [y/N] " confirm
