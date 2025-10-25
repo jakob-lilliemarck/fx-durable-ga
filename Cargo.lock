@@ -468,9 +468,9 @@ dependencies = [
 
 [[package]]
 name = "fx-mq-jobs"
-version = "0.1.4"
+version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c02039d72af11dfe24b071bd8cbfaf93bab46e23fd9fc2f24b3dbce0f8198147"
+checksum = "f53a14f0c821a519cf5fd7effa73cd42b8e05c665fb3ffda35c738ff9fc46662"
 dependencies = [
  "chrono",
  "const-fnv1a-hash",

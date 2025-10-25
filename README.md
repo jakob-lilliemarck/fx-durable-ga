@@ -125,6 +125,13 @@ service.new_optimization_request(
 5. Run tests: `cargo test`
 6. Generate test coverage: `cargo llvm-cov --html --output-dir coverage`
 
+## Migrations
+Running `cargo sqlx prepare` may require setting search path options for the `DATABASE_URL` variable. For example
+```sh
+DATABASE_URL="postgres://postgres:postgres@localhost:5432/fx-durable-ga?options=-c%20search_path%3Dfx_mq_jobs%2Cfx_event_bus%2Cfx_durable_ga"
+```
+Keeping the search path parameters may however make tests fail, so some juggling is currently required.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit pull requests for bug fixes, improvements, or new features.
