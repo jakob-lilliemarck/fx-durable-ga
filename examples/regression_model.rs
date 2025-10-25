@@ -58,7 +58,7 @@ impl Encodeable for NeuralArchitecture {
     fn morphology() -> Vec<GeneBounds> {
         vec![
             GeneBounds::integer(0, 3, 4).unwrap(), // hidden_size: [32, 64, 128, 256]
-            GeneBounds::integer(0, 2, 3).unwrap(), // num_hidden_layers: [1, 2, 3]
+            GeneBounds::integer(0, 7, 8).unwrap(), // num_hidden_layers: [1, 2, 3]
             GeneBounds::integer(0, 2, 3).unwrap(), // activation_fn: [ReLU, GELU, Sigmoid]
             GeneBounds::integer(0, 1, 2).unwrap(), // use_bias: [false, true]
             GeneBounds::integer(0, 2, 3).unwrap(), // learning_rate: [1e-4, 1e-3, 1e-2]
@@ -162,7 +162,7 @@ impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
                     "--activation-fn",
                     &phenotype.activation_fn.to_string(),
                     "--learning-rate",
-                    "0.001",
+                    &phenotype.learning_rate.to_string(),
                 ])
                 .output()
                 .expect("Failed to run fx-example-regression");
@@ -170,7 +170,6 @@ impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
             // Print stderr logs (your tracing output)
             eprintln!("{}", String::from_utf8_lossy(&output.stderr));
 
-            tracing::info!(message = "received JSON", output = ?output);
             // Parse stdout as JSON (the ResultOutput struct)
             let result: ResultOutput =
                 serde_json::from_slice(&output.stdout).expect("Invalid JSON from training binary");
