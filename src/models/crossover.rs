@@ -99,9 +99,9 @@ pub enum Crossover {
     /// - `probability = 0.0`: Always selects from second parent (creates clone)
     /// - `probability = 0.5`: Equal chance from either parent (maximum mixing)
     /// - `probability = 1.0`: Always selects from first parent (creates clone)
-    Uniform { 
+    Uniform {
         /// Probability of selecting each gene from the first parent (0.0 to 1.0)
-        probability: f64 
+        probability: f64,
     },
     /// Single-point crossover cuts genomes at a random point and swaps the tails.
     ///

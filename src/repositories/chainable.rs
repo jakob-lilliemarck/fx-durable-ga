@@ -12,11 +12,11 @@ pub trait TxType<'tx> {
 }
 
 /// Provides transactional chaining capabilities for repositories.
-/// 
+///
 /// Allows executing operations within a database transaction that can be committed or rolled back.
 pub trait Chain<'tx>: TxType<'tx> {
     /// Executes a function within a database transaction.
-    /// 
+    ///
     /// The transaction is automatically committed if the function succeeds, or rolled back on error.
     fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
     where

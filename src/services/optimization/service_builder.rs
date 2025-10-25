@@ -58,7 +58,7 @@ impl ServiceBuilder {
     /// # Evaluator Implementation Requirements
     ///
     /// Your evaluator must implement `Evaluator<T::Phenotype>` with:
-/// - `fitness()`: Async function returning fitness scores (any finite f64 values)
+    /// - `fitness()`: Async function returning fitness scores (any finite f64 values)
     /// - Support for early termination via the `Terminated` trait
     /// - Error handling for failed evaluations
     ///
@@ -290,8 +290,8 @@ impl ServiceBuilder {
     /// - **Use meaningful step sizes**: Align with your problem's natural granularity
     ///
     /// ## Fitness Function Design
-/// - **Use natural value ranges**: Return raw values like loss, accuracy, cost, profit
-/// - **Handle edge cases gracefully**: Return appropriate default values for invalid solutions
+    /// - **Use natural value ranges**: Return raw values like loss, accuracy, cost, profit
+    /// - **Handle edge cases gracefully**: Return appropriate default values for invalid solutions
     /// - **Check termination regularly**: Use `terminated.is_terminated()` in long evaluations
     /// - **Avoid fitness cliffs**: Gradual fitness landscapes converge better than binary ones
     /// - **Return errors for true failures**: Let the system handle evaluation failures
@@ -394,7 +394,7 @@ impl ServiceBuilder {
     ///         Box::pin(async move {
     ///             // Maximize -(x-10)^2 + 100, so optimal x = 10
     ///             let fitness = -(target.value - 10.0).powi(2) + 100.0;
-///             Ok(fitness)  // Return raw fitness value
+    ///             Ok(fitness)  // Return raw fitness value
     ///         })
     ///     }
     /// }

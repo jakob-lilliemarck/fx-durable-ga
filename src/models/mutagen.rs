@@ -39,26 +39,23 @@ fn decay_exponential(upper: f64, lower: f64, progress: f64, multiplier: f64, exp
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Decay {
     /// Parameter remains unchanged throughout optimization.
-    /// 
+    ///
     /// Use when you want consistent behavior or when you're unsure
     /// about the optimal decay strategy for your problem.
     Constant,
-    
+
     /// Parameter decreases linearly from upper to lower bound.
-    /// 
+    ///
     /// Formula: `lower + (upper - lower) * (1.0 - progress * multiplier)`
-    /// 
+    ///
     /// - `lower`: Final value when fully converged (progress = 1.0)
     /// - `multiplier`: Controls decay speed (1.0 = normal, >1.0 = faster, <1.0 = slower)
-    Linear {
-        lower: f64,
-        multiplier: f64,
-    },
-    
+    Linear { lower: f64, multiplier: f64 },
+
     /// Parameter decreases exponentially, providing rapid early decay that slows over time.
-    /// 
+    ///
     /// Formula: `lower + (upper - lower) * (1.0 - progress * multiplier)^exponent`
-    /// 
+    ///
     /// - `lower`: Final value when fully converged
     /// - `multiplier`: Controls decay timing (higher = faster initial decay)
     /// - `exponent`: Controls curve steepness (higher = more aggressive early decay)
@@ -149,13 +146,13 @@ impl Temperature {
     /// - Testing and debugging genetic algorithms
     ///
     /// # Examples
-/// ```rust
-/// use fx_durable_ga::models::Temperature;
-///
-/// let low_temp = Temperature::constant(0.2)?;    // Conservative mutations
-/// let high_temp = Temperature::constant(0.8)?;   // Aggressive mutations
-/// # Ok::<(), Box<dyn std::error::Error>>(())
-/// ```
+    /// ```rust
+    /// use fx_durable_ga::models::Temperature;
+    ///
+    /// let low_temp = Temperature::constant(0.2)?;    // Conservative mutations
+    /// let high_temp = Temperature::constant(0.8)?;   // Aggressive mutations
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn constant(value: f64) -> Result<Self, TemperatureError> {
         let value = Self::validate(value)?;
 
@@ -191,7 +188,7 @@ impl Temperature {
     ///
     /// # Examples
     /// ```rust
-/// use fx_durable_ga::models::Temperature;
+    /// use fx_durable_ga::models::Temperature;
     ///
     /// // Standard linear cooling
     /// let temp = Temperature::linear(0.8, 0.1, 1.0)?;
@@ -237,7 +234,7 @@ impl Temperature {
     ///
     /// # Examples
     /// ```rust
-/// use fx_durable_ga::models::Temperature;
+    /// use fx_durable_ga::models::Temperature;
     ///
     /// // Moderate exponential cooling
     /// let temp = Temperature::exponential(0.8, 0.1, 1.0, 2)?;
@@ -342,7 +339,7 @@ impl MutationRate {
     ///
     /// # Examples
     /// ```rust
-/// use fx_durable_ga::models::MutationRate;
+    /// use fx_durable_ga::models::MutationRate;
     ///
     /// let conservative = MutationRate::constant(0.05)?;  // 5% mutation chance
     /// let balanced = MutationRate::constant(0.3)?;       // 30% mutation chance
@@ -385,7 +382,7 @@ impl MutationRate {
     ///
     /// # Examples
     /// ```rust
-/// use fx_durable_ga::models::MutationRate;
+    /// use fx_durable_ga::models::MutationRate;
     ///
     /// // Standard diversity-to-stability transition
     /// let rate = MutationRate::linear(0.5, 0.1, 1.0)?;
@@ -431,7 +428,7 @@ impl MutationRate {
     ///
     /// # Examples
     /// ```rust
-/// use fx_durable_ga::models::MutationRate;
+    /// use fx_durable_ga::models::MutationRate;
     ///
     /// // Rapid diversity reduction
     /// let rate = MutationRate::exponential(0.7, 0.05, 1.0, 3)?;
@@ -563,7 +560,7 @@ pub struct Mutagen {
 /// let result = Mutagen::constant(1.5, 0.3); // temperature > 1.0
 /// assert!(result.is_err());
 ///
-/// // This will return MutagenError::MutationRate 
+/// // This will return MutagenError::MutationRate
 /// let result = Mutagen::constant(0.5, -0.1); // negative mutation rate
 /// assert!(result.is_err());
 ///
@@ -596,14 +593,14 @@ pub struct Mutagen {
 #[derive(Debug, thiserror::Error)]
 pub enum MutagenError {
     /// Mutation rate parameter configuration is invalid.
-    /// 
+    ///
     /// This occurs when mutation rate values are outside [0.0, 1.0] or when
     /// decay strategy bounds are inconsistent (lower > upper).
     #[error("Mutation rate error: {0}")]
     MutationRate(#[from] MutationRateError),
-    
+
     /// Temperature parameter configuration is invalid.
-    /// 
+    ///
     /// This occurs when temperature values are outside [0.0, 1.0] or when
     /// decay strategy bounds are inconsistent (lower > upper).
     #[error("Temperature error: {0}")]
@@ -622,7 +619,7 @@ impl Mutagen {
     ///
     /// # Examples
     /// ```rust
-/// use fx_durable_ga::models::{Mutagen, Temperature, MutationRate};
+    /// use fx_durable_ga::models::{Mutagen, Temperature, MutationRate};
     ///
     /// // Mixed strategies: exponential temperature, linear mutation rate
     /// let mutagen = Mutagen::new(
@@ -656,7 +653,7 @@ impl Mutagen {
     ///
     /// # Examples
     /// ```rust
-/// use fx_durable_ga::models::Mutagen;
+    /// use fx_durable_ga::models::Mutagen;
     ///
     /// let conservative = Mutagen::constant(0.2, 0.05)?;  // Small, rare mutations
     /// let balanced = Mutagen::constant(0.5, 0.3)?;       // Medium mutations

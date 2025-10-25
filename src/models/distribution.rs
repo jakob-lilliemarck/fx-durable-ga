@@ -71,12 +71,12 @@ pub enum Distribution {
     /// - Typically finds better initial solutions
     ///
     /// **Best for**: Small to medium population sizes (10-500), complex search spaces
-    LatinHypercube { 
+    LatinHypercube {
         /// Number of individuals in the initial population.
         /// Each individual will be positioned to maximize overall space coverage.
-        population_size: u32 
+        population_size: u32,
     },
-    
+
     /// Pure random sampling generates individuals uniformly at random across the search space.
     ///
     /// Each parameter is independently sampled from its allowed range without
@@ -89,10 +89,10 @@ pub enum Distribution {
     /// - Familiar and well-understood behavior
     ///
     /// **Best for**: Very large populations (>1000), simple search spaces, baseline comparisons
-    Random { 
+    Random {
         /// Number of individuals to generate randomly.
         /// Larger populations help compensate for potential clustering and coverage gaps.
-        population_size: u32 
+        population_size: u32,
     },
 }
 
