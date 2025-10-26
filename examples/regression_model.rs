@@ -153,7 +153,7 @@ impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
         Box::pin(async move {
             // Spawn the binary
-            let output = std::process::Command::new("fx-example-regression")
+            let output = tokio::process::Command::new("fx-example-regression")
                 .args([
                     "--hidden-size",
                     &phenotype.hidden_size.to_string(),
@@ -165,6 +165,7 @@ impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
                     &phenotype.learning_rate.to_string(),
                 ])
                 .output()
+                .await
                 .expect("Failed to run fx-example-regression");
 
             // Print stderr logs (your tracing output)
@@ -182,7 +183,11 @@ impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::from_filename(".env.local").ok();
-    tracing_subscriber::fmt().with_max_level(Level::INFO).init();
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_thread_ids(true)
+        .with_max_level(Level::INFO)
+        .init();
 
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
