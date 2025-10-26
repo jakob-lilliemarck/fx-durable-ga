@@ -11,6 +11,11 @@ cargo fmt --check
 
 # --- Check offline documentation build ---
 echo "Checking documentation builds offline (simulating docs.rs)..."
+SQLX_OFFLINE=true cargo doc
+
+# --- Dry-run publishing ---
+echo "Performing dry-run to check package..."
+cargo publish --dry-run
 
 # --- Configuration ---
 TOKEN="${CRATES_IO_TOKEN:-}"
@@ -33,7 +38,7 @@ fi
 echo "$TOKEN" | cargo login
 
 # --- Read current version ---
-package_name=$(cargo read-manifest | grep '"name"' | cut -d'"' -f4)  # e.g., fx-mq-jobs
+package_name=$(cargo read-manifest | grep '"name"' | cut -d'"' -f4)  # e.g., fx-mq-building-blocks
 current_version=$(cargo pkgid | cut -d'#' -f2)  # e.g., 0.1.0
 IFS='.' read -r major minor patch <<< "$current_version"
 
@@ -60,10 +65,6 @@ case "$part" in
         ;;
 esac
 
-# --- Dry-run publishing ---
-echo "Performing dry-run to check package..."
-cargo publish --dry-run
-
 new_version="$major.$minor.$patch"
 echo "Bumping version: $current_version → $new_version"
 
@@ -81,7 +82,7 @@ git commit -m "chore: bumped version from $current_version to $new_version"
 git tag "v$new_version" -m "Release v$new_version"
 
 # --- Confirm publishing ---
-read -p "Dry-run succeeded. Do you want to publish for real? [y/N] " confirm
+read -p "All tests passing. Do you want to publish for real? [y/N] " confirm
 if [[ "$confirm" =~ ^[Yy]$ ]]; then
   echo "Publishing crate..."
   cargo publish
