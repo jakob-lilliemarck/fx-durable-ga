@@ -4,10 +4,13 @@
 //! hidden size, number of layers, activation function, bias usage, and learning rate.
 //!
 //! **IMPORTANT!**
-//! This library requires fx-durable-ga-example-simple-regression to be installed and available on the PATH.
-//! That is required as Autodiff backend of the Burn ML framework currently does not free memory between training runs - as such, running
-//! multiple training runs will cause unbounded memory allocation, and may eventually crash. This example handles that by
-//! running each training run as a subprocess, in which case all memory allocations are freed after each run.
+//! This library requires fx-durable-ga-example-simple-regression to be installed and available on the PATH. The crate is available here:
+//! https://github.com/jakob-lilliemarck/fx-durable-ga-simple-regression
+//!
+//! This workaround is required as the Autodiff backend of the Burn ML framework currently does not free memory between training run.
+//! As such, running multiple training runs will cause unbounded memory allocation.
+//!
+//! This example handles that by running each training run as a subprocess, in which case all memory allocations are freed after each run.
 
 use anyhow::Result;
 use fx_durable_ga::{
