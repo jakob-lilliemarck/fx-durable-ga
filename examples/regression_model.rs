@@ -12,8 +12,8 @@ use fx_durable_ga::{
     },
     services::optimization,
 };
-use fx_mq_building_blocks::queries::Queries;
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
+use fx_mq_jobs::Queries;
 use serde::Deserialize;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
@@ -191,7 +191,7 @@ async fn main() -> Result<()> {
         .await?;
 
     fx_event_bus::run_migrations(&pool).await?;
-    fx_mq_building_blocks::migrator::run_migrations(&pool, FX_MQ_JOBS_SCHEMA_NAME).await?;
+    fx_mq_jobs::run_migrations(&pool, FX_MQ_JOBS_SCHEMA_NAME).await?;
 
     let service = Arc::new(
         bootstrap(pool.clone())

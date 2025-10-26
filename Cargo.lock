@@ -416,7 +416,6 @@ dependencies = [
  "dotenv",
  "futures",
  "fx-event-bus",
- "fx-mq-building-blocks",
  "fx-mq-jobs",
  "rand 0.9.2",
  "serde",
@@ -449,9 +448,9 @@ dependencies = [
 
 [[package]]
 name = "fx-mq-building-blocks"
-version = "0.1.5"
+version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0af39bfb5769044724b48dc70bfd0ca7de5245d9ac78d5875ab212dc3b683014"
+checksum = "98c2e8a9f616488d97ac2d2ded9bca2c704238c6afe599e053b9e21742cb51d1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -468,9 +467,9 @@ dependencies = [
 
 [[package]]
 name = "fx-mq-jobs"
-version = "0.1.5"
+version = "0.1.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f53a14f0c821a519cf5fd7effa73cd42b8e05c665fb3ffda35c738ff9fc46662"
+checksum = "1fd5c533f6f5090db1bc8833f80689406b16eccf0c4f2f4b0da55f28bb6073be"
 dependencies = [
  "chrono",
  "const-fnv1a-hash",

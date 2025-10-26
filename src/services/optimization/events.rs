@@ -1,14 +1,13 @@
+use super::jobs::{
+    EvaluateGenotypeMessage, GenerateInitialPopulationMessage, MaintainPopulationMessage,
+};
 use crate::{
     models::{Conclusion, RequestConclusion},
     services::optimization,
 };
-
-use super::jobs::{
-    EvaluateGenotypeMessage, GenerateInitialPopulationMessage, MaintainPopulationMessage,
-};
 use chrono::Utc;
 use fx_event_bus::Handler;
-use fx_mq_building_blocks::queries::Queries;
+use fx_mq_jobs::Queries;
 use serde::{Deserialize, Serialize};
 use sqlx::PgTransaction;
 use std::sync::Arc;

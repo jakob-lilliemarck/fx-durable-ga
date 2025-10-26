@@ -1,5 +1,4 @@
-use fx_mq_building_blocks::models::Message;
-use fx_mq_jobs::Handler;
+use fx_mq_jobs::{Handler, Message};
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
 use tracing::instrument;
