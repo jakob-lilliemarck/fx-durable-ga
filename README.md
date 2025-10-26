@@ -9,24 +9,22 @@ fx-durable-ga is designed for **long-running genetic algorithm optimizations** w
 - **Crash recovery**: Resume optimizations exactly where they left off
 - **Full audit trails**: Every evaluation, generation, and decision is recorded
 - **Concurrent execution**: Multiple workers can contribute to the same optimization
-- **Parameter tracking**: Complete history of what was tried
 
-## When to use this
+## When to use
 
-**Perfect for:**
+**Well suited for:**
 - AI model hyperparameter optimization
 - Neural architecture search
 - Feature selection for ML models
-- Any optimization where evaluation takes much longer than the GA framework overhead
+- Any optimization where evaluation takes much longer than the GA framework overhead and where parameters can be represented as discrete numbers.
 
 **Not ideal for:**
 - Fast, in-memory optimizations (use traditional GA libraries)
 - Real-time applications requiring sub-second responses
-- Simple parameter sweeps (use grid search)
 
-## How it works
+## How does it work?
 
-The library uses PostgreSQL as both storage and coordination layer:
+The library uses PostgreSQL for both storage and coordination:
 
 1. **Durable state**: All populations, genotypes, and evaluations persist in the database
 2. **Event-driven**: Optimizations progress through database events, enabling crash recovery
@@ -83,7 +81,7 @@ struct MyEvaluator;
 impl Evaluator<MyParams> for MyEvaluator {
     fn fitness<'a>(&self, params: MyParams, _terminated: &'a Box<dyn Terminated>) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
         Box::pin(async move {
-            // Your expensive evaluation here
+            // Your expensive evaluation goes here - make it non-blocking, or run the listener on a separate thread.
             let accuracy = train_model(params).await?;
             Ok(accuracy)
         })
@@ -98,9 +96,9 @@ let service = bootstrap(pool).await?
 service.new_optimization_request(
     MyParams::NAME,
     MyParams::HASH,
-    FitnessGoal::maximize(0.95)?, // Stop at 95% accuracy
-    Schedule::generational(100, 10), // 100 generations, 10 parallel
-    Selector::tournament(3, 50),  // Tournament selection
+    FitnessGoal::maximize(0.95)?, // Fitness value to stop at while trying to maximize
+    Schedule::generational(100, 10), // 100 generations, 10 per generation.
+    Selector::tournament(3, 25),  // Tournament selection
     Mutagen::new(
         Temperature::constant(0.5)?,
         MutationRate::constant(0.1)?,
@@ -112,21 +110,21 @@ service.new_optimization_request(
 
 ## Documentation and examples
 
-- **API documentation**: Run `cargo doc --open` for comprehensive API docs
-- **Examples**: See `examples/point_search.rs` for a complete working example
-- **Code documentation**: All public APIs include detailed usage examples
-
-## Development setup
-
-1. Set up PostgreSQL and configure `DATABASE_URL` with your database URL
-2. Run migrations using sqlx cli `sqlx migrate run`. If you run into issues with missing relations from jobs or events, use offline mode and prepare query cache.
-3. Generate SQLx cache: `cargo sqlx prepare` (optional, for offline compilation)
-4. Run examples: `cargo run --example point-search`
-5. Run tests: `cargo test`
-6. Generate test coverage: `cargo llvm-cov --html --output-dir coverage`
+- **API documentation**: https://docs.rs/fx-durable-ga/0.1.5/fx_durable_ga/index.html or run `cargo doc --open`
+- **Examples**:
+  1. `examples/point_search.rs` - basic example
+  2. `examples/regression_model.rs` - hyperparameter optimization for a regression model
 
 ## Migrations
-Running `cargo sqlx prepare` may require setting search path options for the `DATABASE_URL` variable. For example
+Run migrations using the migrator: https://docs.rs/fx-durable-ga/0.1.5/fx_durable_ga/migrations/fn.run_migrations.html
+
+You may also need to run migrations for
+ - fx-mq-jobs: https://docs.rs/fx-event-bus/0.1.7/fx_event_bus/fn.run_migrations.html
+ - fx-event-bus: https://docs.rs/fx-mq-jobs/0.1.8/fx_mq_jobs/fn.run_migrations.html
+See examples for more detail.
+
+### Running migrations for development
+Running `cargo sqlx prepare` may require setting search path options for the `DATABASE_URL` variable:
 ```sh
 DATABASE_URL="postgres://postgres:postgres@localhost:5432/fx-durable-ga?options=-c%20search_path%3Dfx_mq_jobs%2Cfx_event_bus%2Cfx_durable_ga"
 ```
