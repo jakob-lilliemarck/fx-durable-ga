@@ -6,7 +6,7 @@ authors = ["Jakob Lilliemarck <lilliemarckjakob@gmail.com>"]
 description = "Durable GA event driven optimization loop on PostgreSQL"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/jakob-lilliemarck/fx-durable-ga"
-keywords = ["genetic algoritms", "parameter search", "optimization"]
+keywords = ["genetic-algoritms", "parameter-search", "optimization"]
 categories = ["algorithms", "science"]
 
 [dependencies]
