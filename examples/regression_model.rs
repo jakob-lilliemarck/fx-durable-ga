@@ -2,6 +2,12 @@
 //!
 //! Demonstrates using fx_durable_ga to optimize neural network hyperparameters:
 //! hidden size, number of layers, activation function, bias usage, and learning rate.
+//!
+//! **IMPORTANT!**
+//! This library requires fx-durable-ga-example-simple-regression to be installed and available on the PATH.
+//! That is required as Autodiff backend of the Burn ML framework currently does not free memory between training runs - as such, running
+//! multiple training runs will cause unbounded memory allocation, and may eventually crash. This example handles that by
+//! running each training run as a subprocess, in which case all memory allocations are freed after each run.
 
 use anyhow::Result;
 use fx_durable_ga::{
@@ -22,7 +28,7 @@ use tracing::Level;
 use uuid::Uuid;
 
 const WORKERS: usize = 4;
-const FITNESS_TARGET: f64 = 0.05;
+const FITNESS_TARGET: f64 = 0.1;
 
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
 pub enum ActivationFunction {
@@ -58,7 +64,7 @@ impl Encodeable for NeuralArchitecture {
     fn morphology() -> Vec<GeneBounds> {
         vec![
             GeneBounds::integer(0, 3, 4).unwrap(), // hidden_size: [32, 64, 128, 256]
-            GeneBounds::integer(0, 7, 8).unwrap(), // num_hidden_layers: [1, 2, 3]
+            GeneBounds::integer(0, 7, 8).unwrap(), // num_hidden_layers: [1, 2, 3, 4, 5, 6, 7, 8]
             GeneBounds::integer(0, 2, 3).unwrap(), // activation_fn: [ReLU, GELU, Sigmoid]
             GeneBounds::integer(0, 1, 2).unwrap(), // use_bias: [false, true]
             GeneBounds::integer(0, 2, 3).unwrap(), // learning_rate: [1e-4, 1e-3, 1e-2]
@@ -110,7 +116,7 @@ impl Encodeable for NeuralArchitecture {
             _ => 64,
         };
 
-        let num_hidden_layers = (genes[1] + 1).clamp(1, 3) as usize;
+        let num_hidden_layers = (genes[1] + 1).clamp(1, 8) as usize;
 
         let activation_fn = match genes[2] {
             0 => ActivationFunction::Relu,
