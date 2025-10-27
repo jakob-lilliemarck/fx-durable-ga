@@ -14,12 +14,12 @@
 
 use anyhow::Result;
 use fx_durable_ga::{
-    bootstrap::bootstrap,
+    bootstrap,
     models::{
         Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
         MutationRate, Schedule, Selector, Temperature, Terminated,
     },
-    services::optimization,
+    register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
 use fx_mq_jobs::Queries;
@@ -206,6 +206,7 @@ async fn main() -> Result<()> {
 
     fx_event_bus::run_migrations(&pool).await?;
     fx_mq_jobs::run_migrations(&pool, FX_MQ_JOBS_SCHEMA_NAME).await?;
+    fx_durable_ga::run_migrations(&pool).await?;
 
     let service = Arc::new(
         bootstrap(pool.clone())
@@ -216,7 +217,7 @@ async fn main() -> Result<()> {
     );
 
     let mut registry = fx_event_bus::EventHandlerRegistry::new();
-    optimization::register_event_handlers(
+    register_event_handlers(
         Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME)),
         service.clone(),
         &mut registry,
@@ -227,7 +228,7 @@ async fn main() -> Result<()> {
     let host_id = Uuid::parse_str("00000000-0000-0000-0000-123456789abc")?;
     let mut jobs_listener = fx_mq_jobs::Listener::new(
         pool.clone(),
-        optimization::register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
+        register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
         WORKERS,
         host_id,
         Duration::from_secs(600),

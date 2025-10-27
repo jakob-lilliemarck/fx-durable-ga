@@ -104,7 +104,7 @@ impl Service {
     /// ## Quick Convergence (Time-Constrained)
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
-    /// # use fx_durable_ga::services::optimization::Service;
+    /// # use fx_durable_ga::optimization::Service;
     /// # #[derive(Debug)] struct MyType;
     /// # impl Encodeable for MyType {
     /// #     const NAME: &'static str = "MyType";
@@ -135,7 +135,7 @@ impl Service {
     /// ## Balanced Search (General Purpose)
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
-    /// # use fx_durable_ga::services::optimization::Service;
+    /// # use fx_durable_ga::optimization::Service;
     /// # #[derive(Debug)] struct MyType;
     /// # impl Encodeable for MyType {
     /// #     const NAME: &'static str = "MyType";
@@ -166,7 +166,7 @@ impl Service {
     /// ## Thorough Exploration (Complex Problems)
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
-    /// # use fx_durable_ga::services::optimization::Service;
+    /// # use fx_durable_ga::optimization::Service;
     /// # #[derive(Debug)] struct MyType;
     /// # impl Encodeable for MyType {
     /// #     const NAME: &'static str = "MyType";
@@ -216,7 +216,7 @@ impl Service {
     ///
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
-    /// # use fx_durable_ga::services::optimization::Service;
+    /// # use fx_durable_ga::optimization::Service;
     ///
     /// // Define your problem type
     /// #[derive(Debug)]

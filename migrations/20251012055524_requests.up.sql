@@ -1,4 +1,4 @@
-CREATE SCHEMA fx_durable_ga;
+CREATE SCHEMA IF NOT EXISTS fx_durable_ga;
 
 CREATE TABLE fx_durable_ga.requests (
     id UUID PRIMARY KEY,

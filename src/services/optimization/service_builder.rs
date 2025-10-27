@@ -67,7 +67,7 @@ impl ServiceBuilder {
     /// ## Simple Numerical Optimization
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
-    /// # use fx_durable_ga::services::optimization::ServiceBuilder;
+    /// # use fx_durable_ga::optimization::ServiceBuilder;
     /// # use futures::future::BoxFuture;
     ///
     /// #[derive(Debug, Clone)]
@@ -134,7 +134,7 @@ impl ServiceBuilder {
     /// ## Geometric/Spatial Problems
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
-    /// # use fx_durable_ga::services::optimization::ServiceBuilder;
+    /// # use fx_durable_ga::optimization::ServiceBuilder;
     /// # use futures::future::BoxFuture;
     ///
     /// #[derive(Debug, Clone)]
@@ -216,7 +216,7 @@ impl ServiceBuilder {
     /// ## Combinatorial/Discrete Problems
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
-    /// # use fx_durable_ga::services::optimization::ServiceBuilder;
+    /// # use fx_durable_ga::optimization::ServiceBuilder;
     /// # use futures::future::BoxFuture;
     ///
     /// #[derive(Debug, Clone)]
@@ -306,7 +306,7 @@ impl ServiceBuilder {
     ///
     /// Multiple types can be registered with the same service:
     /// ```rust,no_run
-    /// # use fx_durable_ga::services::optimization::ServiceBuilder;
+    /// # use fx_durable_ga::optimization::ServiceBuilder;
     /// # struct TypeA; struct TypeB; struct EvaluatorA; struct EvaluatorB;
     /// # impl fx_durable_ga::models::Encodeable for TypeA {
     /// #     const NAME: &'static str = "TypeA"; type Phenotype = TypeA;
@@ -353,7 +353,7 @@ impl ServiceBuilder {
     /// # Example Usage
     ///
     /// ```rust,no_run
-    /// use fx_durable_ga::{bootstrap::bootstrap, models::*};
+    /// use fx_durable_ga::{bootstrap, models::*};
     /// # use futures::future::BoxFuture;
     /// # use sqlx::PgPool;
     ///

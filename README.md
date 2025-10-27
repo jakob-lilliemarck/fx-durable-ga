@@ -37,7 +37,7 @@ Network latency to the database is the primary overhead, but this is negligible 
 ## Quick start
 
 ```rust
-use fx_durable_ga::{bootstrap::bootstrap, models::*};
+use fx_durable_ga::{bootstrap, models::*};
 use futures::future::BoxFuture;
 
 // 1. Define your optimization target
