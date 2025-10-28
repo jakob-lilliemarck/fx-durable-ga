@@ -243,33 +243,40 @@ fn roulette_selection<'a>(
         return Err(SelectionError::NoValidParents);
     }
 
-    let sum_fitness: f64 = raw_fitness_pairs.iter().map(|(_, fitness)| *fitness).sum();
-    if sum_fitness <= 0.0 {
-        return Err(SelectionError::InvalidFitnessForRoulette);
-    }
-
-    // FIXME: For maximize goals, check for negative fitness values (not allowed in roulette)
-    // TODO: Scale/shift values to handle negative fitness properly in the future
-    if matches!(goal, FitnessGoal::Maximize { .. }) {
-        if raw_fitness_pairs.iter().any(|(_, fitness)| *fitness < 0.0) {
-            return Err(SelectionError::InvalidFitnessForRoulette);
-        }
-    }
-
     // Transform fitness values for roulette wheel based on goal
-    let evaluated_candidates: Vec<(&Genotype, f64)> = raw_fitness_pairs
-        .iter()
-        .map(|(genotype, fitness)| {
-            let weight = match goal {
-                FitnessGoal::Maximize { .. } => *fitness,
-                FitnessGoal::Minimize { .. } => {
-                    // Invert: smaller fitness values get larger weights
-                    1.0 - (fitness / sum_fitness)
-                }
-            };
-            (*genotype, weight)
-        })
-        .collect();
+    let evaluated_candidates: Vec<(&Genotype, f64)> = match goal {
+        FitnessGoal::Maximize { .. } => {
+            // Find the minimum value
+            let min_fitness = raw_fitness_pairs
+                .iter()
+                .map(|(_, fitness)| *fitness)
+                .min_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap();
+
+            // Figure out how much, if anything it needs to be shifted
+            let shift = if min_fitness < 0.0 { -min_fitness } else { 0.0 };
+
+            // Shift the values
+            raw_fitness_pairs
+                .iter()
+                .map(|(genotype, fitness)| (*genotype, fitness + shift))
+                .collect()
+        }
+        FitnessGoal::Minimize { .. } => {
+            // Find the maximum fitness
+            let max_fitness = raw_fitness_pairs
+                .iter()
+                .map(|(_, fitness)| *fitness)
+                .max_by(|a, b| a.partial_cmp(b).unwrap())
+                .unwrap();
+
+            // Invert: lower fitness = higher weight
+            raw_fitness_pairs
+                .iter()
+                .map(|(genotype, fitness)| (*genotype, max_fitness - fitness))
+                .collect()
+        }
+    };
 
     // Calculate total fitness for roulette wheel
     let total_fitness: f64 = evaluated_candidates.iter().map(|(_, weight)| *weight).sum();
@@ -773,9 +780,8 @@ mod selector_tests {
     }
 
     #[test]
-    fn test_roulette_errors_on_candidate_negative_fitness_zero() {
+    fn test_roulette_handles_negative_fitness() {
         let selector = Selector::roulette(25);
-
         let candidates = vec![
             (
                 super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000001"),
@@ -786,10 +792,13 @@ mod selector_tests {
                 Some(2.0),
             ),
         ];
-
         let goal = &crate::models::FitnessGoal::maximize(0.9).unwrap();
         let result = selector.select_parents(1, &candidates, goal);
-        assert_eq!(result, Err(SelectionError::InvalidFitnessForRoulette));
+
+        // Should succeed now that we handle negative fitness
+        assert!(result.is_ok());
+        let pairs = result.unwrap();
+        assert_eq!(pairs.len(), 1);
     }
 
     #[test]
