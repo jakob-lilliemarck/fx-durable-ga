@@ -91,7 +91,7 @@ impl FitnessGoal {
     /// For now, always returns 0.0 which means decay strategies will use constant values.
     /// Returns 0.0 if best_fitness is None.
     #[instrument(level = "debug", skip(self), fields(goal = ?self))]
-    pub(crate) fn calculate_progress(&self, _: Option<f64>) -> f64 {
+    pub(crate) fn calculate_progress(&self, _fitness: Option<f64>) -> f64 {
         // FIXME: Implement proper progress calculation for unbounded fitness
         // Options: generation-based progress, improvement-rate based, or user-defined decay functions
         0.0
