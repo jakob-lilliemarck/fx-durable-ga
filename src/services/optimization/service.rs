@@ -273,10 +273,11 @@ impl Service {
         mutagen: Mutagen,
         crossover: Crossover,
         distribution: Distribution,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         tracing::info!("Optimization request received");
 
-        self.requests
+        let request = self
+            .requests
             .chain(|mut tx_requests| {
                 Box::pin(async move {
                     // Create a new optimization request with the repository
@@ -306,7 +307,7 @@ impl Service {
             })
             .await?;
 
-        Ok(())
+        Ok(request.id)
     }
 
     /// Generates the initial population of genotypes for an optimization request.
@@ -697,6 +698,45 @@ impl Service {
             .await?;
 
         Ok(())
+    }
+
+    /// Gets the best genotype for a request based on fitness.
+    /// Returns the genotype with the best (min or max) fitness depending on the goal.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub async fn get_best_genotype(
+        &self,
+        request_id: Uuid,
+    ) -> Result<Option<(Genotype, f64)>, Error> {
+        let request = self.requests.get_request(request_id).await?;
+
+        // Determine sort order based on goal
+        let filter = match request.goal {
+            FitnessGoal::Minimize { .. } => genotypes::Filter::default()
+                .with_request_id(request_id)
+                .with_fitness(true)
+                .with_order_fitness_asc(),
+            FitnessGoal::Maximize { .. } => genotypes::Filter::default()
+                .with_request_id(request_id)
+                .with_fitness(true)
+                .with_order_fitness_desc(),
+        };
+
+        let results = self.genotypes.search_genotypes(&filter, 1).await?;
+
+        // Extract the first result if it exists and has fitness
+        let best = results
+            .into_iter()
+            .next()
+            .and_then(|(genotype, fitness_opt)| fitness_opt.map(|fitness| (genotype, fitness)));
+
+        Ok(best)
+    }
+
+    /// Checks if an optimization request has concluded.
+    /// Returns true if the request has been completed or terminated.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub async fn is_request_concluded(&self, request_id: Uuid) -> Result<bool, Error> {
+        Ok(self.requests.get_request_conclusion(&request_id).await?.is_some())
     }
 }
 

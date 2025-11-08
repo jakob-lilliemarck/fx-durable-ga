@@ -12,7 +12,7 @@ pub type Gene = i64;
 /// Contains the genome data and metadata for tracking through generations.
 #[derive(Debug, Clone, FromRow)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(crate) struct Genotype {
+pub struct Genotype {
     pub(crate) id: Uuid,
     pub(crate) generated_at: DateTime<Utc>,
     pub(crate) type_name: String,
@@ -54,6 +54,10 @@ impl Genotype {
         let mut hasher = DefaultHasher::new();
         genome.hash(&mut hasher);
         hasher.finish() as i64
+    }
+
+    pub fn genome(&self) -> Vec<Gene> {
+        self.genome.clone()
     }
 }
 
