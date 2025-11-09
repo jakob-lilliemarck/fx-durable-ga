@@ -35,8 +35,8 @@ use tracing::instrument;
 /// // Fast rolling: breed single genotypes continuously
 /// let continuous = Schedule::rolling(1000, 100, 1);
 /// ```
-#[derive(Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(Clone, PartialEq))]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Schedule {
     /// Total evaluation budget before optimization terminates.
     /// Higher values allow more exploration but take longer to complete.
