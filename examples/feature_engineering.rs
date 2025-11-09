@@ -9,12 +9,12 @@
 //! https://github.com/jakob-lilliemarck/fx-durable-ga-example-feature-engineering
 //!
 //! This example optimizes:
-//! - Which 5 features to use from available columns (TEMP, PRES, DEWP, etc.)
+//! - Which 7 features to use from available columns (TEMP, PRES, DEWP, etc.)
 //! - Preprocessing pipeline for each feature (max 2 transforms: ZSCORE, ROC, STD)
 //! - Neural network hyperparameters (hidden size, learning rate, sequence length)
 //!
-//! Search space: ~5.6 × 10^18 possible configurations
-//! (11^5 source columns × 3^5 pipeline lengths × 12^5 transform_1 × 12^5 transform_2 × 5 hidden sizes × 3 learning rates × 10 sequence lengths)
+//! Search space: ~2.8 × 10^26 possible configurations
+//! (11^7 source columns × 3^7 pipeline lengths × 12^7 transform_1 × 12^7 transform_2 × 6 hidden sizes × 3 learning rates × 10 sequence lengths)
 
 use anyhow::Result;
 use fx_durable_ga::{
@@ -35,7 +35,7 @@ use tracing::Level;
 use uuid::Uuid;
 
 const WORKERS: usize = 5;
-const FITNESS_TARGET: f64 = 1.7;
+const FITNESS_TARGET: f64 = 1.0;
 
 /// Available source columns for features
 const SOURCE_COLUMNS: &[&str] = &[
@@ -154,12 +154,12 @@ impl Encodeable for FeatureConfig {
     fn morphology() -> Vec<GeneBounds> {
         let mut bounds = Vec::new();
 
-        // 5 features, each with:
+        // 7 features, each with:
         // - source column (0-10)
         // - pipeline_length (0-2)
         // - transform_1 (0-11)
         // - transform_2 (0-11)
-        for _ in 0..5 {
+        for _ in 0..7 {
             bounds.push(GeneBounds::integer(0, 10, 11).unwrap()); // source
             bounds.push(GeneBounds::integer(0, 2, 3).unwrap()); // pipeline_length (max 2)
             bounds.push(GeneBounds::integer(0, 11, 12).unwrap()); // transform_1
@@ -167,7 +167,7 @@ impl Encodeable for FeatureConfig {
         }
 
         // Hyperparameters
-        bounds.push(GeneBounds::integer(0, 4, 5).unwrap()); // hidden_size: [4, 8, 16, 32, 64]
+        bounds.push(GeneBounds::integer(0, 5, 6).unwrap()); // hidden_size: [4, 8, 16, 32, 64, 128]
         bounds.push(GeneBounds::integer(0, 2, 3).unwrap()); // learning_rate: [1e-4, 5e-4, 1e-3]
         bounds.push(GeneBounds::integer(0, 9, 10).unwrap()); // sequence_length: [10..100 step 10]
 
@@ -177,7 +177,7 @@ impl Encodeable for FeatureConfig {
     fn encode(&self) -> Vec<i64> {
         let mut genes = Vec::new();
 
-        // Encode 5 features
+        // Encode 7 features
         for feature in &self.features {
             // Source column
             let source_idx = SOURCE_COLUMNS
@@ -206,6 +206,7 @@ impl Encodeable for FeatureConfig {
             16 => 2,
             32 => 3,
             64 => 4,
+            128 => 5,
             _ => 2, // default to 16
         };
         genes.push(hidden_size_idx);
@@ -228,8 +229,8 @@ impl Encodeable for FeatureConfig {
     fn decode(genes: &[i64]) -> Self::Phenotype {
         let mut features = Vec::new();
 
-        // Decode 5 features (4 genes per feature now: source, length, t1, t2)
-        for i in 0..5 {
+        // Decode 7 features (4 genes per feature now: source, length, t1, t2)
+        for i in 0..7 {
             let base_idx = i * 4;
 
             let source_idx = genes[base_idx].clamp(0, 10) as usize;
@@ -247,24 +248,25 @@ impl Encodeable for FeatureConfig {
             features.push(Feature { source, transforms });
         }
 
-        // Decode hyperparameters (genes are now at index 20, 21, 22)
-        let hidden_size = match genes[20] {
+        // Decode hyperparameters (genes are now at index 28, 29, 30)
+        let hidden_size = match genes[28] {
             0 => 4,
             1 => 8,
             2 => 16,
             3 => 32,
             4 => 64,
-            _ => 16,
+            5 => 128,
+            _ => 32,
         };
 
-        let learning_rate = match genes[21] {
+        let learning_rate = match genes[29] {
             0 => 1e-4,
             1 => 5e-4,
             2 => 1e-3,
             _ => 5e-4,
         };
 
-        let sequence_length = ((genes[22].clamp(0, 9) + 1) * 10) as usize;
+        let sequence_length = ((genes[30].clamp(0, 9) + 1) * 10) as usize;
 
         FeatureConfig {
             features,
@@ -418,16 +420,16 @@ async fn main() -> Result<()> {
             FeatureConfig::NAME,
             FeatureConfig::HASH,
             FitnessGoal::minimize(FITNESS_TARGET)?,
-            Schedule::generational(10, 10),
-            Selector::tournament(5, 15),
-            Mutagen::new(Temperature::constant(0.8)?, MutationRate::constant(0.4)?),
+            Schedule::generational(40, 10),
+            Selector::tournament(5, 45),
+            Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.35)?),
             Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(15),
+            Distribution::latin_hypercube(40),
         )
         .await?;
 
     // Poll for completion every 15 seconds (timeout after 1 hour)
-    let timeout = Duration::from_secs(3600);
+    let timeout = Duration::from_secs(7200);
     let poll_interval = Duration::from_secs(15);
     let start = std::time::Instant::now();
 
