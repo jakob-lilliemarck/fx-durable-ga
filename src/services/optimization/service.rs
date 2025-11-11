@@ -4,7 +4,7 @@ use super::events::{
     RequestTerminatedEvent,
 };
 use crate::models::{
-    Breeder, Crossover, Distribution, Fitness, FitnessGoal, Genotype, Mutagen, Request,
+    Breeder, Crossover, Distribution, Encodeable, Fitness, FitnessGoal, Genotype, Mutagen, Request,
     RequestConclusion, Schedule, ScheduleDecision, Selector, Terminated,
 };
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
@@ -698,6 +698,24 @@ impl Service {
 
         Ok(())
     }
+
+    /// Get a morphology by its type name
+    #[instrument(level = "debug", skip(self), fields(type_name))]
+    pub async fn get_phenotype<T: Encodeable>(
+        &self,
+        genotype_id: &Uuid,
+    ) -> Result<T::Phenotype, Error> {
+        let genotype = self.genotypes.get_genotype(genotype_id).await?;
+
+        if genotype.type_hash != T::HASH {
+            return Err(Error::UnknownPhenotype {
+                type_name: genotype.type_name,
+                type_hash: genotype.type_hash,
+            });
+        }
+
+        Ok(T::decode(&genotype.genome))
+    }
 }
 
 #[cfg(test)]
@@ -1098,6 +1116,97 @@ mod tests {
             event_count, 1,
             "Exactly one RequestCompletedEvent should be published"
         );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    async fn test_get_phenotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        use crate::models::{Encodeable, GeneBounds};
+
+        #[derive(Debug, PartialEq)]
+        struct TestPoint {
+            x: i64,
+            y: i64,
+        }
+
+        impl Encodeable for TestPoint {
+            const NAME: &'static str = "TestPoint";
+            type Phenotype = TestPoint;
+
+            fn morphology() -> Vec<GeneBounds> {
+                vec![
+                    GeneBounds::integer(0, 9, 10).unwrap(),
+                    GeneBounds::integer(0, 4, 5).unwrap(),
+                ]
+            }
+
+            fn encode(&self) -> Vec<i64> {
+                vec![self.x, self.y]
+            }
+
+            fn decode(genes: &[i64]) -> Self::Phenotype {
+                TestPoint {
+                    x: genes[0],
+                    y: genes[1],
+                }
+            }
+        }
+
+        let service = create_test_service(pool.clone()).await;
+
+        let goal = FitnessGoal::maximize(0.95)?;
+        let schedule = Schedule::generational(100, 10);
+        let selector = Selector::tournament(3, 20);
+        let mutagen = Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.3)?);
+        let crossover = Crossover::uniform(0.5)?;
+        let distribution = Distribution::random(10);
+
+        let request = crate::models::Request::new(
+            TestPoint::NAME,
+            TestPoint::HASH,
+            goal,
+            selector,
+            schedule,
+            mutagen,
+            crossover,
+            distribution,
+        )?;
+        let request_id = request.id;
+
+        service
+            .requests
+            .chain(|mut tx_requests| {
+                Box::pin(async move {
+                    let request = tx_requests.new_request(request).await?;
+                    Ok((tx_requests, request))
+                })
+            })
+            .await?;
+
+        let genotype = crate::models::Genotype::new(
+            TestPoint::NAME,
+            TestPoint::HASH,
+            vec![7, 3],
+            request_id,
+            1,
+        );
+        let genotype_id = genotype.id;
+
+        service
+            .genotypes
+            .chain(|mut tx_genotypes| {
+                Box::pin(async move {
+                    tx_genotypes.new_genotypes(vec![genotype]).await?;
+                    Ok((tx_genotypes, ()))
+                })
+            })
+            .await?;
+
+        let result: TestPoint = service.get_phenotype::<TestPoint>(&genotype_id).await?;
+
+        assert_eq!(result.x, 7);
+        assert_eq!(result.y, 3);
 
         Ok(())
     }

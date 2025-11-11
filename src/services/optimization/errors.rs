@@ -21,4 +21,6 @@ pub enum Error {
     SelectionError(#[from] SelectionError),
     #[error("Lock error: {0}")]
     LockError(#[from] lock::Error),
+    #[error("Unknownn phenotype")]
+    UnknownPhenotype { type_name: String, type_hash: i32 },
 }
