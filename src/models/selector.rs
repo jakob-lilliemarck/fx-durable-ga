@@ -387,8 +387,8 @@ fn tournament_selection<'a>(
 /// // High selection pressure tournament
 /// let elite_selector = Selector::tournament(7, 50);
 /// ```
-#[derive(Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(Clone, PartialEq))]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Selector {
     /// The selection algorithm to use for choosing parent pairs
     pub method: SelectionMethod,
@@ -400,8 +400,8 @@ pub struct Selector {
 ///
 /// Each method has different characteristics and is suitable for different
 /// optimization scenarios.
-#[derive(Debug, Deserialize, Serialize)]
-#[cfg_attr(test, derive(Clone, PartialEq, Eq))]
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[cfg_attr(test, derive(PartialEq, Eq))]
 pub enum SelectionMethod {
     /// Tournament selection runs competitions between randomly selected candidates.
     ///
