@@ -745,6 +745,17 @@ impl Service {
 
     /// Get a morphology by its type name
     #[instrument(level = "debug", skip(self), fields(type_name))]
+    pub async fn search_genotypes(
+        &self,
+        filter: &genotypes::Filter,
+        limit: i64,
+    ) -> Result<Vec<(Genotype, Option<f64>)>, Error> {
+        let genotypes = self.genotypes.search_genotypes(filter, limit).await?;
+        Ok(genotypes)
+    }
+
+    /// Get a phenotype by its type name
+    #[instrument(level = "debug", skip(self), fields(type_name))]
     pub async fn get_phenotype<T: Encodeable>(
         &self,
         genotype_id: &Uuid,

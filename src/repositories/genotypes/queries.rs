@@ -640,7 +640,7 @@ impl Display for Order {
 
 /// Filter criteria for searching genotypes with various conditions.
 #[derive(Debug)]
-pub(crate) struct Filter {
+pub struct Filter {
     request_id: Option<Uuid>,
     generation_id: Option<i32>,
     has_fitness: Option<bool>,
@@ -660,36 +660,36 @@ impl Default for Filter {
 
 impl Filter {
     /// Filters genotypes by request ID.
-    pub(crate) fn with_request_id(mut self, request_id: Uuid) -> Self {
+    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
         self.request_id = Some(request_id);
         self
     }
 
     #[allow(dead_code)]
-    pub(crate) fn with_generation_id(mut self, generation_id: i32) -> Self {
+    pub fn with_generation_id(mut self, generation_id: i32) -> Self {
         self.generation_id = Some(generation_id);
         self
     }
 
     /// Filters genotypes based on whether they have fitness evaluations.
-    pub(crate) fn with_fitness(mut self, has_fitness: bool) -> Self {
+    pub fn with_fitness(mut self, has_fitness: bool) -> Self {
         self.has_fitness = Some(has_fitness);
         self
     }
 
-    pub(crate) fn with_order_random(mut self) -> Self {
+    pub fn with_order_random(mut self) -> Self {
         self.order = Some(Order::Random);
         self
     }
 
     #[allow(dead_code)]
-    pub(crate) fn with_order_fitness_asc(mut self) -> Self {
+    pub fn with_order_fitness_asc(mut self) -> Self {
         self.order = Some(Order::Fitness(SortOrder::Asc));
         self
     }
 
     #[allow(dead_code)]
-    pub(crate) fn with_order_fitness_desc(mut self) -> Self {
+    pub fn with_order_fitness_desc(mut self) -> Self {
         self.order = Some(Order::Fitness(SortOrder::Desc));
         self
     }
