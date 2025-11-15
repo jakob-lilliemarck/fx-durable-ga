@@ -338,7 +338,7 @@ impl Service {
         for genome in genomes {
             let genotype =
                 Genotype::new(&request.type_name, request.type_hash, genome, request.id, 1);
-            let event = GenotypeGenerated::new(request.id, genotype.id);
+            let event = GenotypeGenerated::new(request.id, genotype.id());
 
             genotypes.push(genotype);
             events.push(event);
@@ -393,16 +393,16 @@ impl Service {
         // Get the evaluator to use for this type
         let evaluator =
             self.evaluators
-                .get(&genotype.type_hash)
+                .get(&genotype.type_hash())
                 .ok_or(Error::UnknownTypeError {
-                    type_hash: genotype.type_hash,
-                    type_name: genotype.type_name,
+                    type_hash: genotype.type_hash(),
+                    type_name: genotype.type_name().to_string(),
                 })?;
 
         // Call the evaluation function. This is a long running function!
         let terminator: Box<dyn Terminated> =
             Box::new(Terminator::new(self.requests.clone(), request_id));
-        let fitness = evaluator.fitness(&genotype.genome, &terminator).await?;
+        let fitness = evaluator.fitness(&genotype, &terminator).await?;
 
         self.genotypes
             .chain(|mut tx_genotypes| {
@@ -497,7 +497,7 @@ impl Service {
             };
 
             // Collect hashes from this batch
-            let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash).collect();
+            let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash()).collect();
 
             // Check database for intersections
             let intersecting_hashes = self
@@ -510,10 +510,10 @@ impl Service {
             // Filter out duplicates (database + already generated)
             let mut unique_count = 0;
             for genotype in batch_genotypes {
-                if !intersecting_hashes.contains(&genotype.genome_hash)
-                    && !generated_hashes.contains(&genotype.genome_hash)
+                if !intersecting_hashes.contains(&genotype.genome_hash())
+                    && !generated_hashes.contains(&genotype.genome_hash())
                 {
-                    generated_hashes.insert(genotype.genome_hash);
+                    generated_hashes.insert(genotype.genome_hash());
                     final_genotypes.push(genotype);
                     unique_count += 1;
                 }
@@ -560,7 +560,7 @@ impl Service {
             // Create events for final genotypes
             let events: Vec<GenotypeGenerated> = final_genotypes
                 .iter()
-                .map(|genotype| GenotypeGenerated::new(request.id, genotype.id))
+                .map(|genotype| GenotypeGenerated::new(request.id, genotype.id()))
                 .collect();
 
             self.genotypes
@@ -751,14 +751,14 @@ impl Service {
     ) -> Result<T::Phenotype, Error> {
         let genotype = self.genotypes.get_genotype(genotype_id).await?;
 
-        if genotype.type_hash != T::HASH {
+        if genotype.type_hash() != T::HASH {
             return Err(Error::UnknownPhenotype {
-                type_name: genotype.type_name,
-                type_hash: genotype.type_hash,
+                type_name: genotype.type_name().to_string(),
+                type_hash: genotype.type_hash(),
             });
         }
 
-        Ok(T::decode(&genotype.genome))
+        Ok(T::decode(&genotype.genome()))
     }
 }
 
@@ -967,6 +967,7 @@ mod tests {
         impl Evaluator<(i64, i64)> for TestEvaluator {
             fn fitness<'a>(
                 &self,
+                _genotype_id: uuid::Uuid,
                 _phenotype: (i64, i64),
                 _terminated: &'a Box<dyn Terminated>,
             ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
@@ -1023,7 +1024,7 @@ mod tests {
             request_id,
             1, // generation_id
         );
-        let genotype_id = genotype.id;
+        let genotype_id = genotype.id();
 
         // Insert genotype into database
         service
@@ -1123,7 +1124,7 @@ mod tests {
         // Create genotype with fitness that EXCEEDS the goal (0.8 > 0.5)
         let genotype =
             crate::models::Genotype::new(type_name, type_hash, vec![5, 2], request_id, 1);
-        let genotype_id = genotype.id;
+        let genotype_id = genotype.id();
 
         // Insert genotype and fitness
         service
@@ -1235,7 +1236,7 @@ mod tests {
             request_id,
             1,
         );
-        let genotype_id = genotype.id;
+        let genotype_id = genotype.id();
 
         service
             .genotypes

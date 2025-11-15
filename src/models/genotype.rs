@@ -56,8 +56,44 @@ impl Genotype {
         hasher.finish() as i64
     }
 
+    pub fn id(&self) -> Uuid {
+        self.id
+    }
+
     pub fn genome(&self) -> Vec<Gene> {
         self.genome.clone()
+    }
+
+    pub(crate) fn type_hash(&self) -> i32 {
+        self.type_hash
+    }
+
+    pub(crate) fn type_name(&self) -> &str {
+        &self.type_name
+    }
+
+    pub(crate) fn generated_at(&self) -> DateTime<Utc> {
+        self.generated_at
+    }
+
+    pub(crate) fn genome_hash(&self) -> i64 {
+        self.genome_hash
+    }
+
+    pub(crate) fn request_id(&self) -> Uuid {
+        self.request_id
+    }
+
+    pub(crate) fn generation_id(&self) -> i32 {
+        self.generation_id
+    }
+
+    pub(crate) fn genome_mut(&mut self) -> &mut Vec<Gene> {
+        &mut self.genome
+    }
+
+    pub(crate) fn set_genome_hash(&mut self, hash: i64) {
+        self.genome_hash = hash;
     }
 }
 

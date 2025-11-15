@@ -287,10 +287,12 @@ struct ResultOutput {
 impl Evaluator<FeatureConfig> for FeatureEvaluator {
     fn fitness<'a>(
         &self,
+        genotype_id: Uuid,
         phenotype: FeatureConfig,
         _: &'a Box<dyn Terminated>,
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
         Box::pin(async move {
+            let model_save_path = format!("./model_storage/{}", genotype_id);
             let mut args = vec![
                 "train".to_string(),
                 "--hidden-size".to_string(),
@@ -305,6 +307,8 @@ impl Evaluator<FeatureConfig> for FeatureEvaluator {
                 "100".to_string(),
                 "--epochs".to_string(),
                 "25".to_string(),
+                "--model-save-path".to_string(),
+                model_save_path,
             ];
 
             // Add time features (always included)
