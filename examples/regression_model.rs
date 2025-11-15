@@ -157,6 +157,7 @@ struct ResultOutput {
 impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
     fn fitness<'a>(
         &self,
+        _genotype_id: Uuid,
         phenotype: NeuralArchitecture,
         _: &'a Box<dyn Terminated>,
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {

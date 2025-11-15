@@ -34,23 +34,24 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             query_builder.push(", ");
         }
 
+        let type_name = g.type_name().to_string();
         query_builder
             .push("(")
-            .push_bind(g.id)
+            .push_bind(g.id())
             .push(", ")
-            .push_bind(g.generated_at)
+            .push_bind(g.generated_at())
             .push(", ")
-            .push_bind(g.type_name)
+            .push_bind(type_name)
             .push(", ")
-            .push_bind(g.type_hash)
+            .push_bind(g.type_hash())
             .push(", ")
-            .push_bind(g.genome)
+            .push_bind(g.genome())
             .push(", ")
-            .push_bind(g.genome_hash)
+            .push_bind(g.genome_hash())
             .push(", ")
-            .push_bind(g.request_id)
+            .push_bind(g.request_id())
             .push(", ")
-            .push_bind(g.generation_id)
+            .push_bind(g.generation_id())
             .push(")");
     }
     query_builder.push(
@@ -95,14 +96,14 @@ mod new_genotypes_tests {
 
         let inserted = new_genotypes(&pool, genotypes).await?;
 
-        assert_eq!(genotypes_clone[0].id, inserted[0].id);
+        assert_eq!(genotypes_clone[0].id(), inserted[0].id());
         assert_eq!(
-            genotypes_clone[0].generated_at.trunc_subsecs(6),
-            inserted[0].generated_at
+            genotypes_clone[0].generated_at().trunc_subsecs(6),
+            inserted[0].generated_at()
         );
-        assert_eq!(genotypes_clone[0].type_name, inserted[0].type_name);
-        assert_eq!(genotypes_clone[0].type_hash, inserted[0].type_hash);
-        assert_eq!(genotypes_clone[0].genome, inserted[0].genome);
+        assert_eq!(genotypes_clone[0].type_name(), inserted[0].type_name());
+        assert_eq!(genotypes_clone[0].type_hash(), inserted[0].type_hash());
+        assert_eq!(genotypes_clone[0].genome(), inserted[0].genome());
 
         Ok(())
     }

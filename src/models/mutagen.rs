@@ -671,7 +671,7 @@ impl Mutagen {
     }
 
     /// Mutates a genotype in place based on current temperature and mutation rate.
-    #[instrument(level = "debug", skip(self, rng, genotype, morphology), fields(progress = progress, genotype_id = %genotype.id))]
+    #[instrument(level = "debug", skip(self, rng, genotype, morphology), fields(progress = progress, genotype_id = %genotype.id()))]
     pub(crate) fn mutate<R: Rng>(
         &self,
         rng: &mut R,
@@ -683,7 +683,7 @@ impl Mutagen {
         let mutation_rate = self.mutation_rate.get(progress);
 
         for (gene, bounds) in genotype
-            .genome
+            .genome_mut()
             .iter_mut()
             .zip(morphology.gene_bounds.iter())
         {
@@ -702,7 +702,8 @@ impl Mutagen {
         }
 
         // Recompute hash after mutation since the genome may have changed
-        genotype.genome_hash = Genotype::compute_genome_hash(&genotype.genome);
+        let new_hash = Genotype::compute_genome_hash(&genotype.genome());
+        genotype.set_genome_hash(new_hash);
     }
 }
 

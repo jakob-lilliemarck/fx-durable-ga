@@ -102,6 +102,7 @@ impl Evaluator<Point> for PointDistanceEvaluator {
     /// Lower distances are better - this is a minimization problem.
     fn fitness<'a>(
         &self,
+        _genotype_id: Uuid,
         phenotype: Point,
         terminated: &'a Box<dyn Terminated>,
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {

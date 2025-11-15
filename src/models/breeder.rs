@@ -6,7 +6,7 @@ pub(crate) struct Breeder;
 
 impl Breeder {
     /// Creates a single child from two parents using crossover and mutation.
-    #[instrument(level = "debug", skip(request, morphology, parent1, parent2, rng), fields(parent1_id = %parent1.id, parent2_id = %parent2.id, generation_id = next_generation_id, progress = progress))]
+    #[instrument(level = "debug", skip(request, morphology, parent1, parent2, rng), fields(parent1_id = %parent1.id(), parent2_id = %parent2.id(), generation_id = next_generation_id, progress = progress))]
     fn breed_child(
         request: &Request,
         morphology: &Morphology,
@@ -153,11 +153,11 @@ mod tests {
         );
 
         let child = &children[0];
-        assert_eq!(child.type_name, "TestType");
-        assert_eq!(child.type_hash, 123);
-        assert_eq!(child.request_id, request.id);
-        assert_eq!(child.generation_id, next_generation_id);
-        assert_eq!(child.genome.len(), 3); // Same length as parents
+        assert_eq!(child.type_name(), "TestType");
+        assert_eq!(child.type_hash(), 123);
+        assert_eq!(child.request_id(), request.id);
+        assert_eq!(child.generation_id(), next_generation_id);
+        assert_eq!(child.genome().len(), 3); // Same length as parents
     }
 
     #[test]
@@ -189,11 +189,11 @@ mod tests {
         assert_eq!(children.len(), 2);
 
         // Each child should have a unique ID
-        assert_ne!(children[0].id, children[1].id);
+        assert_ne!(children[0].id(), children[1].id());
 
         // Children should have valid (non-nil) UUIDs
-        assert!(!children[0].id.is_nil());
-        assert!(!children[1].id.is_nil());
+        assert!(!children[0].id().is_nil());
+        assert!(!children[1].id().is_nil());
     }
 
     #[test]

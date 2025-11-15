@@ -40,7 +40,6 @@ Network latency to the database is the primary overhead, but this is negligible 
 use fx_durable_ga::{bootstrap, models::*};
 use futures::future::BoxFuture;
 
-// 1. Define your optimization target
 #[derive(Debug, Clone)]
 struct MyParams {
     learning_rate: f64,

@@ -1,4 +1,5 @@
 use futures::future::BoxFuture;
+use uuid::Uuid;
 
 /// Provides termination checking capability for long-running evaluations.
 /// Allows evaluators to check if they should abort early due to request cancellation.
@@ -14,6 +15,7 @@ pub trait Evaluator<P> {
     /// Use the terminated checker for long-running evaluations to support early termination.
     fn fitness<'a>(
         &self,
+        genotype_id: Uuid,
         phenotype: P,
         terminated: &'a Box<dyn Terminated>,
     ) -> BoxFuture<'a, Result<f64, anyhow::Error>>;

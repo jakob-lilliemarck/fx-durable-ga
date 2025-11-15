@@ -29,3 +29,4 @@ coverage/
 *.profraw
 *.profdata
 post.txt
+model_storage/*

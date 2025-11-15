@@ -49,3 +49,7 @@ path = "examples/point_search.rs"
 [[example]]
 name = "regression_model"
 path = "examples/regression_model.rs"
+
+[[example]]
+name = "feature_engineering"
+path = "examples/feature_engineering.rs"

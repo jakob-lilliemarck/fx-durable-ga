@@ -113,6 +113,7 @@ impl ServiceBuilder {
     /// impl Evaluator<Parameters> for ModelEvaluator {
     ///     fn fitness<'a>(
     ///         &self,
+    ///         _genotype_id: uuid::Uuid,
     ///         params: Parameters,
     ///         _terminated: &'a Box<dyn Terminated>,
     ///     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
@@ -182,6 +183,7 @@ impl ServiceBuilder {
     /// impl Evaluator<Point3D> for DistanceEvaluator {
     ///     fn fitness<'a>(
     ///         &self,
+    ///         _genotype_id: uuid::Uuid,
     ///         point: Point3D,
     ///         terminated: &'a Box<dyn Terminated>,
     ///     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
@@ -253,6 +255,7 @@ impl ServiceBuilder {
     /// impl Evaluator<Schedule> for ScheduleEvaluator {
     ///     fn fitness<'a>(
     ///         &self,
+    ///         _genotype_id: uuid::Uuid,
     ///         schedule: Schedule,
     ///         _terminated: &'a Box<dyn Terminated>,
     ///     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
@@ -321,12 +324,12 @@ impl ServiceBuilder {
     /// #     fn decode(_: &[i64]) -> Self::Phenotype { TypeB }
     /// # }
     /// # impl fx_durable_ga::models::Evaluator<TypeA> for EvaluatorA {
-    /// #     fn fitness<'a>(&self, _: TypeA, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
+    /// #     fn fitness<'a>(&self, _: uuid::Uuid, _: TypeA, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
     /// #         -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>>
     /// #         { Box::pin(async move { Ok(0.5) }) }
     /// # }
     /// # impl fx_durable_ga::models::Evaluator<TypeB> for EvaluatorB {
-    /// #     fn fitness<'a>(&self, _: TypeB, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
+    /// #     fn fitness<'a>(&self, _: uuid::Uuid, _: TypeB, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
     /// #         -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>>
     /// #         { Box::pin(async move { Ok(0.5) }) }
     /// # }
@@ -388,6 +391,7 @@ impl ServiceBuilder {
     /// impl Evaluator<OptimizationTarget> for QuadraticEvaluator {
     ///     fn fitness<'a>(
     ///         &self,
+    ///         _genotype_id: uuid::Uuid,
     ///         target: OptimizationTarget,
     ///         _terminated: &'a Box<dyn Terminated>,
     ///     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {

@@ -18,13 +18,14 @@ pub use distribution::Distribution;
 pub use encodeable::Encodeable;
 pub use evaluator::{Evaluator, Terminated};
 pub use gene_bounds::{GeneBoundError, GeneBounds};
+pub use genotype::Genotype;
 pub use goal::FitnessGoal;
 pub use mutagen::{Decay, Mutagen, MutagenError, MutationRate, Temperature};
 pub use schedule::Schedule;
 pub use selector::{SelectionError, Selector};
 
 pub(crate) use breeder::Breeder;
-pub(crate) use genotype::{Fitness, Gene, Genotype};
+pub(crate) use genotype::{Fitness, Gene};
 pub(crate) use morphology::Morphology;
 pub(crate) use population::Population;
 pub(crate) use request::{Conclusion, Request, RequestConclusion};

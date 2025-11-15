@@ -273,10 +273,11 @@ impl Service {
         mutagen: Mutagen,
         crossover: Crossover,
         distribution: Distribution,
-    ) -> Result<(), Error> {
+    ) -> Result<Uuid, Error> {
         tracing::info!("Optimization request received");
 
-        self.requests
+        let request = self
+            .requests
             .chain(|mut tx_requests| {
                 Box::pin(async move {
                     // Create a new optimization request with the repository
@@ -306,7 +307,7 @@ impl Service {
             })
             .await?;
 
-        Ok(())
+        Ok(request.id)
     }
 
     /// Generates the initial population of genotypes for an optimization request.
@@ -337,7 +338,7 @@ impl Service {
         for genome in genomes {
             let genotype =
                 Genotype::new(&request.type_name, request.type_hash, genome, request.id, 1);
-            let event = GenotypeGenerated::new(request.id, genotype.id);
+            let event = GenotypeGenerated::new(request.id, genotype.id());
 
             genotypes.push(genotype);
             events.push(event);
@@ -392,16 +393,16 @@ impl Service {
         // Get the evaluator to use for this type
         let evaluator =
             self.evaluators
-                .get(&genotype.type_hash)
+                .get(&genotype.type_hash())
                 .ok_or(Error::UnknownTypeError {
-                    type_hash: genotype.type_hash,
-                    type_name: genotype.type_name,
+                    type_hash: genotype.type_hash(),
+                    type_name: genotype.type_name().to_string(),
                 })?;
 
         // Call the evaluation function. This is a long running function!
         let terminator: Box<dyn Terminated> =
             Box::new(Terminator::new(self.requests.clone(), request_id));
-        let fitness = evaluator.fitness(&genotype.genome, &terminator).await?;
+        let fitness = evaluator.fitness(&genotype, &terminator).await?;
 
         self.genotypes
             .chain(|mut tx_genotypes| {
@@ -496,7 +497,7 @@ impl Service {
             };
 
             // Collect hashes from this batch
-            let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash).collect();
+            let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash()).collect();
 
             // Check database for intersections
             let intersecting_hashes = self
@@ -509,10 +510,10 @@ impl Service {
             // Filter out duplicates (database + already generated)
             let mut unique_count = 0;
             for genotype in batch_genotypes {
-                if !intersecting_hashes.contains(&genotype.genome_hash)
-                    && !generated_hashes.contains(&genotype.genome_hash)
+                if !intersecting_hashes.contains(&genotype.genome_hash())
+                    && !generated_hashes.contains(&genotype.genome_hash())
                 {
-                    generated_hashes.insert(genotype.genome_hash);
+                    generated_hashes.insert(genotype.genome_hash());
                     final_genotypes.push(genotype);
                     unique_count += 1;
                 }
@@ -559,7 +560,7 @@ impl Service {
             // Create events for final genotypes
             let events: Vec<GenotypeGenerated> = final_genotypes
                 .iter()
-                .map(|genotype| GenotypeGenerated::new(request.id, genotype.id))
+                .map(|genotype| GenotypeGenerated::new(request.id, genotype.id()))
                 .collect();
 
             self.genotypes
@@ -699,6 +700,49 @@ impl Service {
         Ok(())
     }
 
+    /// Gets the best genotype for a request based on fitness.
+    /// Returns the genotype with the best (min or max) fitness depending on the goal.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub async fn get_best_genotype(
+        &self,
+        request_id: Uuid,
+    ) -> Result<Option<(Genotype, f64)>, Error> {
+        let request = self.requests.get_request(request_id).await?;
+
+        // Determine sort order based on goal
+        let filter = match request.goal {
+            FitnessGoal::Minimize { .. } => genotypes::Filter::default()
+                .with_request_id(request_id)
+                .with_fitness(true)
+                .with_order_fitness_asc(),
+            FitnessGoal::Maximize { .. } => genotypes::Filter::default()
+                .with_request_id(request_id)
+                .with_fitness(true)
+                .with_order_fitness_desc(),
+        };
+
+        let results = self.genotypes.search_genotypes(&filter, 1).await?;
+
+        // Extract the first result if it exists and has fitness
+        let best = results
+            .into_iter()
+            .next()
+            .and_then(|(genotype, fitness_opt)| fitness_opt.map(|fitness| (genotype, fitness)));
+
+        Ok(best)
+    }
+
+    /// Checks if an optimization request has concluded.
+    /// Returns true if the request has been completed or terminated.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub async fn is_request_concluded(&self, request_id: Uuid) -> Result<bool, Error> {
+        Ok(self
+            .requests
+            .get_request_conclusion(&request_id)
+            .await?
+            .is_some())
+    }
+
     /// Get a morphology by its type name
     #[instrument(level = "debug", skip(self), fields(type_name))]
     pub async fn get_phenotype<T: Encodeable>(
@@ -707,14 +751,14 @@ impl Service {
     ) -> Result<T::Phenotype, Error> {
         let genotype = self.genotypes.get_genotype(genotype_id).await?;
 
-        if genotype.type_hash != T::HASH {
+        if genotype.type_hash() != T::HASH {
             return Err(Error::UnknownPhenotype {
-                type_name: genotype.type_name,
-                type_hash: genotype.type_hash,
+                type_name: genotype.type_name().to_string(),
+                type_hash: genotype.type_hash(),
             });
         }
 
-        Ok(T::decode(&genotype.genome))
+        Ok(T::decode(&genotype.genome()))
     }
 }
 
@@ -923,6 +967,7 @@ mod tests {
         impl Evaluator<(i64, i64)> for TestEvaluator {
             fn fitness<'a>(
                 &self,
+                _genotype_id: uuid::Uuid,
                 _phenotype: (i64, i64),
                 _terminated: &'a Box<dyn Terminated>,
             ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
@@ -979,7 +1024,7 @@ mod tests {
             request_id,
             1, // generation_id
         );
-        let genotype_id = genotype.id;
+        let genotype_id = genotype.id();
 
         // Insert genotype into database
         service
@@ -1079,7 +1124,7 @@ mod tests {
         // Create genotype with fitness that EXCEEDS the goal (0.8 > 0.5)
         let genotype =
             crate::models::Genotype::new(type_name, type_hash, vec![5, 2], request_id, 1);
-        let genotype_id = genotype.id;
+        let genotype_id = genotype.id();
 
         // Insert genotype and fitness
         service
@@ -1191,7 +1236,7 @@ mod tests {
             request_id,
             1,
         );
-        let genotype_id = genotype.id;
+        let genotype_id = genotype.id();
 
         service
             .genotypes
