@@ -46,8 +46,10 @@ mod new_morphology_tests {
     use crate::models::GeneBounds;
     use chrono::SubsecRound;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_inserts_a_new_morphology(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let morphology = Morphology::new(
             "test",
             1,
@@ -72,8 +74,10 @@ mod new_morphology_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let morphology = Morphology::new(
             "test",
             1,
@@ -130,8 +134,10 @@ mod get_morphology_tests {
     use super::*;
     use crate::models::GeneBounds;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_an_existing_morphology(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let morphology = Morphology::new(
             "test",
             1,
@@ -151,8 +157,10 @@ mod get_morphology_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let morphology = Morphology::new(
             "test",
             1,
@@ -172,8 +180,10 @@ mod get_morphology_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_handles_database_errors(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         pool.close().await;
         let result = get_morphology(&pool, 1).await;
         assert!(matches!(result, Err(Error::Database(_))));

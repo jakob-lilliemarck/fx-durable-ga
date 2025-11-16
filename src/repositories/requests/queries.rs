@@ -66,8 +66,10 @@ mod new_request_tests {
     use crate::models::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
     use chrono::SubsecRound;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_inserts_a_new_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
@@ -101,8 +103,10 @@ mod new_request_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
@@ -166,8 +170,10 @@ mod get_request_tests {
     use super::*;
     use crate::models::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_an_existing_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
@@ -192,8 +198,10 @@ mod get_request_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let mutagen = Mutagen::constant(0.5, 0.1)?;
         let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
@@ -266,8 +274,10 @@ mod new_request_conclusion_conclusion_tests {
     use chrono::SubsecRound;
     use chrono::Utc;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_inserts_a_new_completed_conclusion(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request = Request::new(
             "test",
             1,
@@ -299,8 +309,10 @@ mod new_request_conclusion_conclusion_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_inserts_a_new_terminated_conclusion(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request = Request::new(
             "test",
             1,
@@ -332,8 +344,10 @@ mod new_request_conclusion_conclusion_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request = Request::new(
             "test",
             1,
@@ -407,8 +421,10 @@ mod get_request_conclusion_tests {
     use chrono::SubsecRound;
     use chrono::Utc;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_a_request_conclusion(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request = Request::new(
             "test",
             1,
@@ -443,8 +459,10 @@ mod get_request_conclusion_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_returns_none_when_there_is_none(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request = Request::new(
             "test",
             1,

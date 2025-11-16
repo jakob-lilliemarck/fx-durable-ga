@@ -115,19 +115,18 @@ service.new_optimization_request(
   2. `examples/regression_model.rs` - hyperparameter optimization for a regression model
 
 ## Migrations
-Run migrations using the migrator: https://docs.rs/fx-durable-ga/0.1.5/fx_durable_ga/migrations/fn.run_migrations.html
-
-You may also need to run migrations for
- - fx-mq-jobs: https://docs.rs/fx-event-bus/0.1.7/fx_event_bus/fn.run_migrations.html
- - fx-event-bus: https://docs.rs/fx-mq-jobs/0.1.8/fx_mq_jobs/fn.run_migrations.html
-See examples for more detail.
+Run migrations using the provided sqlx migrator.
+- To run the migrations of this crate only, use `fx_durable_ga::migrations::run_migrations`
+- To run migrations of dependencies and the migrations of this crate, use `fx_durable_ga::migrations::run_migrations`. Note that this will use the default schema name for `fx-mq-jobs`, if you wish to use another schema, you will need call each migrator.
 
 ### Running migrations for development
-Running `cargo sqlx prepare` may require setting search path options for the `DATABASE_URL` variable:
-```sh
-DATABASE_URL="postgres://postgres:postgres@localhost:5432/fx-durable-ga?options=-c%20search_path%3Dfx_mq_jobs%2Cfx_event_bus%2Cfx_durable_ga"
+Set `DATABASE_URL` in your env and create the database. If you're using `sqlx` cli call `sqlx database create`. Then `SQLX_OFFLINE=true cargo run --bin migrate --features migration` to run migrations for this crate and its dependencies `fx-event-bus` and `fx-mq-jobs`. The migration binary uses the feature flag `"migration"` to exclude all code that is statically typechecked by `sqlx`. Once it has been run you may set `SQLX_OFFLINE=false` and everything should work as normally.
+
+Set `DATABASE_URL` in your environment and create the database (e.g., `sqlx database create`). Run migrations with:
+
+```bash
+SQLX_OFFLINE=true cargo run --bin migrate --features migration
 ```
-Keeping the search path parameters may however make tests fail, so some juggling is currently required.
 
 ## Contributing
 

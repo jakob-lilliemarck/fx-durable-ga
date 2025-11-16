@@ -205,9 +205,8 @@ async fn main() -> Result<()> {
         .connect(&database_url)
         .await?;
 
-    fx_event_bus::run_migrations(&pool).await?;
-    fx_mq_jobs::run_migrations(&pool, FX_MQ_JOBS_SCHEMA_NAME).await?;
-    fx_durable_ga::run_migrations(&pool).await?;
+    // Run all default migrations
+    fx_durable_ga::migrations::run_default_migrations(&pool).await?;
 
     let service = Arc::new(
         bootstrap(pool.clone())

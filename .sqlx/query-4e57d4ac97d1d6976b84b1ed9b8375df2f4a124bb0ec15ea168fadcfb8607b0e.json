@@ -18,7 +18,7 @@
         "name": "concluded_with: Conclusion",
         "type_info": {
           "Custom": {
-            "name": "fx_durable_ga.conclusion",
+            "name": "conclusion",
             "kind": {
               "Enum": [
                 "completed",

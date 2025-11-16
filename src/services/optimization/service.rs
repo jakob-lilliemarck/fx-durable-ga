@@ -778,19 +778,19 @@ mod tests {
     use super::*;
     use crate::bootstrap;
     use crate::models::{
-        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector,
-        Temperature,
+        Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
+        MutationRate, Schedule, Selector, Temperature, Terminated,
     };
+    use futures::future::BoxFuture;
 
     async fn create_test_service(pool: sqlx::PgPool) -> Service {
         let builder = bootstrap::bootstrap(pool).await.unwrap();
         builder.build()
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn test_new_optimization_request_happy_path(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // Run event bus migrations for event publishing
-        fx_event_bus::run_migrations(&pool).await?;
+        crate::migrations::run_default_migrations(&pool).await?;
 
         // Create service
         let service = create_test_service(pool.clone()).await;
@@ -853,10 +853,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn test_generate_initial_population_happy_path(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // Run event bus migrations
-        fx_event_bus::run_migrations(&pool).await?;
+        crate::migrations::run_default_migrations(&pool).await?;
 
         // Create service
         let service = create_test_service(pool.clone()).await;
@@ -943,10 +942,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn test_evaluate_genotype_happy_path(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        use crate::models::{Encodeable, Evaluator, GeneBounds, Terminated};
-        use futures::future::BoxFuture;
+        crate::migrations::run_default_migrations(&pool).await?;
 
         // Define a simple test type
         #[derive(Debug)]
@@ -985,9 +983,6 @@ mod tests {
                 Box::pin(async move { Ok(0.75) })
             }
         }
-
-        // Run event bus migrations
-        fx_event_bus::run_migrations(&pool).await?;
 
         // Create service and register evaluator
         let service = bootstrap::bootstrap(pool.clone())
@@ -1080,10 +1075,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn test_maintain_population_request_completion(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // Run event bus migrations
-        fx_event_bus::run_migrations(&pool).await?;
+        crate::migrations::run_default_migrations(&pool).await?;
 
         // Create service
         let service = create_test_service(pool.clone()).await;
@@ -1176,9 +1170,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn test_get_phenotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        use crate::models::{Encodeable, GeneBounds};
+        crate::migrations::run_default_migrations(&pool).await?;
 
         #[derive(Debug, PartialEq)]
         struct TestPoint {

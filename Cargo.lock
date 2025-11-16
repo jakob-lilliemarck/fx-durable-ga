@@ -430,9 +430,9 @@ dependencies = [
 
 [[package]]
 name = "fx-event-bus"
-version = "0.1.7"
+version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e96b294470d1883377f8a208a048082bee9985afdd7c101ec88f201e479aac6"
+checksum = "323c3eb1f81264c35cf53ef3960636ef8e900cea1d5c850778f71f33d8125340"
 dependencies = [
  "chrono",
  "const-fnv1a-hash",

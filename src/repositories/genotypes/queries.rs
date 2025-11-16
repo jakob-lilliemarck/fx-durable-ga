@@ -75,8 +75,10 @@ mod new_genotypes_tests {
     use crate::repositories::requests::queries::new_request;
     use chrono::SubsecRound;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_inserts_a_new_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         // Create a request first
         let request = Request::new(
             "test",
@@ -108,8 +110,10 @@ mod new_genotypes_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         // Create a request first
         let request = Request::new(
             "test",
@@ -173,8 +177,10 @@ mod check_if_generation_exists_tests {
 
     use super::Genotype;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_returns_true_when_generation_exists(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request = Request::new(
             "test",
             1,
@@ -209,8 +215,10 @@ mod check_if_generation_exists_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_returns_false_when_none_exist(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request = Request::new(
             "test",
             1,
@@ -268,8 +276,10 @@ mod get_genotype_tests {
     use crate::repositories::requests::queries::new_request;
     use chrono::{SubsecRound, Utc};
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_an_existing_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         // Create a request first
         let request = Request::new(
             "test",
@@ -304,8 +314,10 @@ mod get_genotype_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let non_existent_id = Uuid::now_v7();
 
         let result = get_genotype(&pool, &non_existent_id).await;
@@ -350,8 +362,10 @@ mod record_fitness_tests {
     use chrono::SubsecRound;
     use uuid::Uuid;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_records_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         // Create a request first
         let request = Request::new(
             "test",
@@ -390,8 +404,10 @@ mod record_fitness_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request = Request::new(
             "test",
             1,
@@ -460,8 +476,10 @@ mod get_population_tests {
     use crate::repositories::requests::queries::new_request;
     use uuid::Uuid;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_a_population(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         // Create a request first
         let request = Request::new(
             "test",
@@ -506,8 +524,10 @@ mod get_population_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_handles_empty_population(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let request_id = Uuid::now_v7();
 
         let population = get_population(&pool, &request_id).await?;
@@ -527,8 +547,10 @@ mod get_population_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_population_with_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         // Create a request first
         let request = Request::new(
             "test",
@@ -780,8 +802,10 @@ mod search_genotypes_tests {
     use super::{Filter, search_genotypes};
     use uuid::Uuid;
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_genotypes_with_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let (request_id_1, _) = super::seeding::seed(&pool).await;
 
         let found =
@@ -808,8 +832,10 @@ mod search_genotypes_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_genotypes_with_generation_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_generation_id(2), 5).await?;
@@ -835,8 +861,10 @@ mod search_genotypes_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_genotypes_with_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_fitness(true), 5).await?;
@@ -866,8 +894,10 @@ mod search_genotypes_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_genotypes_with_fitness_desc(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
@@ -904,8 +934,10 @@ mod search_genotypes_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_genotypes_with_fitness_asc(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
@@ -942,8 +974,10 @@ mod search_genotypes_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_genotypes_without_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_fitness(false), 5).await?;
@@ -969,10 +1003,12 @@ mod search_genotypes_tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_gets_genotypes_with_request_id_fitness_and_random_order(
         pool: sqlx::PgPool,
     ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
         let (request_id_1, _) = super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
@@ -1027,9 +1063,11 @@ pub(crate) async fn get_intersection<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod tests {
-    #[sqlx::test(migrations = "./migrations")]
+    use crate::models::Genotype;
+
+    #[sqlx::test(migrations = false)]
     async fn it_gets_the_intersection(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        use crate::models::Genotype;
+        crate::migrations::run_default_migrations(&pool).await?;
 
         let (request_id_1, _request_id_2) = super::seeding::seed(&pool).await;
 
@@ -1050,11 +1088,11 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_returns_empty_vector_when_there_is_no_intersection(
         pool: sqlx::PgPool,
     ) -> anyhow::Result<()> {
-        use crate::models::Genotype;
+        crate::migrations::run_default_migrations(&pool).await?;
 
         let (request_id_1, _) = super::seeding::seed(&pool).await;
 
@@ -1072,9 +1110,9 @@ mod tests {
         Ok(())
     }
 
-    #[sqlx::test(migrations = "./migrations")]
+    #[sqlx::test(migrations = false)]
     async fn it_isolates_intersection_by_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        use crate::models::Genotype;
+        crate::migrations::run_default_migrations(&pool).await?;
 
         let (request_id_1, request_id_2) = super::seeding::seed(&pool).await;
 
