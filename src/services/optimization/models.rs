@@ -1,5 +1,5 @@
 use crate::{
-    models::{Evaluator, Genotype, Terminated},
+    models::{Evaluator, Genotype, NoContext, Terminated},
     repositories::requests,
 };
 use futures::future::BoxFuture;
@@ -76,6 +76,7 @@ where
         terminated: &'a Box<dyn Terminated>,
     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
         let phenotype = (self.decode)(&genotype.genome());
-        self.evaluator.fitness(genotype.id(), phenotype, terminated)
+        self.evaluator
+            .fitness(genotype.id(), phenotype, &NoContext, terminated)
     }
 }

@@ -654,6 +654,20 @@ mod selector_tests {
     }
 
     #[test]
+    fn test_tournament_constructor_validation() {
+        let selector = Selector::tournament(3, 5);
+
+        assert!(selector.is_err());
+        assert!(matches!(
+            selector.unwrap_err(),
+            SelectionError::InvalidSampleSize {
+                min_required: 6,
+                provided: 5
+            }
+        ));
+    }
+
+    #[test]
     fn test_roulette_constructor() {
         let selector = Selector::roulette(25);
 

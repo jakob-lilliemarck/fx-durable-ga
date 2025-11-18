@@ -779,7 +779,7 @@ mod tests {
     use crate::bootstrap;
     use crate::models::{
         Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, Schedule, Selector, Temperature, Terminated,
+        MutationRate, NoContext, Schedule, Selector, Temperature, Terminated,
     };
     use futures::future::BoxFuture;
 
@@ -973,11 +973,12 @@ mod tests {
         // Simple evaluator that returns constant fitness
         struct TestEvaluator;
 
-        impl Evaluator<(i64, i64)> for TestEvaluator {
+        impl Evaluator<(i64, i64), NoContext> for TestEvaluator {
             fn fitness<'a>(
                 &self,
                 _genotype_id: uuid::Uuid,
                 _phenotype: (i64, i64),
+                _ctx: &NoContext,
                 _terminated: &'a Box<dyn Terminated>,
             ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
                 Box::pin(async move { Ok(0.75) })

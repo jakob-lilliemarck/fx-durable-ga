@@ -16,7 +16,7 @@ mod selector;
 pub use crossover::{Crossover, ProbabilityOutOfRangeError};
 pub use distribution::Distribution;
 pub use encodeable::Encodeable;
-pub use evaluator::{Evaluator, Terminated};
+pub use evaluator::{Evaluator, NoContext, Terminated};
 pub use gene_bounds::{GeneBoundError, GeneBounds};
 pub use genotype::Genotype;
 pub use goal::FitnessGoal;

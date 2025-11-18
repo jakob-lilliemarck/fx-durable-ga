@@ -68,6 +68,7 @@ impl ServiceBuilder {
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
     /// # use fx_durable_ga::optimization::ServiceBuilder;
+    /// # use fx_durable_ga::models::NoContext;
     /// # use futures::future::BoxFuture;
     ///
     /// #[derive(Debug, Clone)]
@@ -115,6 +116,7 @@ impl ServiceBuilder {
     ///         &self,
     ///         _genotype_id: uuid::Uuid,
     ///         params: Parameters,
+    ///         _: &NoContext,
     ///         _terminated: &'a Box<dyn Terminated>,
     ///     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
     ///         Box::pin(async move {
@@ -185,6 +187,7 @@ impl ServiceBuilder {
     ///         &self,
     ///         _genotype_id: uuid::Uuid,
     ///         point: Point3D,
+    ///         _: &NoContext,
     ///         terminated: &'a Box<dyn Terminated>,
     ///     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
     ///         let target = self.target.clone();
@@ -257,6 +260,7 @@ impl ServiceBuilder {
     ///         &self,
     ///         _genotype_id: uuid::Uuid,
     ///         schedule: Schedule,
+    ///         _: &NoContext,
     ///         _terminated: &'a Box<dyn Terminated>,
     ///     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
     ///         let costs = self.job_costs.clone();
@@ -324,12 +328,12 @@ impl ServiceBuilder {
     /// #     fn decode(_: &[i64]) -> Self::Phenotype { TypeB }
     /// # }
     /// # impl fx_durable_ga::models::Evaluator<TypeA> for EvaluatorA {
-    /// #     fn fitness<'a>(&self, _: uuid::Uuid, _: TypeA, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
+    /// #     fn fitness<'a>(&self, _: uuid::Uuid, _: TypeA, _: &fx_durable_ga::models::NoContext, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
     /// #         -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>>
     /// #         { Box::pin(async move { Ok(0.5) }) }
     /// # }
     /// # impl fx_durable_ga::models::Evaluator<TypeB> for EvaluatorB {
-    /// #     fn fitness<'a>(&self, _: uuid::Uuid, _: TypeB, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
+    /// #     fn fitness<'a>(&self, _: uuid::Uuid, _: TypeB, _: &fx_durable_ga::models::NoContext, _: &'a Box<dyn fx_durable_ga::models::Terminated>)
     /// #         -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>>
     /// #         { Box::pin(async move { Ok(0.5) }) }
     /// # }
@@ -393,6 +397,7 @@ impl ServiceBuilder {
     ///         &self,
     ///         _genotype_id: uuid::Uuid,
     ///         target: OptimizationTarget,
+    ///         _: &NoContext,
     ///         _terminated: &'a Box<dyn Terminated>,
     ///     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
     ///         Box::pin(async move {

@@ -21,7 +21,7 @@ use fx_durable_ga::{
     bootstrap,
     models::{
         Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, Schedule, Selector, Temperature, Terminated,
+        MutationRate, NoContext, Schedule, Selector, Temperature, Terminated,
     },
     register_event_handlers, register_job_handlers,
 };
@@ -289,6 +289,7 @@ impl Evaluator<FeatureConfig> for FeatureEvaluator {
         &self,
         genotype_id: Uuid,
         phenotype: FeatureConfig,
+        _: &NoContext,
         _: &'a Box<dyn Terminated>,
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
         Box::pin(async move {
