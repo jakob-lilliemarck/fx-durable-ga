@@ -242,7 +242,7 @@ async fn main() -> Result<()> {
             NeuralArchitecture::HASH,
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(10, 10),
-            Selector::tournament(5, 15),
+            Selector::tournament(5, 15)?,
             Mutagen::new(Temperature::constant(0.8)?, MutationRate::constant(0.4)?),
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(15),

@@ -87,7 +87,7 @@ mod tests {
             "TestType",
             123,
             FitnessGoal::minimize(0.9).unwrap(),
-            Selector::tournament(5, 20),
+            Selector::tournament(5, 20).expect("is valid"),
             Schedule::generational(100, 10),
             Mutagen::constant(0.5, 0.1).unwrap(),
             Crossover::uniform(0.5).unwrap(),

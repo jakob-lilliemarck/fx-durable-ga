@@ -120,7 +120,7 @@ impl Service {
     ///     MyType::HASH,
     ///     FitnessGoal::maximize(0.90)?,                    // Modest target
     ///     Schedule::generational(20, 30),                 // Small, fast generations
-    ///     Selector::tournament(5, 50),                    // Strong selection pressure
+    ///     Selector::tournament(5, 50)?,                    // Strong selection pressure
     ///     Mutagen::new(
     ///         Temperature::exponential(0.8, 0.1, 1.2, 3)?, // Rapid cooling
     ///         MutationRate::exponential(0.6, 0.05, 1.1, 2)?
@@ -151,7 +151,7 @@ impl Service {
     ///     MyType::HASH,
     ///     FitnessGoal::maximize(0.95)?,                    // High-quality target
     ///     Schedule::generational(50, 50),                 // Moderate generations
-    ///     Selector::tournament(3, 100),                   // Balanced selection
+    ///     Selector::tournament(3, 100)?,                   // Balanced selection
     ///     Mutagen::new(
     ///         Temperature::linear(0.7, 0.2, 1.0)?,         // Gradual cooling
     ///         MutationRate::linear(0.4, 0.1, 1.0)?
@@ -182,7 +182,7 @@ impl Service {
     ///     MyType::HASH,
     ///     FitnessGoal::maximize(0.99)?,                    // High precision target
     ///     Schedule::rolling(10000, 200, 20),              // Large budget
-    ///     Selector::tournament(2, 150),                   // Low selection pressure
+    ///     Selector::tournament(2, 150)?,                   // Low selection pressure
     ///     Mutagen::constant(0.6, 0.4)?,                   // Sustained exploration
     ///     Crossover::single_point(),                      // Conservative recombination
     ///     Distribution::latin_hypercube(100)              // High initial diversity
@@ -254,7 +254,7 @@ impl Service {
     ///     Point::HASH,
     ///     FitnessGoal::maximize(0.95)?,
     ///     Schedule::generational(50, 50),
-    ///     Selector::tournament(3, 100),
+    ///     Selector::tournament(3, 100)?,
     ///     Mutagen::constant(0.5, 0.3)?,
     ///     Crossover::uniform(0.5)?,
     ///     Distribution::latin_hypercube(50)
@@ -800,7 +800,7 @@ mod tests {
         let type_hash = 123;
         let goal = FitnessGoal::maximize(0.95)?;
         let schedule = Schedule::generational(100, 10);
-        let selector = Selector::tournament(3, 20);
+        let selector = Selector::tournament(3, 20).expect("is valid");
         let mutagen = Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.3)?);
         let crossover = Crossover::uniform(0.5)?;
         let distribution = Distribution::random(50);
@@ -878,7 +878,7 @@ mod tests {
         // Create a request
         let goal = FitnessGoal::maximize(0.95)?;
         let schedule = Schedule::generational(100, 10);
-        let selector = Selector::tournament(3, 20);
+        let selector = Selector::tournament(3, 20).expect("is valid");
         let mutagen = Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.3)?);
         let crossover = Crossover::uniform(0.5)?;
         let distribution = Distribution::random(10); // Small population for testing
@@ -994,7 +994,7 @@ mod tests {
         // Create a test request
         let goal = FitnessGoal::maximize(0.95)?;
         let schedule = Schedule::generational(100, 10);
-        let selector = Selector::tournament(3, 20);
+        let selector = Selector::tournament(3, 20).expect("is valid");
         let mutagen = Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.3)?);
         let crossover = Crossover::uniform(0.5)?;
         let distribution = Distribution::random(1);
@@ -1098,7 +1098,7 @@ mod tests {
         // Create request with LOW fitness goal (0.5) so it's easy to exceed
         let goal = FitnessGoal::maximize(0.5)?;
         let schedule = Schedule::generational(100, 10);
-        let selector = Selector::tournament(3, 20);
+        let selector = Selector::tournament(3, 20).expect("is valid");
         let mutagen = Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.3)?);
         let crossover = Crossover::uniform(0.5)?;
         let distribution = Distribution::random(5);
@@ -1207,7 +1207,7 @@ mod tests {
 
         let goal = FitnessGoal::maximize(0.95)?;
         let schedule = Schedule::generational(100, 10);
-        let selector = Selector::tournament(3, 20);
+        let selector = Selector::tournament(3, 20).expect("is valid");
         let mutagen = Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.3)?);
         let crossover = Crossover::uniform(0.5)?;
         let distribution = Distribution::random(10);

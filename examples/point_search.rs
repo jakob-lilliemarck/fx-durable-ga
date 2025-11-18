@@ -196,7 +196,7 @@ async fn main() -> Result<()> {
                 Point::HASH,
                 FitnessGoal::minimize(0.01)?, // Stop when distance ≤ 0.01
                 Schedule::generational(200, 30),
-                Selector::tournament(7, 100),
+                Selector::tournament(7, 100)?,
                 Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.3)?),
                 Crossover::uniform(0.5)?,
                 Distribution::latin_hypercube(1000),

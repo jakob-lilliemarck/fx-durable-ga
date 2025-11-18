@@ -424,7 +424,7 @@ async fn main() -> Result<()> {
             FeatureConfig::HASH,
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(40, 10),
-            Selector::tournament(5, 45),
+            Selector::tournament(5, 45)?,
             Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.35)?),
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(40),

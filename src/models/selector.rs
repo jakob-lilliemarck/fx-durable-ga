@@ -317,9 +317,9 @@ fn tournament_selection<'a>(
 
     // Check if we have enough candidates
     if evaluated_candidates.len() < tournament_size * 2 {
-        return Err(SelectionError::InsufficientCandidates {
-            needed: tournament_size * 2,
-            available: evaluated_candidates.len(),
+        return Err(SelectionError::InvalidSampleSize {
+            min_required: tournament_size * 2,
+            provided: evaluated_candidates.len(),
         });
     }
 
@@ -453,17 +453,17 @@ pub enum SelectionError {
     #[error("No valid parents available for selection")]
     NoValidParents,
 
-    /// Tournament selection requires more candidates than are available.
+    /// Invalid sample size for tournament selection configuration.
     ///
-    /// Tournament selection needs at least `tournament_size * 2` evaluated candidates
-    /// to run two separate tournaments (one for each parent).
-    ///
-    /// **Solutions**:
-    /// - Reduce the tournament size
-    /// - Increase the population size
-    /// - Ensure more candidates are evaluated before selection
-    #[error("Insufficient candidates for tournament selection: need {needed}, got {available}")]
-    InsufficientCandidates { needed: usize, available: usize },
+    /// Tournament selection requires `sample_size >= tournament_size * 2` because
+    /// it runs two separate tournaments (one for each parent in a breeding pair).
+    #[error(
+        "Sample size must be >= 2 * tournament_size. Min required: {min_required}, got {provided}"
+    )]
+    InvalidSampleSize {
+        min_required: usize,
+        provided: usize,
+    },
 
     /// Roulette selection cannot proceed due to invalid fitness values.
     ///
@@ -527,13 +527,21 @@ impl Selector {
     ///
     /// The population must have at least `tournament_size * 2` evaluated candidates
     /// to perform selection, as each parent pair requires two separate tournaments.
-    pub fn tournament(tournament_size: usize, sample_size: usize) -> Self {
-        Self {
+    pub fn tournament(tournament_size: usize, sample_size: usize) -> Result<Self, SelectionError> {
+        let min_sample_size = tournament_size * 2;
+        if sample_size < min_sample_size {
+            return Err(SelectionError::InvalidSampleSize {
+                min_required: min_sample_size,
+                provided: sample_size,
+            });
+        }
+
+        Ok(Self {
             method: SelectionMethod::Tournament {
                 size: tournament_size,
             },
             sample_size,
-        }
+        })
     }
 
     /// Creates a roulette wheel selector for fitness-proportionate selection.
@@ -622,7 +630,7 @@ impl Selector {
     /// ```rust
     /// use fx_durable_ga::models::Selector;
     ///
-    /// let selector = Selector::tournament(3, 150);
+    /// let selector = Selector::tournament(3, 150).expect("sample_size is larger than 2 * tournament_size");
     /// assert_eq!(selector.sample_size(), 150);
     ///
     /// let roulette = Selector::roulette(75);
@@ -639,7 +647,7 @@ mod selector_tests {
 
     #[test]
     fn test_tournament_constructor() {
-        let selector = Selector::tournament(3, 50);
+        let selector = Selector::tournament(3, 50).expect("is valid");
 
         assert_eq!(selector.sample_size, 50);
         assert_eq!(selector.method, SelectionMethod::Tournament { size: 3 });
@@ -655,7 +663,7 @@ mod selector_tests {
 
     #[test]
     fn test_sample_size_method() {
-        let tournament_selector = Selector::tournament(2, 100);
+        let tournament_selector = Selector::tournament(2, 100).expect("is valid");
         assert_eq!(tournament_selector.sample_size(), 100);
 
         let roulette_selector = Selector::roulette(75);
@@ -747,7 +755,7 @@ mod selector_tests {
 
     #[test]
     fn test_select_parents_tournament_insufficient_candidates() {
-        let selector = Selector::tournament(3, 50);
+        let selector = Selector::tournament(3, 50).expect("is valid");
 
         let candidates = vec![(
             super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000001"),
@@ -758,9 +766,9 @@ mod selector_tests {
         let result = selector.select_parents(1, &candidates, goal);
         assert_eq!(
             result,
-            Err(SelectionError::InsufficientCandidates {
-                needed: 6,
-                available: 1
+            Err(SelectionError::InvalidSampleSize {
+                min_required: 6,
+                provided: 1
             })
         );
     }
@@ -817,7 +825,7 @@ mod selector_tests {
 
     #[test]
     fn test_selector_clone_and_equality() {
-        let selector1 = Selector::tournament(3, 50);
+        let selector1 = Selector::tournament(3, 50).expect("is valid");
         let selector2 = selector1.clone();
 
         assert_eq!(selector1, selector2);
