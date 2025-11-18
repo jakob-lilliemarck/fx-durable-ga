@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id,\n            requested_at,\n            type_name,\n            type_hash,\n            goal,\n            schedule,\n            selector,\n            mutagen,\n            crossover,\n            distribution\n        FROM fx_durable_ga.requests\n        WHERE id = $1;\n        ",
+  "query": "\n            INSERT INTO fx_durable_ga.requests (\n                id,\n                requested_at,\n                type_name,\n                type_hash,\n                goal,\n                schedule,\n                selector,\n                mutagen,\n                crossover,\n                distribution,\n                data\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n            RETURNING\n                id,\n                requested_at,\n                type_name,\n                type_hash,\n                goal,\n                schedule,\n                selector,\n                mutagen,\n                crossover,\n                distribution,\n                data;\n            ",
   "describe": {
     "columns": [
       {
@@ -52,11 +52,26 @@
         "ordinal": 9,
         "name": "distribution",
         "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "data",
+        "type_info": "Jsonb"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Int4",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -69,8 +84,9 @@
       false,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "4bdda14fbd75984c400d16ea8a7c6aa542293fd90a1d284b0daf6163e9aee23e"
+  "hash": "2d4dfc5d944b40b8f830f7c19295bdbdb3a39c54a97611de345cf77b5954757f"
 }
