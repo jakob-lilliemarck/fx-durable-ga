@@ -1,6 +1,6 @@
 [package]
 name = "fx-durable-ga"
-version = "0.8.0"
+version = "0.9.0"
 edition = "2024"
 authors = ["Jakob Lilliemarck <lilliemarckjakob@gmail.com>"]
 description = "Durable GA event driven optimization loop on PostgreSQL"
