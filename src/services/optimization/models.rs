@@ -1,5 +1,5 @@
 use crate::{
-    models::{Evaluator, Genotype, NoContext, Terminated},
+    models::{Evaluator, Genotype, Request, Terminated},
     repositories::requests,
 };
 use futures::future::BoxFuture;
@@ -47,6 +47,7 @@ pub(crate) trait TypeErasedEvaluator: Send + Sync {
     fn fitness<'a>(
         &self,
         genotype: &Genotype,
+        request: &'a Request,
         terminated: &'a Box<dyn Terminated>,
     ) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }
@@ -69,14 +70,15 @@ impl<P, E> TypeErasedEvaluator for ErasedEvaluator<P, E>
 where
     E: Evaluator<P> + Send + Sync + 'static,
 {
-    #[instrument(level = "debug", skip(self, genotype, terminated), fields(genotype_id = %genotype.id(), genome_length = genotype.genome().len()))]
+    #[instrument(level = "debug", skip(self, genotype, request, terminated), fields(genotype_id = %genotype.id(), genome_length = genotype.genome().len()))]
     fn fitness<'a>(
         &self,
         genotype: &Genotype,
+        request: &'a Request,
         terminated: &'a Box<dyn Terminated>,
     ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
         let phenotype = (self.decode)(&genotype.genome());
         self.evaluator
-            .fitness(genotype.id(), phenotype, &NoContext, terminated)
+            .fitness(genotype.id(), phenotype, request, terminated)
     }
 }

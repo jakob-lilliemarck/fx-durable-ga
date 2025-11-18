@@ -8,18 +8,16 @@ pub trait Terminated: Send + Sync {
     fn is_terminated(&self) -> BoxFuture<'_, bool>;
 }
 
-pub struct NoContext;
-
 /// Objective function that evaluates phenotypes and returns fitness scores.
 /// Fitness values can be any finite f64 values appropriate for your problem domain.
-pub trait Evaluator<P, Ctx = NoContext> {
+pub trait Evaluator<P> {
     /// Evaluates a phenotype and returns its fitness score.
     /// Use the terminated checker for long-running evaluations to support early termination.
     fn fitness<'a>(
         &self,
         genotype_id: Uuid,
         phenotype: P,
-        context: &'a Ctx,
+        request: &'a crate::models::Request,
         terminated: &'a Box<dyn Terminated>,
     ) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
 }

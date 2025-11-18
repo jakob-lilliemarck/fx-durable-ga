@@ -89,6 +89,7 @@ mod new_genotypes_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -124,6 +125,7 @@ mod new_genotypes_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -190,6 +192,7 @@ mod check_if_generation_exists_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -228,6 +231,7 @@ mod check_if_generation_exists_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -290,6 +294,7 @@ mod get_genotype_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -376,6 +381,7 @@ mod record_fitness_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -417,6 +423,7 @@ mod record_fitness_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_clone = request.clone();
 
@@ -490,6 +497,7 @@ mod get_population_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -561,6 +569,7 @@ mod get_population_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -1158,6 +1167,7 @@ mod seeding {
             Mutagen::constant(0.5, 0.1).unwrap(),
             Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(200),
+            None::<()>,
         )
         .unwrap();
         let request_2 = Request::new(
@@ -1169,6 +1179,7 @@ mod seeding {
             Mutagen::constant(0.5, 0.1).unwrap(),
             Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(200),
+            None::<()>,
         )
         .unwrap();
 

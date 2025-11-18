@@ -27,9 +27,10 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 selector,
                 mutagen,
                 crossover,
-                distribution
+                distribution,
+                data
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
             RETURNING
                 id,
                 requested_at,
@@ -40,7 +41,8 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 selector,
                 mutagen,
                 crossover,
-                distribution;
+                distribution,
+                data;
             "#,
         db_request.id,
         db_request.requested_at,
@@ -51,7 +53,8 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
         db_request.selector,
         db_request.mutagen,
         db_request.crossover,
-        db_request.distribution
+        db_request.distribution,
+        db_request.data
     )
     .fetch_one(tx)
     .await?;
@@ -84,6 +87,7 @@ mod new_request_tests {
             mutagen,
             crossover,
             distribution,
+            None::<()>,
         )?;
         let request_clone = request.clone();
 
@@ -121,6 +125,7 @@ mod new_request_tests {
             mutagen,
             crossover,
             distribution,
+            None::<()>,
         )?;
         let request_clone = request.clone();
 
@@ -152,7 +157,8 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
             selector,
             mutagen,
             crossover,
-            distribution
+            distribution,
+            data
         FROM fx_durable_ga.requests
         WHERE id = $1;
         "#,
@@ -188,6 +194,7 @@ mod get_request_tests {
             mutagen,
             crossover,
             distribution,
+            None::<()>,
         )?;
         let request_id = request.id;
 
@@ -216,6 +223,7 @@ mod get_request_tests {
             mutagen,
             crossover,
             distribution,
+            None::<()>,
         )?;
         let request_id = request.id;
 
@@ -287,6 +295,7 @@ mod new_request_conclusion_conclusion_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -322,6 +331,7 @@ mod new_request_conclusion_conclusion_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -357,6 +367,7 @@ mod new_request_conclusion_conclusion_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -434,6 +445,7 @@ mod get_request_conclusion_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;
@@ -472,6 +484,7 @@ mod get_request_conclusion_tests {
             Mutagen::constant(0.5, 0.1)?,
             Crossover::uniform(0.5)?,
             Distribution::latin_hypercube(200),
+            None::<()>,
         )?;
         let request_id = request.id;
         new_request(&pool, request).await?;

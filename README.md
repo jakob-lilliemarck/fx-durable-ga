@@ -120,7 +120,13 @@ Run migrations using the provided sqlx migrator.
 - To run migrations of dependencies and the migrations of this crate, use `fx_durable_ga::migrations::run_migrations`. Note that this will use the default schema name for `fx-mq-jobs`, if you wish to use another schema, you will need call each migrator.
 
 ### Running migrations for development
-Set `DATABASE_URL` in your env and create the database. If you're using `sqlx` cli call `sqlx database create`. Then `SQLX_OFFLINE=true cargo run --bin migrate --features migration` to run migrations for this crate and its dependencies `fx-event-bus` and `fx-mq-jobs`. The migration binary uses the feature flag `"migration"` to exclude all code that is statically typechecked by `sqlx`. Once it has been run you may set `SQLX_OFFLINE=false` and everything should work as normally.
+Set `DATABASE_URL` in your env and create the database. If you're using `sqlx` cli call `sqlx database create`. Then do:
+
+```
+SQLX_OFFLINE=true cargo run --bin migrate --features migration
+```
+
+That runs migrations for this crate and its dependencies `fx-event-bus` and `fx-mq-jobs`. The migration binary uses the feature flag `"migration"` to exclude all code that is statically typechecked by `sqlx`. Once it has been run you may set `SQLX_OFFLINE=false` and everything should work as normally.
 
 Set `DATABASE_URL` in your environment and create the database (e.g., `sqlx database create`). Run migrations with:
 

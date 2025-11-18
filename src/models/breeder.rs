@@ -98,6 +98,7 @@ mod tests {
             ),
             Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(50),
+            None::<()>,
         )
         .unwrap()
     }

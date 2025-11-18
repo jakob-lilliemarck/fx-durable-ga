@@ -12,6 +12,7 @@ use crate::repositories::{genotypes, morphologies, requests};
 use crate::services::lock;
 use crate::services::optimization::models::{Terminator, TypeErasedEvaluator};
 use fx_event_bus::Publisher;
+use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use tracing::instrument;
 use uuid::Uuid;
@@ -126,7 +127,8 @@ impl Service {
     ///         MutationRate::exponential(0.6, 0.05, 1.1, 2)?
     ///     ),
     ///     Crossover::uniform(0.6)?,                       // High recombination
-    ///     Distribution::latin_hypercube(30)
+    ///     Distribution::latin_hypercube(30),
+    ///     None::<()>,
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -157,7 +159,8 @@ impl Service {
     ///         MutationRate::linear(0.4, 0.1, 1.0)?
     ///     ),
     ///     Crossover::uniform(0.5)?,                       // Balanced recombination
-    ///     Distribution::latin_hypercube(50)
+    ///     Distribution::latin_hypercube(50),
+    ///     None::<()>,
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -185,7 +188,8 @@ impl Service {
     ///     Selector::tournament(2, 150)?,                   // Low selection pressure
     ///     Mutagen::constant(0.6, 0.4)?,                   // Sustained exploration
     ///     Crossover::single_point(),                      // Conservative recombination
-    ///     Distribution::latin_hypercube(100)              // High initial diversity
+    ///     Distribution::latin_hypercube(100),             // High initial diversity
+    ///     None::<()>,
     /// ).await?;
     /// # Ok(())
     /// # }
@@ -257,12 +261,13 @@ impl Service {
     ///     Selector::tournament(3, 100)?,
     ///     Mutagen::constant(0.5, 0.3)?,
     ///     Crossover::uniform(0.5)?,
-    ///     Distribution::latin_hypercube(50)
+    ///     Distribution::latin_hypercube(50),
+    ///     None::<()>,
     /// ).await?;
     /// # Ok(())
     /// # }
     /// ```
-    #[instrument(level = "debug", skip(self), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen, crossover = ?crossover))]
+    #[instrument(level = "debug", skip(self, data), fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen, crossover = ?crossover))]
     pub async fn new_optimization_request(
         &self,
         type_name: &str,
@@ -273,6 +278,7 @@ impl Service {
         mutagen: Mutagen,
         crossover: Crossover,
         distribution: Distribution,
+        data: Option<impl Serialize + Send + Sync>,
     ) -> Result<Uuid, Error> {
         tracing::info!("Optimization request received");
 
@@ -291,6 +297,7 @@ impl Service {
                             mutagen,
                             crossover,
                             distribution,
+                            data,
                         )?)
                         .await?;
 
@@ -390,6 +397,9 @@ impl Service {
                 e
             })?;
 
+        // Get the request from the database
+        let request = self.requests.get_request(request_id).await?;
+
         // Get the evaluator to use for this type
         let evaluator =
             self.evaluators
@@ -402,7 +412,7 @@ impl Service {
         // Call the evaluation function. This is a long running function!
         let terminator: Box<dyn Terminated> =
             Box::new(Terminator::new(self.requests.clone(), request_id));
-        let fitness = evaluator.fitness(&genotype, &terminator).await?;
+        let fitness = evaluator.fitness(&genotype, &request, &terminator).await?;
 
         self.genotypes
             .chain(|mut tx_genotypes| {
@@ -779,7 +789,7 @@ mod tests {
     use crate::bootstrap;
     use crate::models::{
         Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, NoContext, Schedule, Selector, Temperature, Terminated,
+        MutationRate, Request, Schedule, Selector, Temperature, Terminated,
     };
     use futures::future::BoxFuture;
 
@@ -816,6 +826,7 @@ mod tests {
                 mutagen.clone(),
                 crossover.clone(),
                 distribution.clone(),
+                None::<()>,
             )
             .await;
 
@@ -892,6 +903,7 @@ mod tests {
             mutagen,
             crossover,
             distribution,
+            None::<()>,
         )?;
         let request_id = request.id;
 
@@ -973,12 +985,12 @@ mod tests {
         // Simple evaluator that returns constant fitness
         struct TestEvaluator;
 
-        impl Evaluator<(i64, i64), NoContext> for TestEvaluator {
+        impl Evaluator<(i64, i64)> for TestEvaluator {
             fn fitness<'a>(
                 &self,
                 _genotype_id: uuid::Uuid,
                 _phenotype: (i64, i64),
-                _ctx: &NoContext,
+                _request: &'a Request,
                 _terminated: &'a Box<dyn Terminated>,
             ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
                 Box::pin(async move { Ok(0.75) })
@@ -1009,6 +1021,7 @@ mod tests {
             mutagen,
             crossover,
             distribution,
+            None::<()>,
         )?;
         let request_id = request.id;
 
@@ -1113,6 +1126,7 @@ mod tests {
             mutagen,
             crossover,
             distribution,
+            None::<()>,
         )?;
         let request_id = request.id;
 
@@ -1222,6 +1236,7 @@ mod tests {
             mutagen,
             crossover,
             distribution,
+            None::<()>,
         )?;
         let request_id = request.id;
 

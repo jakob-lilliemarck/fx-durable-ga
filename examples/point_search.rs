@@ -17,7 +17,7 @@ use fx_durable_ga::{
     bootstrap,
     models::{
         Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, NoContext, Schedule, Selector, Temperature, Terminated,
+        MutationRate, Request, Schedule, Selector, Temperature, Terminated,
     },
     register_event_handlers, register_job_handlers,
 };
@@ -104,7 +104,7 @@ impl Evaluator<Point> for PointDistanceEvaluator {
         &self,
         _genotype_id: Uuid,
         phenotype: Point,
-        _: &NoContext,
+        _: &Request,
         terminated: &'a Box<dyn Terminated>,
     ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
         let target = self.target_point;
@@ -201,6 +201,7 @@ async fn main() -> Result<()> {
                 Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.3)?),
                 Crossover::uniform(0.5)?,
                 Distribution::latin_hypercube(1000),
+                None::<()>,
             )
             .await?;
     }

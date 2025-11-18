@@ -1,5 +1,6 @@
 use super::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
 use chrono::{DateTime, Utc};
+use serde::Serialize;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -7,7 +8,7 @@ use uuid::Uuid;
 /// Contains the complete configuration needed to run an optimization.
 #[derive(Debug)]
 #[cfg_attr(test, derive(Clone))]
-pub(crate) struct Request {
+pub struct Request {
     pub(crate) id: Uuid,
     pub(crate) requested_at: DateTime<Utc>,
     pub(crate) type_name: String,
@@ -18,14 +19,18 @@ pub(crate) struct Request {
     pub(crate) mutagen: Mutagen,
     pub(crate) crossover: Crossover,
     pub(crate) distribution: Distribution,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum RequestValidationError {}
+pub enum RequestValidationError {
+    #[error("Could not serialize data: {0}")]
+    SerializationError(#[from] serde_json::Error),
+}
 
 impl Request {
     /// Creates a new optimization request with the given parameters.
-    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen))]
+    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen), skip(data))]
     pub(crate) fn new(
         type_name: &str,
         type_hash: i32,
@@ -35,7 +40,10 @@ impl Request {
         mutagen: Mutagen,
         crossover: Crossover,
         distribution: Distribution,
+        data: Option<impl Serialize>,
     ) -> Result<Self, RequestValidationError> {
+        let data = data.map(|d| serde_json::to_value(d)).transpose()?;
+
         Ok(Self {
             id: Uuid::now_v7(),
             requested_at: Utc::now(),
@@ -47,6 +55,7 @@ impl Request {
             mutagen,
             crossover,
             distribution,
+            data: data,
         })
     }
 
@@ -95,6 +104,7 @@ mod tests {
             ),
             Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(50),
+            None::<()>,
         )
         .unwrap()
     }

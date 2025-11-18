@@ -18,6 +18,7 @@ pub(super) struct DbRequest {
     pub(super) mutagen: serde_json::Value,
     pub(super) crossover: serde_json::Value,
     pub(super) distribution: serde_json::Value,
+    pub(super) data: Option<serde_json::Value>,
 }
 
 impl TryFrom<Request> for DbRequest {
@@ -44,6 +45,7 @@ impl TryFrom<Request> for DbRequest {
             mutagen: mutagen_json,
             crossover: crossover_json,
             distribution: distribution_json,
+            data: request.data,
         })
     }
 }
@@ -72,6 +74,7 @@ impl TryFrom<DbRequest> for Request {
             mutagen,
             crossover,
             distribution,
+            data: request.data,
         })
     }
 }
@@ -92,6 +95,7 @@ mod tests {
             Mutagen::constant(0.5, 0.1).unwrap(),
             Crossover::uniform(0.5).unwrap(),
             Distribution::latin_hypercube(50),
+            None::<()>,
         )
         .unwrap()
     }
