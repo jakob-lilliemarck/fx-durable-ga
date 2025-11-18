@@ -68,7 +68,7 @@ impl ServiceBuilder {
     /// ```rust,no_run
     /// use fx_durable_ga::models::*;
     /// # use fx_durable_ga::optimization::ServiceBuilder;
-    /// # 
+    /// #
     /// # use futures::future::BoxFuture;
     ///
     /// #[derive(Debug, Clone)]
