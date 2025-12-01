@@ -315,6 +315,61 @@ impl Handler<RequestTerminatedEvent> for RequestTerminatedHandler {
 }
 
 // ============================================================
+// RequestInterrupted
+// ============================================================
+
+/// Event published when an optimization request is manually interrupted.
+#[derive(Clone, Serialize, Deserialize)]
+pub struct RequestInterruptedEvent {
+    request_id: Uuid,
+}
+
+impl fx_event_bus::Event for RequestInterruptedEvent {
+    const NAME: &'static str = "RequestInterrupted";
+}
+
+impl RequestInterruptedEvent {
+    /// Creates a new request interrupted event.
+    pub fn new(request_id: Uuid) -> Self {
+        Self { request_id }
+    }
+}
+
+/// Handler that concludes optimization requests when they are manually interrupted.
+pub struct RequestInterruptedHandler {
+    optimization: Arc<optimization::Service>,
+}
+
+impl Handler<RequestInterruptedEvent> for RequestInterruptedHandler {
+    type Error = super::Error;
+
+    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
+    fn handle<'a>(
+        &'a self,
+        input: Arc<RequestInterruptedEvent>,
+        _: chrono::DateTime<chrono::Utc>,
+        tx: sqlx::PgTransaction<'a>,
+    ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
+        Box::pin(async move {
+            let optimization = self.optimization.clone();
+
+            if let Err(err) = optimization
+                .conclude_request(RequestConclusion {
+                    request_id: input.request_id,
+                    concluded_at: Utc::now(),
+                    concluded_with: Conclusion::Interrupted,
+                })
+                .await
+            {
+                tracing::error!(message = "Could not conclude request", error = ?err)
+            }
+
+            (tx, Ok(()))
+        })
+    }
+}
+
+// ============================================================
 // Registration
 // ============================================================
 
@@ -342,6 +397,10 @@ pub fn register_event_handlers(
     });
 
     registry.with_handler(RequestTerminatedHandler {
+        optimization: optimization.clone(),
+    });
+
+    registry.with_handler(RequestInterruptedHandler {
         optimization: optimization.clone(),
     });
 }

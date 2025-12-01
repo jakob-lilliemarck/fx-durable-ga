@@ -72,6 +72,7 @@ impl Request {
 pub(crate) enum Conclusion {
     Completed,
     Terminated,
+    Interrupted,
 }
 
 /// Records the conclusion of an optimization request.

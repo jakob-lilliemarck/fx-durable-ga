@@ -1,7 +1,7 @@
 use super::Error;
 use super::events::{
     GenotypeEvaluatedEvent, GenotypeGenerated, OptimizationRequestedEvent, RequestCompletedEvent,
-    RequestTerminatedEvent,
+    RequestInterruptedEvent, RequestTerminatedEvent,
 };
 use crate::models::{
     Breeder, Crossover, Distribution, Encodeable, Fitness, FitnessGoal, Genotype, Mutagen, Request,
@@ -710,6 +710,26 @@ impl Service {
         Ok(())
     }
 
+    /// Interrupts a running optimization request.
+    /// Publishes an interruption event that concludes the request with the "Interrupted" reason.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub async fn interrupt_request(&self, request_id: Uuid) -> Result<(), Error> {
+        self.genotypes
+            .chain(|tx_genotypes| {
+                Box::pin(async move {
+                    let mut publisher = Publisher::new(tx_genotypes.tx());
+                    let ret = publisher
+                        .publish(RequestInterruptedEvent::new(request_id))
+                        .await?;
+
+                    Ok((publisher, ret))
+                })
+            })
+            .await?;
+
+        Ok(())
+    }
+
     /// Gets the best genotype for a request based on fitness.
     /// Returns the genotype with the best (min or max) fitness depending on the goal.
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
@@ -1180,6 +1200,67 @@ mod tests {
         assert_eq!(
             event_count, 1,
             "Exactly one RequestCompletedEvent should be published"
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn test_interrupt_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        // Create service
+        let service = create_test_service(pool.clone()).await;
+
+        // Create a test request
+        let goal = FitnessGoal::maximize(0.95)?;
+        let schedule = Schedule::generational(100, 10);
+        let selector = Selector::tournament(3, 20).expect("is valid");
+        let mutagen = Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.3)?);
+        let crossover = Crossover::uniform(0.5)?;
+        let distribution = Distribution::random(5);
+
+        let request = crate::models::Request::new(
+            "TestType",
+            123,
+            goal,
+            selector,
+            schedule,
+            mutagen,
+            crossover,
+            distribution,
+            None::<()>,
+        )?;
+        let request_id = request.id;
+
+        // Insert request
+        service
+            .requests
+            .chain(|mut tx_requests| {
+                Box::pin(async move {
+                    let request = tx_requests.new_request(request).await?;
+                    Ok((tx_requests, request))
+                })
+            })
+            .await?;
+
+        // Call the method under test
+        let result = service.interrupt_request(request_id).await;
+
+        // Verify success
+        assert!(result.is_ok(), "interrupt_request should succeed");
+
+        // Verify RequestInterruptedEvent was published
+        let event_count: i64 = sqlx::query_scalar::<_, i64>(
+            "SELECT COUNT(*) FROM fx_event_bus.events_unacknowledged WHERE name = $1",
+        )
+        .bind("RequestInterrupted")
+        .fetch_one(&pool)
+        .await?;
+
+        assert_eq!(
+            event_count, 1,
+            "Exactly one RequestInterruptedEvent should be published"
         );
 
         Ok(())

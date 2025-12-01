@@ -1,0 +1,3 @@
+-- Down migration: Removing an ENUM value from PostgreSQL is not safe in production.
+-- ENUM values cannot be removed without recreating the type and migrating all dependent data.
+-- This migration is intentionally left as a no-op to preserve data integrity.

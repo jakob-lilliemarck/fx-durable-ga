@@ -31,7 +31,7 @@ rand = "0.9.2"
 const-fnv1a-hash = "1.1"
 futures = "0.3.31"
 fx-mq-jobs = "~0.1.8"
-fx-event-bus = "~0.1.9"
+fx-event-bus = "~0.1.10"
 chrono = "0.4.39"
 anyhow = "1.0.95"
 tokio = { version = "1.42.0", features = [
