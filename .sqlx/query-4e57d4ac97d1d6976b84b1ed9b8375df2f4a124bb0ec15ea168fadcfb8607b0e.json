@@ -22,7 +22,8 @@
             "kind": {
               "Enum": [
                 "completed",
-                "terminated"
+                "terminated",
+                "interrupted"
               ]
             }
           }
