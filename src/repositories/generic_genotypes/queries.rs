@@ -3,33 +3,16 @@
 mod tests {
     use super::*;
     use crate::models::{
-        Crossover, Distribution, Evolvable, FitnessGoal, Mutagen, Request, Schedule, Selector,
+        Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector,
     };
     use crate::repositories::requests::queries::new_request;
-    use rand::Rng;
     use serde::{Deserialize, Serialize};
     use std::hash::Hash;
 
-    // 1. Define a simple, concrete type to be used as a genome.
     #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Hash)]
     struct TestGenome {
         param_a: i32,
         param_b: String,
-    }
-
-    // 2. Implement `Evolvable` for the concrete type.
-    // The logic here is trivial, just for satisfying the trait bounds.
-    impl Evolvable for TestGenome {
-        fn mutate<R: Rng>(&mut self, rng: &mut R, _mutation_rate: f64, _temperature: f64) {
-            self.param_a = rng.gen_range(0..100);
-        }
-        fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self {
-            if rng.gen_bool(0.5) {
-                self.clone()
-            } else {
-                other.clone()
-            }
-        }
     }
 
     /// Creates and inserts a dummy request to satisfy foreign key constraints.
@@ -54,19 +37,16 @@ mod tests {
     async fn it_writes_and_reads_a_generic_genotype_roundtrip(
         pool: sqlx::PgPool,
     ) -> anyhow::Result<()> {
-        // The test database is created empty, so we must run migrations.
         crate::migrations::run_default_migrations(&pool).await?;
 
         // --- ARRANGE ---
         let request = create_test_request(&pool).await;
 
-        // Create an instance of our custom genome type.
         let concrete_genome = TestGenome {
             param_a: 42,
             param_b: "hello".to_string(),
         };
 
-        // Create the type-erased `GenericGenotype` for storage.
         let genotype_to_insert = GenericGenotype::new(
             "TestGenome",
             123,
@@ -76,18 +56,16 @@ mod tests {
         )?;
 
         // --- ACT ---
-        // Write the genotype to the database.
         new_genotypes(&pool, vec![genotype_to_insert.clone()]).await?;
-
-        // Read the genotype back from the database.
         let retrieved_genotype = get_genotype(&pool, &genotype_to_insert.id).await?;
-
-        // Deserialize the `genome_data` back into our concrete type.
+        let retrieved_id = retrieved_genotype.id;
+        let retrieved_hash = retrieved_genotype.genome_hash;
         let deserialized_genome: TestGenome = retrieved_genotype.deserialize()?;
 
         // --- ASSERT ---
-        // Verify that the deserialized genome is identical to the original.
         assert_eq!(concrete_genome, deserialized_genome);
+        assert_eq!(genotype_to_insert.id, retrieved_id);
+        assert_eq!(genotype_to_insert.genome_hash, retrieved_hash);
 
         Ok(())
     }

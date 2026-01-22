@@ -1,31 +1,32 @@
+use futures::future::BoxFuture;
 use rand::Rng;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde_json::Value;
 use std::fmt::Debug;
+use anyhow::Result;
 
 /// The core trait for any type that can be evolved by the generic framework.
 ///
 /// Types implementing this trait define their own structure, mutation rules,
 /// and crossover logic. The framework handles persistence (via Serde) and
 /// the evolutionary loop (Selection -> Breeding -> Evaluation).
-pub trait Evolvable: Serialize + DeserializeOwned + Clone + Send + Sync + Debug {
-    /// Mutate the genome in place.
-    ///
-    /// # Arguments
-    /// * `rng` - The random number generator to use for stochastic operations.
-    /// * `mutation_rate` - The global probability of mutation occurring (0.0 - 1.0).
-    ///   Types with multiple fields should use this to determine *which* fields to mutate.
-    /// * `temperature` - A simulated annealing parameter (0.0 - 1.0) often used to scale
-    ///   the *magnitude* of mutation (e.g., small tweaks at low temp, wild changes at high temp).
-    fn mutate<R: Rng>(&mut self, rng: &mut R, mutation_rate: f64, temperature: f64);
 
-    /// Create a new offspring by crossing over this parent with another.
-    ///
-    /// # Arguments
-    /// * `other` - The second parent to crossover with.
-    /// * `rng` - Random number generator for selecting crossover points/strategies.
-    ///
-    /// # Returns
-    /// A new instance representing the child genome.
-    fn crossover<R: Rng>(&self, other: &Self, rng: &mut R) -> Self;
+/// A type-erased manager for a specific `Evolvable` genotype.
+///
+/// This is the trait the framework interacts with via a registry. Implementors of this
+/// trait provide the bridge between the framework's generic `serde_json::Value` representation
+/// and the user's concrete `Evolvable` type.
+pub trait GenotypeManager: Send + Sync {
+    /// Generate a new, random genome as a JSON Value.
+    fn random(&self, rng: &mut impl Rng) -> Value;
+
+    /// Perform crossover on two JSON values, returning a new JSON child.
+    fn crossover(&self, parent1: &Value, parent2: &Value, rng: &mut impl Rng) -> Result<Value>;
+
+    /// Mutate a JSON genome in place.
+    fn mutate(&self, genotype: &mut Value, rng: &mut impl Rng, mutation_rate: f64, temperature: f64) -> Result<()>;
+
+    /// Evaluate the fitness of a JSON genome.
+    fn evaluate<'a>(&'a self, genotype: &'a Value) -> BoxFuture<'a, Result<f64>>;
 }

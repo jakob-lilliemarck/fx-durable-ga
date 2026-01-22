@@ -1,4 +1,3 @@
-use crate::models::Evolvable;
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -32,7 +31,7 @@ impl GenericGenotype {
         generation_id: i32,
     ) -> Result<Self, serde_json::Error>
     where
-        G: Evolvable + Serialize + Hash,
+        G: Serialize + Hash,
     {
         let genome_data = serde_json::to_value(genome)?;
 

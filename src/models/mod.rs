@@ -19,7 +19,6 @@ pub use crossover::{Crossover, ProbabilityOutOfRangeError};
 pub use distribution::Distribution;
 pub use encodeable::Encodeable;
 pub use evaluator::{Evaluator, Terminated};
-pub use evolution::Evolvable;
 pub use gene_bounds::{GeneBoundError, GeneBounds};
 pub use generic_genotype::GenericGenotype;
 pub use genotype::Genotype;
