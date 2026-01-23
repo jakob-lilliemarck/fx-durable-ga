@@ -127,6 +127,8 @@ This phase is a **breaking change** that refactors the `OptimizationService` and
 5.  **RNG & Logging**
     * Prefer passing a shared `&mut rng`; only create new RNGs when sharing is impractical across threads.
     * Follow existing instrumentation patterns (`#[instrument(level = \"debug\")]`; log only significant business events).
+6.  **Stable Hashing for JSON Genomes**
+    * Implement a small in-house helper to canonicalize `serde_json::Value` by sorting object keys (via `BTreeMap`), preserving array order, serializing to a compact string, and hashing that. Use this in `Genotype::compute_genome_hash` to ensure deterministic hashes.
 
 ## Key Insights
 *   **Breaking Change Simplifies**: Legacy pipeline is removed entirely; major-version bump will signal the break.
