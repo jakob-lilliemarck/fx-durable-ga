@@ -5,7 +5,7 @@
 ## Overview
 This plan outlines a **breaking change** to refactor `fx-durable-ga` from a specialized numeric optimization engine into a generic evolutionary framework. The goal is to support any user-defined genotype (GP trees, hybrid types, etc.) by removing the dependency on `Vec<i64>` genomes.
 
-The existing `genotypes` table, `morphology` system, and associated repository code will be completely replaced.
+The existing `genotypes` table, `morphology` system, and associated repository code will be completely replaced; the canonical table remains `genotypes` (no separate `generic_genotypes` table).
 
 ## Core Philosophy
 Shift from **Data-Driven Definition** (Morphology rules in DB) to **Code-Driven Definition** (Rust's type system defines rules at compile time). The framework becomes ignorant of the concrete types it manages.
@@ -44,8 +44,12 @@ pub trait GenotypeManager: Send + Sync {
     /// Mutate a JSON genome in place.
     fn mutate(&self, genotype: &mut Value, rng: &mut impl Rng, mutation_rate: f64, temperature: f64) -> Result<()>;
     
-    /// Evaluate the fitness of a JSON genome.
-    fn evaluate<'a>(&'a self, genotype: &'a Value) -> BoxFuture<'a, Result<f64>>;
+    /// Evaluate the fitness of a JSON genome with termination support.
+    fn evaluate<'a>(
+        &'a self,
+        genotype: &'a Value,
+        terminated: &'a dyn Terminated,
+    ) -> BoxFuture<'a, Result<f64>>;
 }
 ```
 The user is free to implement the logic inside these methods however they choose.
@@ -57,9 +61,9 @@ The user is free to implement the logic inside these methods however they choose
 *   When a job is received, the service uses the `type_hash` to look up the correct `GenotypeManager` from the registry and calls its type-erased methods.
 
 ### 3. Unified, Type-Erased Persistence
-*   **`Genotype` Struct**: The primary `Genotype` struct will be refactored to store the genome as `genome_data: serde_json::Value`.
-*   **Database**: The `genotypes` table will be replaced with a new version that has a `genome_data JSONB` column.
-*   **Repository**: The existing `genotypes` repository will be replaced with a new implementation that works with the refactored `Genotype` struct and the new table schema.
+*   **`Genotype` Struct**: The primary `Genotype` struct will be refactored to store the genome as `genome: serde_json::Value` (same field name, new JSON representation).
+*   **Database**: The `genotypes` table will be altered in place so `genome` becomes `JSONB`.
+*   **Repository**: The existing `genotypes` repository will be updated to the new schema; the prototype `generic_genotypes` repository will be removed.
 
 ## Implementation Steps & Progress
 
@@ -69,8 +73,8 @@ The user is free to implement the logic inside these methods however they choose
 - [x] **Migration**: A new migration has been created for a parallel `generic_genotypes` table.
 
 ### Phase 2: Persistence (Complete)
-- [x] **Parallel Repository**: A new, separate `generic_genotypes` repository has been implemented.
-- [x] **Validation**: A roundtrip test has been written and passed, proving the persistence strategy.
+- [x] **Repository Prototype**: A JSONB-backed repository was implemented (initially under `generic_genotypes`) and validated via roundtrip test.
+- [x] **Migration Prototype**: An initial migration created `generic_genotypes`; this will now be rewritten to alter `genotypes` in place to the JSONB schema.
 
 ### Phase 3: Unification & Refactoring (Next Steps)
 
@@ -78,122 +82,55 @@ This phase is a **breaking change** that refactors the `OptimizationService` and
 
 ---
 
-#### **Step 3.1: Update `GenotypeManager` Trait**
+#### **Step 3.1: Validate `GenotypeManager` Trait**
 *   **File:** `src/models/evolution.rs`
-*   **Action:** Add `name()` and `hash()` methods to the `GenotypeManager` trait. This encapsulates the type identity logic previously handled by the `Encodeable` trait, allowing us to eventually remove `Encodeable`.
+*   **Action:** Ensure `name()`/`hash()` are present (already added) so type identity lives in the manager. Extend `evaluate` to accept a termination handle (`&dyn Terminated`) so cancellation remains supported. No other trait changes planned for this refactor.
 
 ---
 
-#### **Step 3.2: Refactor Core Models for Generality**
+#### **Step 3.2: Core Models**
 
-*   **File:** `src/models/request.rs`
-    *   **Action:** Remove `crossover` and `distribution` fields. The `new()` function will need to be adjusted.
-        ```diff
-        pub struct Request {
-            // ...
-        -   pub(crate) crossover: Crossover,
-        -   pub(crate) distribution: Distribution,
-            // ...
-        }
-        ```
-    *   **Rationale:** These configurations are obsolete in the new architecture. `GenotypeManager` owns the logic for crossover and initial population generation (`random`), so the `Request` no longer needs to carry this configuration.
-
-*   **File:** `src/models/selector.rs`
-    *   **Action:** Refactor `select_parents` to be agnostic of the `Genotype` struct. It should operate on a simpler slice.
-        ```rust
-        // Define a simple struct for selection
-        pub struct FitnessRecord {
-            pub id: Uuid,
-            pub fitness: f64,
-        }
-
-        // Change the signature
-        pub fn select_parents<'a>(
-            &self,
-            num_pairs: usize,
-        -   candidates: &'a [(Genotype, Option<f64>)],
-        +   candidates: &'a [FitnessRecord],
-            goal: &FitnessGoal,
-        ) -> Result<Vec<(&'a FitnessRecord, &'a FitnessRecord)>, SelectionError>
-        ```
-    *   **Rationale:** The selection algorithm only needs the ID and fitness. This decouples `Selector` from any specific `Genotype` implementation.
-
-*   **File:** `src/models/breeder.rs`
-    *   **Action:** **Delete this file.**
-    *   **Rationale:** The logic in `Breeder` is a simple loop that calls crossover and mutate. This logic will be moved directly into a private method within the `OptimizationService` and will dispatch to the `GenotypeManager`.
+*   **Request** (`src/models/request.rs`): **No changes.** Keep existing fields (`crossover`, `distribution`, `mutagen`, etc.). Even if `distribution` is unused initially, we leave the API intact for now.
+*   **Selector** (`src/models/selector.rs`): **No signature change.** Keep access to genotypes; we are not introducing `FitnessRecord` indirection in this refactor.
+*   **Breeder** (`src/models/breeder.rs`): Keep the module. Refactor it to operate on JSON-based `Genotype`, taking parent references, `request.mutagen`, and a `GenotypeManager` to perform crossover/mutate. This keeps breeding logic isolated and testable without the full service.
 
 ---
 
 #### **Step 3.3: Refactor the `OptimizationService`**
 
 *   **File:** `src/services/optimization/service_builder.rs`
-    *   **Action 1:** Add the `GenotypeManager` registry.
-        ```diff
-        pub struct ServiceBuilder {
-            // ...
-            pub(super) evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
-        +   pub(super) genotype_managers: HashMap<i32, Box<dyn GenotypeManager + 'static>>,
-            // ...
-        }
-        ```
-    *   **Action 2:** Create the `with_genotype_manager` registration method.
-        ```rust
-        #[instrument(level = "debug", skip(self, manager), fields(type_name = manager.name(), type_hash = manager.hash()))]
-        pub fn with_genotype_manager<M>(mut self, manager: M) -> Self
-        where
-            M: GenotypeManager + 'static,
-        {
-            self.genotype_managers.insert(manager.hash(), Box::new(manager));
-            self
-        }
-        ```
-    *   **Action 3:** Update the `build()` method to pass the new manager registry to the `Service`.
-    *   **Action 4:** Deprecate the old `.register()` method in favor of the new manager.
+    *   Add a `genotype_managers: HashMap<i32, Box<dyn GenotypeManager>>`.
+    *   Provide `with_genotype_manager` (preferred registration API). Remove/replace `.register()` and the `TypeErasedEvaluator` pathway.
+    *   Drop dependencies on `Encodeable`, `Evaluator`, and `Morphology`.
+    *   Pass the manager registry into `Service::new`.
 
 *   **File:** `src/services/optimization/service.rs`
-    *   **Action 1:** Update the `Service` struct.
-        ```diff
-        pub struct Service {
-            // ...
-            pub(super) genotypes: genotypes::Repository, // This will be the NEW repository
-        -   pub(super) evaluators: HashMap<i32, Box<dyn TypeErasedEvaluator + 'static>>,
-        +   pub(super) genotype_managers: HashMap<i32, Box<dyn GenotypeManager + 'static>>,
-            // ...
-        }
-        ```
-    *   **Action 2: Refactor `generate_initial_population`**
-        *   Remove the call to `morphologies.get_morphology`.
-        *   Look up the `type_hash` in `self.genotype_managers`.
-        *   Call `manager.random()` in a loop based on `request.distribution`.
-        *   Create `GenericGenotype` instances from the returned `Value`.
-        *   Save them using the new `genotypes` repository.
-    *   **Action 3: Refactor `breed_genotypes`**
-        *   This method will now contain the logic previously in `Breeder`.
-        *   It will fetch parent `GenericGenotype`s.
-        *   It will look up the `GenotypeManager`.
-        *   In a loop, it will deserialize parent `genome_data` to `Value`, call `manager.crossover` and `manager.mutate`, and create new `GenericGenotype` children to be saved.
-    *   **Action 4: Refactor `evaluate_genotype`**
-        *   Remove the lookup in `self.evaluators`.
-        *   Look up the `GenotypeManager` using the `type_hash`.
-        *   Call `manager.evaluate(&genotype.genome_data)`.
-        *   The concept of `TypeErasedEvaluator` is now obsolete and can be removed.
+    *   Replace evaluator map with `genotype_managers`.
+    *   `generate_initial_population`: use `GenotypeManager::random` via `type_hash`; respect `request.distribution` even if internally unused by the manager. Persist via the genotypes repo.
+    *   `breed_genotypes`: delegate to refactored `Breeder`, passing parents, `GenotypeManager`, `request.mutagen`, and a shared `&mut rng`.
+    *   `evaluate_genotype`: call `GenotypeManager::evaluate(&genotype.genome, terminated_handle)` directly (no `TypeErasedEvaluator`), preserving termination support.
+    *   Ensure instrumentation with `#[instrument(level = \"debug\")]` and log only significant business events (`info!`/`warn!`/`error!` as appropriate).
 
 ---
 
 #### **Step 3.4: Unification and Deletion**
 
-1.  **Rename & Replace**:
-    *   Delete `src/repositories/genotypes`.
-    *   Rename `src/repositories/generic_genotypes` to `src/repositories/genotypes`.
-    *   Delete `src/models/genotype.rs`.
-    *   Rename `src/models/generic_genotype.rs` to `src/models/genotype.rs` and `GenericGenotype` to `Genotype`.
-2.  **Delete Obsolete Code**:
-    *   Delete `src/models/morphology.rs`, `src/repositories/morphologies`, and the database table.
-    *   Delete the `Encodeable` trait.
-    *   Refactor `Crossover` and `Mutagen` to be simple DTOs with no logic, or remove them entirely if the `GenotypeManager` is expected to handle all configuration internally.
-3.  **Update Tests & Examples**: Update all broken tests and examples to use the new `GenotypeManager`-based workflow.
+1.  **Schema & Migration**
+    * Rewrite the existing migration that introduced `generic_genotypes` to instead alter the existing `genotypes` table in place: change `genome` column type from `BIGINT[]` to `JSONB NOT NULL` (keep the column name), keep `genome_hash BIGINT` and existing indexes. Do **not** create `generic_genotypes` and do not touch `fitness` or `populations` view/indexes. Down migration restores `genome BIGINT[]` and removes the JSONB change.
+2.  **Repositories & Models**
+    * Keep `src/repositories/genotypes`; update its queries/models to use `genome` as JSONB. Remove the prototype `generic_genotypes` repository.
+    * Keep `src/models/genotype.rs` but refactor its `genome` field to `serde_json::Value` and update helpers/hash accordingly. Remove `src/models/generic_genotype.rs`.
+3.  **Obsolete Components**
+    * Delete `Encodeable`, `Evaluator`, `TypeErasedEvaluator`, `Morphology`, their repositories, and related modules (`morphologies`).
+4.  **Tests & Examples**
+    * Rewrite existing tests to target the new `GenotypeManager` flow; prefer rewriting over removal when meaningful.
+5.  **RNG & Logging**
+    * Prefer passing a shared `&mut rng`; only create new RNGs when sharing is impractical across threads.
+    * Follow existing instrumentation patterns (`#[instrument(level = \"debug\")]`; log only significant business events).
 
 ## Key Insights
-*   **Breaking Change Simplifies**: By not supporting the legacy system, the refactoring is cleaner and avoids a complex transition period.
-*   **Type Erasure is Key**: The `GenotypeManager` trait, operating on `serde_json::Value`, is the essential abstraction that allows a non-generic service to handle multiple, user-defined types.
-*   **Framework Boundary**: The framework handles "Persistence" and "Orchestration". The consuming application, via its `GenotypeManager` implementation, handles all "Structure" and "Evolution Logic".
+*   **Breaking Change Simplifies**: Legacy pipeline is removed entirely; major-version bump will signal the break.
+*   **Single Integration Point**: `GenotypeManager` replaces `Encodeable`/`Evaluator`/`Morphology` as the only integration surface.
+*   **Type Erasure**: Operating on `serde_json::Value` keeps the service non-generic while enabling arbitrary genotypes (GA or GP).
+*   **Framework Boundary**: Framework owns persistence/orchestration; consuming app owns structure and evolutionary logic in its `GenotypeManager`.
+*   **Data Reset**: Clean break is acceptable; migration recreates `genotypes` with the new schema.

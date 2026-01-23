@@ -1,23 +1,24 @@
+use anyhow::Result;
+use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
 use rand::Rng;
-use serde::de::DeserializeOwned;
-use serde::Serialize;
 use serde_json::Value;
-use std::fmt::Debug;
-use anyhow::Result;
 
-/// The core trait for any type that can be evolved by the generic framework.
-///
-/// Types implementing this trait define their own structure, mutation rules,
-/// and crossover logic. The framework handles persistence (via Serde) and
-/// the evolutionary loop (Selection -> Breeding -> Evaluation).
-
-/// A type-erased manager for a specific `Evolvable` genotype.
+/// A type-erased manager for a specific genotype.
 ///
 /// This is the trait the framework interacts with via a registry. Implementors of this
 /// trait provide the bridge between the framework's generic `serde_json::Value` representation
-/// and the user's concrete `Evolvable` type.
+/// and the user's concrete genotype type.
 pub trait GenotypeManager: Send + Sync {
+    /// Unique name identifier for the type being managed.
+    fn name(&self) -> &'static str;
+
+    /// Hash derived from the name for efficient type identification.
+    /// Default implementation provided using FNV-1a.
+    fn hash(&self) -> i32 {
+        fnv1a_hash_str_32(self.name()) as i32
+    }
+
     /// Generate a new, random genome as a JSON Value.
     fn random(&self, rng: &mut impl Rng) -> Value;
 
