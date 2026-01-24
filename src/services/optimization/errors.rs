@@ -1,7 +1,7 @@
 use crate::services::lock;
 use crate::{
     models::SelectionError,
-    repositories::{genotypes, morphologies, requests},
+    repositories::{genotypes, requests},
 };
 
 /// Errors that can occur during optimization operations.
@@ -9,8 +9,6 @@ use crate::{
 pub enum Error {
     #[error("RequestsRepositoryError: {0}")]
     RequestsRepositoryError(#[from] requests::Error),
-    #[error("MorphologiesRepositoryError: {0}")]
-    MorphologiesRepositoryError(#[from] morphologies::Error),
     #[error("GenotypesRepositoryError: {0}")]
     GenotypesRepositoryError(#[from] genotypes::Error),
     #[error("UnknownType: type_name={type_name}, type_hash={type_hash}")]
@@ -21,6 +19,4 @@ pub enum Error {
     SelectionError(#[from] SelectionError),
     #[error("Lock error: {0}")]
     LockError(#[from] lock::Error),
-    #[error("Unknownn phenotype")]
-    UnknownPhenotype { type_name: String, type_hash: i32 },
 }

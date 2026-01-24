@@ -1,7 +1,8 @@
+use crate::models::Terminated;
 use anyhow::Result;
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
-use rand::Rng;
+use rand::RngCore;
 use serde_json::Value;
 
 /// A type-erased manager for a specific genotype.
@@ -20,14 +21,24 @@ pub trait GenotypeManager: Send + Sync {
     }
 
     /// Generate a new, random genome as a JSON Value.
-    fn random(&self, rng: &mut impl Rng) -> Value;
+    fn random(&self, rng: &mut dyn RngCore) -> Result<Value>;
 
     /// Perform crossover on two JSON values, returning a new JSON child.
-    fn crossover(&self, parent1: &Value, parent2: &Value, rng: &mut impl Rng) -> Result<Value>;
+    fn crossover(&self, parent1: &Value, parent2: &Value, rng: &mut dyn RngCore) -> Result<Value>;
 
     /// Mutate a JSON genome in place.
-    fn mutate(&self, genotype: &mut Value, rng: &mut impl Rng, mutation_rate: f64, temperature: f64) -> Result<()>;
+    fn mutate(
+        &self,
+        genotype: &mut Value,
+        rng: &mut dyn RngCore,
+        mutation_rate: f64,
+        temperature: f64,
+    ) -> Result<()>;
 
     /// Evaluate the fitness of a JSON genome.
-    fn evaluate<'a>(&'a self, genotype: &'a Value) -> BoxFuture<'a, Result<f64>>;
+    fn evaluate<'a>(
+        &'a self,
+        genotype: &'a Value,
+        terminated: &'a dyn Terminated,
+    ) -> BoxFuture<'a, Result<f64>>;
 }

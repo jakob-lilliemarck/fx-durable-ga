@@ -1,5 +1,5 @@
 use crate::{
-    models::{Evaluator, Genotype, Request, Terminated},
+    models::Terminated,
     repositories::requests,
 };
 use futures::future::BoxFuture;
@@ -41,44 +41,4 @@ impl Terminated for Terminator {
     }
 }
 
-/// Type-erased evaluator trait that allows storing different evaluator types in a collection.
-/// Converts gene arrays to phenotypes and delegates to the underlying evaluator.
-pub(crate) trait TypeErasedEvaluator: Send + Sync {
-    fn fitness<'a>(
-        &self,
-        genotype: &Genotype,
-        request: &'a Request,
-        terminated: &'a Box<dyn Terminated>,
-    ) -> BoxFuture<'a, Result<f64, anyhow::Error>>;
-}
-
-/// Wraps a typed evaluator to implement the type-erased interface.
-/// Handles decoding genes to phenotypes before evaluation.
-pub(crate) struct ErasedEvaluator<P, E: Evaluator<P>> {
-    evaluator: E,
-    decode: fn(&[i64]) -> P,
-}
-
-impl<P, E: Evaluator<P>> ErasedEvaluator<P, E> {
-    /// Creates a new erased evaluator with the given evaluator and decode function.
-    pub(crate) fn new(evaluator: E, decode: fn(&[i64]) -> P) -> Self {
-        Self { evaluator, decode }
-    }
-}
-
-impl<P, E> TypeErasedEvaluator for ErasedEvaluator<P, E>
-where
-    E: Evaluator<P> + Send + Sync + 'static,
-{
-    #[instrument(level = "debug", skip(self, genotype, request, terminated), fields(genotype_id = %genotype.id(), genome_length = genotype.genome().len()))]
-    fn fitness<'a>(
-        &self,
-        genotype: &Genotype,
-        request: &'a Request,
-        terminated: &'a Box<dyn Terminated>,
-    ) -> BoxFuture<'a, Result<f64, anyhow::Error>> {
-        let phenotype = (self.decode)(&genotype.genome());
-        self.evaluator
-            .fitness(genotype.id(), phenotype, request, terminated)
-    }
-}
+// Evaluator pipeline removed; GenotypeManager now owns evaluation.

@@ -1,4 +1,5 @@
-use crate::models::{Genotype, Morphology, Request};
+use crate::models::evolution::GenotypeManager;
+use crate::models::{Genotype, Request};
 use tracing::instrument;
 
 /// Handles the breeding process by combining crossover and mutation operations.
@@ -6,83 +7,131 @@ pub(crate) struct Breeder;
 
 impl Breeder {
     /// Creates a single child from two parents using crossover and mutation.
-    #[instrument(level = "debug", skip(request, morphology, parent1, parent2, rng), fields(parent1_id = %parent1.id(), parent2_id = %parent2.id(), generation_id = next_generation_id, progress = progress))]
+    #[instrument(level = "debug", skip(request, manager, parent1, parent2, rng), fields(parent1_id = %parent1.id(), parent2_id = %parent2.id(), generation_id = next_generation_id, progress = progress, type_hash = request.type_hash))]
     fn breed_child(
         request: &Request,
-        morphology: &Morphology,
+        manager: &dyn GenotypeManager,
         parent1: &Genotype,
         parent2: &Genotype,
         next_generation_id: i32,
         progress: f64,
-        rng: &mut impl rand::Rng,
-    ) -> Genotype {
-        let genome = request.crossover.apply(rng, parent1, parent2);
-        let mut child = Genotype::new(
+        rng: &mut dyn rand::RngCore,
+    ) -> anyhow::Result<Genotype> {
+        let p1 = parent1.genome().clone();
+        let p2 = parent2.genome().clone();
+        let mut child_genome = manager.crossover(&p1, &p2, rng)?;
+
+        let mutation_rate = request.mutagen.mutation_rate().at_progress(progress);
+        let temperature = request.mutagen.temperature().at_progress(progress);
+        manager.mutate(&mut child_genome, rng, mutation_rate, temperature)?;
+
+        let child = Genotype::new(
             &request.type_name,
             request.type_hash,
-            genome,
+            child_genome,
             request.id,
             next_generation_id,
         );
-
-        // Apply mutation based on current optimization progress
-        request
-            .mutagen
-            .mutate(rng, &mut child, morphology, progress);
-
-        child
+        Ok(child)
     }
 
     /// Creates multiple children from parent pairs using crossover and mutation.
-    #[instrument(level = "debug", skip(request, morphology, parent_pairs, rng), fields(num_pairs = parent_pairs.len(), generation_id = next_generation_id, progress = progress))]
+    #[instrument(level = "debug", skip(request, manager, parent_pairs, rng), fields(num_pairs = parent_pairs.len(), generation_id = next_generation_id, progress = progress, type_hash = request.type_hash))]
     pub(crate) fn breed_batch(
         request: &Request,
-        morphology: &Morphology,
+        manager: &dyn GenotypeManager,
         parent_pairs: &[(&Genotype, &Genotype)],
         next_generation_id: i32,
         progress: f64,
-        rng: &mut impl rand::Rng,
-    ) -> Vec<Genotype> {
-        parent_pairs
-            .iter()
-            .map(|&(p1, p2)| {
-                Self::breed_child(
-                    request,
-                    morphology,
-                    p1,
-                    p2,
-                    next_generation_id,
-                    progress,
-                    rng,
-                )
-            })
-            .collect()
+        rng: &mut dyn rand::RngCore,
+    ) -> anyhow::Result<Vec<Genotype>> {
+        let mut out = Vec::with_capacity(parent_pairs.len());
+        for &(p1, p2) in parent_pairs {
+            out.push(Self::breed_child(
+                request,
+                manager,
+                p1,
+                p2,
+                next_generation_id,
+                progress,
+                rng,
+            )?);
+        }
+        Ok(out)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::evolution::GenotypeManager;
     use crate::models::{
-        Crossover, Distribution, FitnessGoal, GeneBounds, Mutagen, MutationRate, Schedule,
-        Selector, Temperature,
+        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector,
+        Temperature, Terminated,
     };
-    use chrono::Utc;
+    use anyhow::Result;
+    use futures::future::BoxFuture;
+    use rand::Rng;
+    use rand::RngCore;
     use rand::SeedableRng;
     use rand::rngs::StdRng;
+    use serde_json::Value;
     use uuid::Uuid;
 
-    fn create_test_genotype(id: &str, genome: Vec<i64>) -> Genotype {
-        Genotype {
-            id: Uuid::parse_str(id).unwrap(),
-            generated_at: Utc::now(),
-            type_name: "test".to_string(),
-            type_hash: 123,
-            genome: genome.clone(),
-            genome_hash: Genotype::compute_genome_hash(&genome),
-            request_id: Uuid::now_v7(),
-            generation_id: 1,
+    struct TestTerminated;
+    impl Terminated for TestTerminated {
+        fn is_terminated(&self) -> BoxFuture<'_, bool> {
+            Box::pin(async { false })
         }
+    }
+
+    struct TestManager;
+    impl GenotypeManager for TestManager {
+        fn name(&self) -> &'static str {
+            "test"
+        }
+        fn random(&self, rng: &mut dyn RngCore) -> anyhow::Result<Value> {
+            Ok(serde_json::json!([
+                rng.random_range(0..10),
+                rng.random_range(0..10)
+            ]))
+        }
+        fn crossover(
+            &self,
+            parent1: &Value,
+            parent2: &Value,
+            _rng: &mut dyn RngCore,
+        ) -> Result<Value> {
+            Ok(serde_json::json!([
+                parent1[0].as_i64().unwrap_or(0),
+                parent2[1].as_i64().unwrap_or(0)
+            ]))
+        }
+        fn mutate(
+            &self,
+            genotype: &mut Value,
+            _rng: &mut dyn RngCore,
+            mutation_rate: f64,
+            _temperature: f64,
+        ) -> Result<()> {
+            if mutation_rate > 0.0 {
+                if let Some(first) = genotype.as_array_mut().and_then(|a| a.get_mut(0)) {
+                    *first = serde_json::json!(first.as_i64().unwrap_or(0) + 1);
+                }
+            }
+            Ok(())
+        }
+        fn evaluate<'a>(
+            &'a self,
+            _genotype: &'a Value,
+            _terminated: &'a dyn Terminated,
+        ) -> BoxFuture<'a, Result<f64>> {
+            Box::pin(async { Ok(1.0) })
+        }
+    }
+
+    fn create_test_genotype(id: &str, genome: Value) -> Genotype {
+        Genotype::new("test", 123, genome, Uuid::parse_str(id).unwrap(), 1)
     }
 
     fn create_test_request() -> Request {
@@ -103,31 +152,28 @@ mod tests {
         .unwrap()
     }
 
-    fn create_test_morphology() -> Morphology {
-        Morphology::new(
-            "TestType",
-            123,
-            vec![
-                GeneBounds::integer(0, 10, 11).unwrap(), // 11 steps for range 0-10
-                GeneBounds::integer(0, 10, 11).unwrap(),
-                GeneBounds::integer(0, 10, 11).unwrap(),
-            ],
-        )
-    }
-
     #[test]
     fn test_breed_batch_produces_correct_number_of_children() {
         let request = create_test_request();
-        let morphology = create_test_morphology();
+        let manager = TestManager;
         let mut rng = StdRng::seed_from_u64(42);
 
-        let parent1 = create_test_genotype("00000000-0000-0000-0000-000000000001", vec![1, 2, 3]);
-        let parent2 = create_test_genotype("00000000-0000-0000-0000-000000000002", vec![4, 5, 6]);
-        let parent3 = create_test_genotype("00000000-0000-0000-0000-000000000003", vec![7, 8, 9]);
+        let parent1 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000001",
+            serde_json::json!([1, 2]),
+        );
+        let parent2 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000002",
+            serde_json::json!([4, 5]),
+        );
+        let parent3 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000003",
+            serde_json::json!([7, 8]),
+        );
 
         let parent_pairs = vec![(&parent1, &parent2), (&parent2, &parent3)];
-
-        let children = Breeder::breed_batch(&request, &morphology, &parent_pairs, 2, 0.5, &mut rng);
+        let children =
+            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, 0.5, &mut rng).unwrap();
 
         assert_eq!(children.len(), 2);
     }
@@ -135,41 +181,47 @@ mod tests {
     #[test]
     fn test_breed_batch_children_have_correct_metadata() {
         let request = create_test_request();
-        let morphology = create_test_morphology();
+        let manager = TestManager;
         let mut rng = StdRng::seed_from_u64(42);
 
-        let parent1 = create_test_genotype("00000000-0000-0000-0000-000000000001", vec![1, 2, 3]);
-        let parent2 = create_test_genotype("00000000-0000-0000-0000-000000000002", vec![4, 5, 6]);
+        let parent1 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000001",
+            serde_json::json!([1, 2]),
+        );
+        let parent2 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000002",
+            serde_json::json!([4, 5]),
+        );
 
         let parent_pairs = vec![(&parent1, &parent2)];
         let next_generation_id = 5;
 
         let children = Breeder::breed_batch(
             &request,
-            &morphology,
+            &manager,
             &parent_pairs,
             next_generation_id,
             0.0,
             &mut rng,
-        );
+        )
+        .unwrap();
 
         let child = &children[0];
         assert_eq!(child.type_name(), "TestType");
         assert_eq!(child.type_hash(), 123);
         assert_eq!(child.request_id(), request.id);
         assert_eq!(child.generation_id(), next_generation_id);
-        assert_eq!(child.genome().len(), 3); // Same length as parents
     }
 
     #[test]
     fn test_breed_batch_with_empty_parent_pairs() {
         let request = create_test_request();
-        let morphology = create_test_morphology();
+        let manager = TestManager;
         let mut rng = StdRng::seed_from_u64(42);
 
         let parent_pairs: Vec<(&Genotype, &Genotype)> = vec![];
-
-        let children = Breeder::breed_batch(&request, &morphology, &parent_pairs, 2, 0.5, &mut rng);
+        let children =
+            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, 0.5, &mut rng).unwrap();
 
         assert_eq!(children.len(), 0);
     }
@@ -177,81 +229,25 @@ mod tests {
     #[test]
     fn test_breed_batch_children_are_unique() {
         let request = create_test_request();
-        let morphology = create_test_morphology();
+        let manager = TestManager;
         let mut rng = StdRng::seed_from_u64(42);
 
-        let parent1 = create_test_genotype("00000000-0000-0000-0000-000000000001", vec![1, 2, 3]);
-        let parent2 = create_test_genotype("00000000-0000-0000-0000-000000000002", vec![4, 5, 6]);
-
-        let parent_pairs = vec![(&parent1, &parent2), (&parent1, &parent2)];
-
-        let children = Breeder::breed_batch(&request, &morphology, &parent_pairs, 2, 0.5, &mut rng);
-
-        assert_eq!(children.len(), 2);
-
-        // Each child should have a unique ID
-        assert_ne!(children[0].id(), children[1].id());
-
-        // Children should have valid (non-nil) UUIDs
-        assert!(!children[0].id().is_nil());
-        assert!(!children[1].id().is_nil());
-    }
-
-    #[test]
-    fn test_breed_batch_respects_genome_bounds() {
-        let request = create_test_request();
-        let morphology = create_test_morphology(); // Bounds are 0-10 for each gene
-        let mut rng = StdRng::seed_from_u64(42);
-
-        let parent1 = create_test_genotype("00000000-0000-0000-0000-000000000001", vec![0, 5, 10]);
-        let parent2 = create_test_genotype("00000000-0000-0000-0000-000000000002", vec![2, 7, 8]);
-
-        let parent_pairs = vec![(&parent1, &parent2)];
-
-        let children = Breeder::breed_batch(&request, &morphology, &parent_pairs, 2, 0.5, &mut rng);
-
-        let child = &children[0];
-
-        // All genes should be within bounds [0, 10]
-        for &gene in &child.genome {
-            assert!(gene >= 0);
-            assert!(gene <= 10);
-        }
-    }
-
-    #[test]
-    fn test_breed_batch_children_differ_from_parents() {
-        let request = create_test_request();
-        let morphology = create_test_morphology();
-        let mut rng = StdRng::seed_from_u64(123); // Different seed to ensure variance
-
-        // Create parents with distinct genomes
-        let parent1 = create_test_genotype("00000000-0000-0000-0000-000000000001", vec![1, 1, 1]);
-        let parent2 = create_test_genotype("00000000-0000-0000-0000-000000000002", vec![9, 9, 9]);
-
-        let parent_pairs = vec![(&parent1, &parent2)];
-
-        let children = Breeder::breed_batch(
-            &request,
-            &morphology,
-            &parent_pairs,
-            2,
-            0.8, // High progress value to ensure mutation occurs
-            &mut rng,
+        let parent1 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000001",
+            serde_json::json!([1, 2]),
+        );
+        let parent2 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000002",
+            serde_json::json!([4, 5]),
         );
 
-        let child = &children[0];
+        let parent_pairs = vec![(&parent1, &parent2), (&parent1, &parent2)];
+        let children =
+            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, 0.5, &mut rng).unwrap();
 
-        // Child should be different from both parents due to crossover and mutation
-        assert_ne!(child.genome, parent1.genome);
-        assert_ne!(child.genome, parent2.genome);
-
-        // Child should have same length as parents
-        assert_eq!(child.genome.len(), parent1.genome.len());
-        assert_eq!(child.genome.len(), parent2.genome.len());
-
-        // Child's genome hash should differ from parents (confirms genetic diversity)
-        assert_ne!(child.genome_hash, parent1.genome_hash);
-        assert_ne!(child.genome_hash, parent2.genome_hash);
+        assert_eq!(children.len(), 2);
+        assert_ne!(children[0].id(), children[1].id());
+        assert!(!children[0].id().is_nil());
+        assert!(!children[1].id().is_nil());
     }
 }

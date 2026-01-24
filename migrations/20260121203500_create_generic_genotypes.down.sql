@@ -1,1 +1,3 @@
-DROP TABLE fx_durable_ga.generic_genotypes;
+ALTER TABLE fx_durable_ga.genotypes
+    ALTER COLUMN genome TYPE BIGINT[]
+    USING ARRAY[]::bigint[];
