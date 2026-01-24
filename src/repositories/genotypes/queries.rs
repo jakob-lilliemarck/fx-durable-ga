@@ -357,7 +357,6 @@ mod record_fitness_tests {
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
     use chrono::SubsecRound;
-    use uuid::Uuid;
 
     #[sqlx::test(migrations = false)]
     async fn it_records_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
@@ -378,10 +377,9 @@ mod record_fitness_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        let genotype_id = Uuid::now_v7();
-
         // Create a genotype
         let genotype = Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1);
+        let genotype_id = genotype.id;
         new_genotypes(&pool, vec![genotype]).await?;
 
         let fitness = Fitness::new(genotype_id, 0.543);
@@ -554,16 +552,16 @@ mod get_population_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        // Create genotypes
-        let a_id = Uuid::now_v7();
-        let b_id = Uuid::now_v7();
-        let c_id = Uuid::now_v7();
-
         let genotypes = vec![
             Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1),
             Genotype::new("test", 1, serde_json::json!([4, 5, 6]), request_id, 1),
             Genotype::new("test", 1, serde_json::json!([7, 8, 9]), request_id, 1),
         ];
+
+        // Create genotypes
+        let a_id = genotypes[0].id;
+        let b_id = genotypes[1].id;
+        let c_id = genotypes[2].id;
 
         new_genotypes(&pool, genotypes).await?;
 
@@ -768,28 +766,16 @@ mod search_genotypes_tests {
     async fn it_gets_genotypes_with_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        let (request_id_1, _) = super::seeding::seed(&pool).await;
+        let (rid_1, _, gids) = super::seeding::seed(&pool).await;
 
-        let found =
-            search_genotypes(&pool, &Filter::default().with_request_id(request_id_1), 5).await?;
+        let found = search_genotypes(&pool, &Filter::default().with_request_id(rid_1), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
             .map(|(genotype, fitness)| (genotype.id, *fitness))
             .collect();
-        assert_eq!(
-            vec![
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-                    Some(0.11)
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
-                    None
-                )
-            ],
-            actual
-        );
+
+        assert_eq!(vec![(gids[0], Some(0.11)), (gids[1], None)], actual);
 
         Ok(())
     }
@@ -798,7 +784,7 @@ mod search_genotypes_tests {
     async fn it_gets_genotypes_with_generation_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        super::seeding::seed(&pool).await;
+        let (.., gids) = super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_generation_id(2), 5).await?;
 
@@ -806,19 +792,8 @@ mod search_genotypes_tests {
             .iter()
             .map(|(genotype, fitness)| (genotype.id, *fitness))
             .collect();
-        assert_eq!(
-            vec![
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
-                    None
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
-                    None
-                )
-            ],
-            actual
-        );
+
+        assert_eq!(vec![(gids[1], None), (gids[4], None)], actual);
 
         Ok(())
     }
@@ -827,7 +802,7 @@ mod search_genotypes_tests {
     async fn it_gets_genotypes_with_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        super::seeding::seed(&pool).await;
+        let (.., gids) = super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_fitness(true), 5).await?;
 
@@ -835,20 +810,12 @@ mod search_genotypes_tests {
             .iter()
             .map(|(genotype, fitness)| (genotype.id, *fitness))
             .collect();
+
         assert_eq!(
             vec![
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-                    Some(0.11)
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
-                    Some(0.12)
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
-                    Some(0.42)
-                )
+                (gids[0], Some(0.11)),
+                (gids[2], Some(0.12)),
+                (gids[3], Some(0.42))
             ],
             actual
         );
@@ -860,7 +827,7 @@ mod search_genotypes_tests {
     async fn it_gets_genotypes_with_fitness_desc(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        super::seeding::seed(&pool).await;
+        let (.., gids) = super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
             &pool,
@@ -875,20 +842,12 @@ mod search_genotypes_tests {
             .iter()
             .map(|(genotype, fitness)| (genotype.id, *fitness))
             .collect();
+
         assert_eq!(
             vec![
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
-                    Some(0.42)
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
-                    Some(0.12)
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-                    Some(0.11)
-                ),
+                (gids[3], Some(0.42)),
+                (gids[2], Some(0.12)),
+                (gids[0], Some(0.11)),
             ],
             actual
         );
@@ -900,7 +859,7 @@ mod search_genotypes_tests {
     async fn it_gets_genotypes_with_fitness_asc(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        super::seeding::seed(&pool).await;
+        let (.., gids) = super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
             &pool,
@@ -915,20 +874,12 @@ mod search_genotypes_tests {
             .iter()
             .map(|(genotype, fitness)| (genotype.id, *fitness))
             .collect();
+
         assert_eq!(
             vec![
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-                    Some(0.11)
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap(),
-                    Some(0.12)
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap(),
-                    Some(0.42)
-                ),
+                (gids[0], Some(0.11)),
+                (gids[2], Some(0.12)),
+                (gids[3], Some(0.42)),
             ],
             actual
         );
@@ -940,7 +891,7 @@ mod search_genotypes_tests {
     async fn it_gets_genotypes_without_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        super::seeding::seed(&pool).await;
+        let (.., gids) = super::seeding::seed(&pool).await;
 
         let found = search_genotypes(&pool, &Filter::default().with_fitness(false), 5).await?;
 
@@ -948,19 +899,8 @@ mod search_genotypes_tests {
             .iter()
             .map(|(genotype, fitness)| (genotype.id, *fitness))
             .collect();
-        assert_eq!(
-            vec![
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap(),
-                    None
-                ),
-                (
-                    Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap(),
-                    None
-                )
-            ],
-            actual
-        );
+
+        assert_eq!(vec![(gids[1], None), (gids[4], None)], actual);
 
         Ok(())
     }
@@ -971,12 +911,12 @@ mod search_genotypes_tests {
     ) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        let (request_id_1, _) = super::seeding::seed(&pool).await;
+        let (rid_1, _, gids) = super::seeding::seed(&pool).await;
 
         let found = search_genotypes(
             &pool,
             &Filter::default()
-                .with_request_id(request_id_1)
+                .with_request_id(rid_1)
                 .with_fitness(true)
                 .with_order_random(),
             5,
@@ -988,13 +928,7 @@ mod search_genotypes_tests {
             .map(|(genotype, fitness)| (genotype.id, *fitness))
             .collect();
 
-        assert_eq!(
-            vec![(
-                Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap(),
-                Some(0.11)
-            ),],
-            actual
-        );
+        assert_eq!(vec![(gids[0], Some(0.11)),], actual);
 
         Ok(())
     }
@@ -1031,7 +965,7 @@ mod tests {
     async fn it_gets_the_intersection(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        let (request_id_1, _request_id_2) = super::seeding::seed(&pool).await;
+        let (rid_1, ..) = super::seeding::seed(&pool).await;
 
         // Test hashes for genomes in request_id_1: [1,2,3] and [4,5,6]
         let hash_1_2_3 = Genotype::compute_genome_hash(&[1, 2, 3]);
@@ -1040,7 +974,7 @@ mod tests {
 
         let candidate_hashes = vec![hash_1_2_3, hash_4_5_6, hash_nonexistent];
 
-        let intersection = super::get_intersection(&pool, request_id_1, &candidate_hashes).await?;
+        let intersection = super::get_intersection(&pool, rid_1, &candidate_hashes).await?;
 
         // Should return the two hashes that exist for request_id_1
         assert_eq!(intersection.len(), 2);
@@ -1056,7 +990,7 @@ mod tests {
     ) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        let (request_id_1, _) = super::seeding::seed(&pool).await;
+        let (rid_1, ..) = super::seeding::seed(&pool).await;
 
         // Test with hashes that don't exist in the database
         let nonexistent_hashes = vec![
@@ -1064,8 +998,7 @@ mod tests {
             Genotype::compute_genome_hash(&[200, 201, 202]),
         ];
 
-        let intersection =
-            super::get_intersection(&pool, request_id_1, &nonexistent_hashes).await?;
+        let intersection = super::get_intersection(&pool, rid_1, &nonexistent_hashes).await?;
 
         assert!(intersection.is_empty());
 
@@ -1076,7 +1009,7 @@ mod tests {
     async fn it_isolates_intersection_by_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        let (request_id_1, request_id_2) = super::seeding::seed(&pool).await;
+        let (rid_1, rid_2, ..) = super::seeding::seed(&pool).await;
 
         // Test with hashes from request_2: [7,8,9], [10,11,12], [13,14,15]
         let hash_7_8_9 = Genotype::compute_genome_hash(&[7, 8, 9]);
@@ -1085,11 +1018,11 @@ mod tests {
         let candidate_hashes = vec![hash_7_8_9, hash_10_11_12];
 
         // Query for request_1 should return empty (these hashes exist but in request_2)
-        let intersection = super::get_intersection(&pool, request_id_1, &candidate_hashes).await?;
+        let intersection = super::get_intersection(&pool, rid_1, &candidate_hashes).await?;
         assert!(intersection.is_empty());
 
         // Query for request_2 should return both hashes
-        let intersection = super::get_intersection(&pool, request_id_2, &candidate_hashes).await?;
+        let intersection = super::get_intersection(&pool, rid_2, &candidate_hashes).await?;
         assert_eq!(intersection.len(), 2);
         assert!(intersection.contains(&hash_7_8_9));
         assert!(intersection.contains(&hash_10_11_12));
@@ -1109,7 +1042,7 @@ mod seeding {
     use crate::repositories::requests::queries::new_request;
     use uuid::Uuid;
 
-    pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid) {
+    pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         // Create requests first
         let request_1 = Request::new(
             "test",
@@ -1136,39 +1069,39 @@ mod seeding {
         )
         .unwrap();
 
-        let request_id_1 = request_1.id;
-        let request_id_2 = request_2.id;
+        let rid_1 = request_1.id;
+        let rid_2 = request_2.id;
 
         new_request(pool, request_1).await.unwrap();
         new_request(pool, request_2).await.unwrap();
 
         let genotypes = vec![
-            Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id_1, 1),
-            Genotype::new("test", 1, serde_json::json!([4, 5, 6]), request_id_1, 2),
-            Genotype::new("test", 1, serde_json::json!([7, 8, 9]), request_id_2, 1),
-            Genotype::new("test", 1, serde_json::json!([10, 11, 12]), request_id_2, 1),
-            Genotype::new("test", 1, serde_json::json!([13, 14, 15]), request_id_2, 2),
+            Genotype::new("test", 1, serde_json::json!([1, 2, 3]), rid_1, 1),
+            Genotype::new("test", 1, serde_json::json!([4, 5, 6]), rid_1, 2),
+            Genotype::new("test", 1, serde_json::json!([7, 8, 9]), rid_2, 1),
+            Genotype::new("test", 1, serde_json::json!([10, 11, 12]), rid_2, 1),
+            Genotype::new("test", 1, serde_json::json!([13, 14, 15]), rid_2, 2),
         ];
 
-        let genotype_id_1 = genotypes[0].id;
-        let _genotype_id_2 = genotypes[1].id;
-        let genotype_id_3 = genotypes[2].id;
-        let genotype_id_4 = genotypes[3].id;
-        let _genotype_id_5 = genotypes[4].id;
+        let gid_1 = genotypes[0].id;
+        let gid_2 = genotypes[1].id;
+        let gid_3 = genotypes[2].id;
+        let gid_4 = genotypes[3].id;
+        let gid_5 = genotypes[4].id;
 
         new_genotypes(pool, genotypes).await.unwrap();
 
-        record_fitness(pool, &Fitness::new(genotype_id_1, 0.11))
+        record_fitness(pool, &Fitness::new(gid_1, 0.11))
             .await
             .unwrap();
         // genotype_id_2 has not fitness
-        record_fitness(pool, &Fitness::new(genotype_id_3, 0.12))
+        record_fitness(pool, &Fitness::new(gid_3, 0.12))
             .await
             .unwrap();
-        record_fitness(pool, &Fitness::new(genotype_id_4, 0.42))
+        record_fitness(pool, &Fitness::new(gid_4, 0.42))
             .await
             .unwrap();
         // genotype_id_5 has not fitness
-        (request_id_1, request_id_2)
+        (rid_1, rid_2, [gid_1, gid_2, gid_3, gid_4, gid_5])
     }
 }
