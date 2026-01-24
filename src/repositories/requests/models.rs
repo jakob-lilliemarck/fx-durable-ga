@@ -129,7 +129,7 @@ mod tests {
         );
         assert_eq!(
             db_request.crossover,
-            json!({"Uniform": {"probability": 0.5}})
+            json!({"probability": 0.5})
         );
         assert_eq!(
             db_request.distribution,

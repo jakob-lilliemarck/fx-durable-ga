@@ -1,8 +1,8 @@
 use fx_durable_ga::{
     bootstrap, migrations,
     models::{
-        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector,
-        Temperature,
+        Crossover, Distribution, FitnessGoal, GenotypeManager, Mutagen, MutationRate, Schedule,
+        Selector, Temperature, Terminated,
     },
     register_event_handlers, register_job_handlers,
 };
@@ -14,13 +14,61 @@ use uuid::Uuid;
 
 const FX_MQ_JOBS_SCHEMA_NAME: &str = "fx_mq_jobs";
 
+struct TestManager;
+
+impl GenotypeManager for TestManager {
+    fn name(&self) -> &'static str {
+        "TestType"
+    }
+
+    fn hash(&self) -> i32 {
+        123
+    }
+
+    fn random(&self, _rng: &mut dyn rand::RngCore) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::json!({}))
+    }
+
+    fn crossover(
+        &self,
+        _parent1: &serde_json::Value,
+        _parent2: &serde_json::Value,
+        _rng: &mut dyn rand::RngCore,
+    ) -> anyhow::Result<serde_json::Value> {
+        Ok(serde_json::json!({}))
+    }
+
+    fn mutate(
+        &self,
+        _genotype: &mut serde_json::Value,
+        _rng: &mut dyn rand::RngCore,
+        _mutation_rate: f64,
+        _temperature: f64,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        _genotype: &'a serde_json::Value,
+        _terminated: &'a dyn Terminated,
+    ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
+        Box::pin(async { Ok(0.0) })
+    }
+}
+
 #[sqlx::test(migrations = false)]
 async fn test_interrupt_request_end_to_end(pool: PgPool) -> anyhow::Result<()> {
     // Run migrations
     migrations::run_default_migrations(&pool).await?;
 
     // Bootstrap service
-    let service = Arc::new(bootstrap(pool.clone()).await?.build());
+    let service = Arc::new(
+        bootstrap(pool.clone())
+            .await?
+            .with_genotype_manager(TestManager)
+            .build(),
+    );
 
     // Register event handlers
     let mut registry = fx_event_bus::EventHandlerRegistry::new();
