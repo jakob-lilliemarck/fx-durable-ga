@@ -78,13 +78,6 @@ mod tests {
     use serde_json::Value;
     use uuid::Uuid;
 
-    struct TestTerminated;
-    impl Terminated for TestTerminated {
-        fn is_terminated(&self) -> BoxFuture<'_, bool> {
-            Box::pin(async { false })
-        }
-    }
-
     struct TestManager;
     impl GenotypeManager for TestManager {
         fn name(&self) -> &'static str {

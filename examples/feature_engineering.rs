@@ -20,19 +20,22 @@ use anyhow::Result;
 use fx_durable_ga::{
     bootstrap,
     models::{
-        Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, Request, Schedule, Selector, Temperature, Terminated,
+        Crossover, Distribution, FitnessGoal, GenotypeManager, Mutagen, MutationRate, Schedule,
+        Selector, Temperature, Terminated,
     },
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
 use fx_mq_jobs::Queries;
 use serde::Deserialize;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use std::{env, sync::Arc};
 use tracing::Level;
 use uuid::Uuid;
+use rand::{Rng, RngCore};
+use const_fnv1a_hash::fnv1a_hash_str_32;
 
 const WORKERS: usize = 5;
 const FITNESS_TARGET: f64 = 1.0;
@@ -146,153 +149,200 @@ struct FeatureConfig {
     sequence_length: usize,
 }
 
-impl Encodeable for FeatureConfig {
-    const NAME: &'static str = "feature_engineering";
-
-    type Phenotype = FeatureConfig;
-
-    fn morphology() -> Vec<GeneBounds> {
-        let mut bounds = Vec::new();
-
-        // 7 features, each with:
-        // - source column (0-10)
-        // - pipeline_length (0-2)
-        // - transform_1 (0-11)
-        // - transform_2 (0-11)
-        for _ in 0..7 {
-            bounds.push(GeneBounds::integer(0, 10, 11).unwrap()); // source
-            bounds.push(GeneBounds::integer(0, 2, 3).unwrap()); // pipeline_length (max 2)
-            bounds.push(GeneBounds::integer(0, 11, 12).unwrap()); // transform_1
-            bounds.push(GeneBounds::integer(0, 11, 12).unwrap()); // transform_2
-        }
-
-        // Hyperparameters
-        bounds.push(GeneBounds::integer(0, 5, 6).unwrap()); // hidden_size: [4, 8, 16, 32, 64, 128]
-        bounds.push(GeneBounds::integer(0, 2, 3).unwrap()); // learning_rate: [1e-4, 5e-4, 1e-3]
-        bounds.push(GeneBounds::integer(0, 9, 10).unwrap()); // sequence_length: [10..100 step 10]
-
-        bounds
-    }
-
-    fn encode(&self) -> Vec<i64> {
-        let mut genes = Vec::new();
-
-        // Encode 7 features
-        for feature in &self.features {
-            // Source column
-            let source_idx = SOURCE_COLUMNS
-                .iter()
-                .position(|&col| col == feature.source)
-                .unwrap_or(0) as i64;
-            genes.push(source_idx);
-
-            // Pipeline length (max 2)
-            genes.push(feature.transforms.len().min(2) as i64);
-
-            // Transforms (pad with 0 if fewer than 2)
-            for i in 0..2 {
-                if i < feature.transforms.len() {
-                    genes.push(feature.transforms[i].to_gene());
-                } else {
-                    genes.push(0);
-                }
-            }
-        }
-
-        // Encode hyperparameters
-        let hidden_size_idx = match self.hidden_size {
-            4 => 0,
-            8 => 1,
-            16 => 2,
-            32 => 3,
-            64 => 4,
-            128 => 5,
-            _ => 2, // default to 16
-        };
-        genes.push(hidden_size_idx);
-
-        let lr_idx = if self.learning_rate <= 1e-4 {
-            0
-        } else if self.learning_rate <= 5e-4 {
-            1
-        } else {
-            2
-        };
-        genes.push(lr_idx);
-
-        let seq_len_idx = ((self.sequence_length / 10).saturating_sub(1)).min(9) as i64;
-        genes.push(seq_len_idx);
-
-        genes
-    }
-
-    fn decode(genes: &[i64]) -> Self::Phenotype {
+impl FeatureConfig {
+    fn random(rng: &mut dyn RngCore) -> Self {
         let mut features = Vec::new();
-
-        // Decode 7 features (4 genes per feature now: source, length, t1, t2)
-        for i in 0..7 {
-            let base_idx = i * 4;
-
-            let source_idx = genes[base_idx].clamp(0, 10) as usize;
-            let source = SOURCE_COLUMNS[source_idx].to_string();
-
-            let pipeline_length = genes[base_idx + 1].clamp(0, 2) as usize;
-
+        for _ in 0..7 {
+            let source = SOURCE_COLUMNS[rng.random_range(0..SOURCE_COLUMNS.len())].to_string();
+            let pipeline_length = rng.random_range(0..3); // 0,1,2
             let mut transforms = Vec::new();
-            for j in 0..pipeline_length {
-                if let Some(transform) = Transform::from_gene(genes[base_idx + 2 + j]) {
-                    transforms.push(transform);
+            for _ in 0..pipeline_length {
+                let gene = rng.random_range(0..12) as i64;
+                if let Some(t) = Transform::from_gene(gene) {
+                    transforms.push(t);
                 }
             }
-
             features.push(Feature { source, transforms });
         }
 
-        // Decode hyperparameters (genes are now at index 28, 29, 30)
-        let hidden_size = match genes[28] {
-            0 => 4,
-            1 => 8,
-            2 => 16,
-            3 => 32,
-            4 => 64,
-            5 => 128,
-            _ => 32,
-        };
-
-        let learning_rate = match genes[29] {
-            0 => 1e-4,
-            1 => 5e-4,
-            2 => 1e-3,
-            _ => 5e-4,
-        };
-
-        let sequence_length = ((genes[30].clamp(0, 9) + 1) * 10) as usize;
+        let hidden_choices = [4usize, 8, 16, 32, 64, 128];
+        let lr_choices = [1e-4f64, 5e-4, 1e-3];
+        let seq_choices = [10usize, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 
         FeatureConfig {
             features,
-            hidden_size,
-            learning_rate,
-            sequence_length,
+            hidden_size: hidden_choices[rng.random_range(0..hidden_choices.len())],
+            learning_rate: lr_choices[rng.random_range(0..lr_choices.len())],
+            sequence_length: seq_choices[rng.random_range(0..seq_choices.len())],
+        }
+    }
+
+    fn to_json(&self) -> Value {
+        serde_json::json!({
+            "features": self.features.iter().map(|f| {
+                serde_json::json!({
+                    "source": f.source,
+                    "transforms": f.transforms.iter().map(|t| t.to_gene()).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>(),
+            "hidden_size": self.hidden_size,
+            "learning_rate": self.learning_rate,
+            "sequence_length": self.sequence_length,
+        })
+    }
+
+    fn from_json(genome: &Value) -> Self {
+        let features = genome
+            .get("features")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|f| {
+                let source = f.get("source").and_then(Value::as_str).unwrap_or("TEMP").to_string();
+                let transforms = f
+                    .get("transforms")
+                    .and_then(Value::as_array)
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .filter_map(|v| v.as_i64())
+                    .filter_map(Transform::from_gene)
+                    .take(2)
+                    .collect::<Vec<_>>();
+                Feature { source, transforms }
+            })
+            .collect::<Vec<_>>();
+
+        FeatureConfig {
+            features: if features.len() == 7 { features } else { FeatureConfig::random(&mut rand::rng()).features },
+            hidden_size: genome
+                .get("hidden_size")
+                .and_then(Value::as_u64)
+                .map(|v| v as usize)
+                .unwrap_or(32),
+            learning_rate: genome
+                .get("learning_rate")
+                .and_then(Value::as_f64)
+                .unwrap_or(5e-4),
+            sequence_length: genome
+                .get("sequence_length")
+                .and_then(Value::as_u64)
+                .map(|v| v as usize)
+                .unwrap_or(60),
         }
     }
 }
 
-struct FeatureEvaluator;
+struct FeatureManager;
 
 #[derive(Deserialize)]
 struct ResultOutput {
     validation_loss: f64,
 }
 
-impl Evaluator<FeatureConfig> for FeatureEvaluator {
-    fn fitness<'a>(
+impl GenotypeManager for FeatureManager {
+    fn name(&self) -> &'static str {
+        TYPE_NAME
+    }
+
+    fn random(&self, rng: &mut dyn RngCore) -> anyhow::Result<Value> {
+        Ok(FeatureConfig::random(rng).to_json())
+    }
+
+    fn crossover(
         &self,
-        genotype_id: Uuid,
-        phenotype: FeatureConfig,
-        _: &Request,
-        _: &'a Box<dyn Terminated>,
-    ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
+        parent1: &Value,
+        parent2: &Value,
+        rng: &mut dyn RngCore,
+    ) -> anyhow::Result<Value> {
+        let random_feature = |rng: &mut dyn RngCore| {
+            let source = SOURCE_COLUMNS[rng.random_range(0..SOURCE_COLUMNS.len())].to_string();
+            let len = rng.random_range(0..3);
+            let mut transforms = Vec::new();
+            for _ in 0..len {
+                let gene = rng.random_range(0..12) as i64;
+                if let Some(t) = Transform::from_gene(gene) {
+                    transforms.push(t.to_gene());
+                }
+            }
+            serde_json::json!({ "source": source, "transforms": transforms })
+        };
+
+        // Features: per index pick parent feature or random fallback
+        let feats1 = parent1.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
+        let feats2 = parent2.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
+        let mut features = Vec::new();
+        for i in 0..7 {
+            let chosen = if rng.random_range(0..2) == 0 {
+                feats1.get(i)
+            } else {
+                feats2.get(i)
+            };
+            features.push(chosen.cloned().unwrap_or_else(|| random_feature(rng)));
+        }
+
+        let mut pick_scalar = |k: &str| if rng.random_range(0..2) == 0 { parent1[k].clone() } else { parent2[k].clone() };
+
+        Ok(serde_json::json!({
+            "features": features,
+            "hidden_size": pick_scalar("hidden_size"),
+            "learning_rate": pick_scalar("learning_rate"),
+            "sequence_length": pick_scalar("sequence_length"),
+        }))
+    }
+
+    fn mutate(
+        &self,
+        genome: &mut Value,
+        rng: &mut dyn RngCore,
+        mutation_rate: f64,
+        _temperature: f64,
+    ) -> anyhow::Result<()> {
+        let mut cfg = FeatureConfig::from_json(genome);
+        let maybe = |rng: &mut dyn RngCore, rate: f64| rng.random_range(0.0..1.0) < rate;
+
+        if maybe(rng, mutation_rate) {
+            cfg.hidden_size = [4usize, 8, 16, 32, 64, 128][rng.random_range(0..6)];
+        }
+        if maybe(rng, mutation_rate) {
+            cfg.learning_rate = [1e-4f64, 5e-4, 1e-3][rng.random_range(0..3)];
+        }
+        if maybe(rng, mutation_rate) {
+            cfg.sequence_length = [10usize, 20, 30, 40, 50, 60, 70, 80, 90, 100][rng.random_range(0..10)];
+        }
+
+        for feat in cfg.features.iter_mut() {
+            if maybe(rng, mutation_rate) {
+                feat.source = SOURCE_COLUMNS[rng.random_range(0..SOURCE_COLUMNS.len())].to_string();
+            }
+            if maybe(rng, mutation_rate) {
+                let len = rng.random_range(0..3);
+                feat.transforms.clear();
+                for _ in 0..len {
+                    let gene = rng.random_range(0..12) as i64;
+                    if let Some(t) = Transform::from_gene(gene) {
+                        feat.transforms.push(t);
+                    }
+                }
+            }
+        }
+
+        *genome = cfg.to_json();
+        Ok(())
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        genome: &'a Value,
+        terminated: &'a dyn Terminated,
+    ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         Box::pin(async move {
+            if terminated.is_terminated().await {
+                return Ok(f64::MAX);
+            }
+
+            let phenotype = FeatureConfig::from_json(genome);
+            let genotype_id = Uuid::now_v7();
             let model_save_path = format!("./model_storage/{}", genotype_id);
             let mut args = vec![
                 "train".to_string(),
@@ -373,6 +423,9 @@ impl Evaluator<FeatureConfig> for FeatureEvaluator {
     }
 }
 
+const TYPE_NAME: &str = "feature_engineering";
+const TYPE_HASH: i32 = fnv1a_hash_str_32(TYPE_NAME) as i32;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     dotenv::from_filename(".env.local").ok();
@@ -394,8 +447,7 @@ async fn main() -> Result<()> {
     let service = Arc::new(
         bootstrap(pool.clone())
             .await?
-            .register::<FeatureConfig, _>(FeatureEvaluator)
-            .await?
+            .with_genotype_manager(FeatureManager)
             .build(),
     );
 
@@ -421,8 +473,8 @@ async fn main() -> Result<()> {
 
     let request_id = service
         .new_optimization_request(
-            FeatureConfig::NAME,
-            FeatureConfig::HASH,
+            TYPE_NAME,
+            TYPE_HASH,
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(40, 10),
             Selector::tournament(5, 45)?,
@@ -454,7 +506,7 @@ async fn main() -> Result<()> {
 
     // Get and print the best configuration
     if let Some((genotype, fitness)) = service.get_best_genotype(request_id).await? {
-        let config = FeatureConfig::decode(&genotype.genome());
+        let config = FeatureConfig::from_json(&genotype.genome());
         println!("\n=== Best Configuration ===");
         println!("Fitness (MSE): {:.6}", fitness);
         println!("RMSE: {:.6}°C", fitness.sqrt());

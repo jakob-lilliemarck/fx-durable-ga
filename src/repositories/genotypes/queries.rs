@@ -94,7 +94,13 @@ mod new_genotypes_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        let genotypes = vec![Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1)];
+        let genotypes = vec![Genotype::new(
+            "test",
+            1,
+            serde_json::json!([1, 2, 3]),
+            request_id,
+            1,
+        )];
         let genotypes_clone = genotypes.clone();
 
         let inserted = new_genotypes(&pool, genotypes).await?;
@@ -167,8 +173,6 @@ pub(crate) async fn check_if_generation_exists<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod check_if_generation_exists_tests {
-    use uuid::Uuid;
-
     use crate::{
         models::{Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector},
         repositories::{
@@ -197,20 +201,9 @@ mod check_if_generation_exists_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        let mut genotypes = Vec::with_capacity(3);
+        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1);
 
-        genotypes.push(Genotype {
-            id: Uuid::now_v7(),
-            generated_at: chrono::Utc::now(),
-            type_name: "test".to_string(),
-            type_hash: 1,
-            genome: vec![1, 2, 3],
-            genome_hash: Genotype::compute_genome_hash(&[1, 2, 3]),
-            request_id,
-            generation_id: 1,
-        });
-
-        new_genotypes(&pool, genotypes).await?;
+        new_genotypes(&pool, vec![genotype]).await?;
 
         let exists = check_if_generation_exists(&pool, request_id, 1).await?;
         assert!(exists);
@@ -287,7 +280,6 @@ mod get_genotype_tests {
         Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector,
     };
     use crate::repositories::requests::queries::new_request;
-    use chrono::{SubsecRound, Utc};
 
     #[sqlx::test(migrations = false)]
     async fn it_gets_an_existing_genotype(pool: sqlx::PgPool) -> anyhow::Result<()> {
@@ -308,13 +300,7 @@ mod get_genotype_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        let genotype = Genotype::new(
-            "test",
-            1,
-            serde_json::json!([1, 2, 3]),
-            request_id,
-            1,
-        );
+        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1);
         let genotype_id = genotype.id;
 
         new_genotypes(&pool, vec![genotype]).await?;
@@ -395,13 +381,7 @@ mod record_fitness_tests {
         let genotype_id = Uuid::now_v7();
 
         // Create a genotype
-        let genotype = Genotype::new(
-            "test",
-            1,
-            serde_json::json!([1, 2, 3]),
-            request_id,
-            1,
-        );
+        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1);
         new_genotypes(&pool, vec![genotype]).await?;
 
         let fitness = Fitness::new(genotype_id, 0.543);
@@ -1162,64 +1142,19 @@ mod seeding {
         new_request(pool, request_1).await.unwrap();
         new_request(pool, request_2).await.unwrap();
 
-        let genotype_id_1 = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
-        let genotype_id_2 = Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap();
-        let genotype_id_3 = Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap();
-        let genotype_id_4 = Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap();
-        let genotype_id_5 = Uuid::parse_str("00000000-0000-0000-0000-000000000005").unwrap();
-
         let genotypes = vec![
-            Genotype {
-                id: genotype_id_1,
-                generated_at: chrono::Utc::now(),
-                type_name: "test".to_string(),
-                type_hash: 1,
-                genome: vec![1, 2, 3],
-                genome_hash: Genotype::compute_genome_hash(&[1, 2, 3]),
-                request_id: request_id_1,
-                generation_id: 1,
-            },
-            Genotype {
-                id: genotype_id_2,
-                generated_at: chrono::Utc::now(),
-                type_name: "test".to_string(),
-                type_hash: 1,
-                genome: vec![4, 5, 6],
-                genome_hash: Genotype::compute_genome_hash(&[4, 5, 6]),
-                request_id: request_id_1,
-                generation_id: 2,
-            },
-            Genotype {
-                id: genotype_id_3,
-                generated_at: chrono::Utc::now(),
-                type_name: "test".to_string(),
-                type_hash: 1,
-                genome: vec![7, 8, 9],
-                genome_hash: Genotype::compute_genome_hash(&[7, 8, 9]),
-                request_id: request_id_2,
-                generation_id: 1,
-            },
-            Genotype {
-                id: genotype_id_4,
-                generated_at: chrono::Utc::now(),
-                type_name: "test".to_string(),
-                type_hash: 1,
-                genome: vec![10, 11, 12],
-                genome_hash: Genotype::compute_genome_hash(&[10, 11, 12]),
-                request_id: request_id_2,
-                generation_id: 1,
-            },
-            Genotype {
-                id: genotype_id_5,
-                generated_at: chrono::Utc::now(),
-                type_name: "test".to_string(),
-                type_hash: 1,
-                genome: vec![13, 14, 15],
-                genome_hash: Genotype::compute_genome_hash(&[13, 14, 15]),
-                request_id: request_id_2,
-                generation_id: 2,
-            },
+            Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id_1, 1),
+            Genotype::new("test", 1, serde_json::json!([4, 5, 6]), request_id_1, 2),
+            Genotype::new("test", 1, serde_json::json!([7, 8, 9]), request_id_2, 1),
+            Genotype::new("test", 1, serde_json::json!([10, 11, 12]), request_id_2, 1),
+            Genotype::new("test", 1, serde_json::json!([13, 14, 15]), request_id_2, 2),
         ];
+
+        let genotype_id_1 = genotypes[0].id;
+        let _genotype_id_2 = genotypes[1].id;
+        let genotype_id_3 = genotypes[2].id;
+        let genotype_id_4 = genotypes[3].id;
+        let _genotype_id_5 = genotypes[4].id;
 
         new_genotypes(pool, genotypes).await.unwrap();
 

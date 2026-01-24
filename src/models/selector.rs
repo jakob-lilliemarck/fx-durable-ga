@@ -116,22 +116,19 @@ fn spin_roulette(
 #[cfg(test)]
 mod spin_roulette_tests {
     use super::*;
-    use chrono::Utc;
+    use serde_json;
     use uuid::Uuid;
 
     const TOLERANCE: f64 = 0.07;
 
     fn create_test_genotype(id: &str) -> Genotype {
-        Genotype {
-            id: Uuid::parse_str(id).unwrap(),
-            generated_at: Utc::now(),
-            type_name: "test".to_string(),
-            type_hash: 123,
-            genome: vec![1, 2, 3],
-            genome_hash: Genotype::compute_genome_hash(&[1, 2, 3]),
-            request_id: Uuid::now_v7(),
-            generation_id: 1,
-        }
+        Genotype::new(
+            "test",
+            123,
+            serde_json::json!([1, 2, 3]),
+            Uuid::parse_str(id).unwrap(),
+            1,
+        )
     }
 
     #[test]
@@ -852,19 +849,16 @@ mod selector_tests {
 #[cfg(test)]
 mod test_utilities {
     use crate::models::Genotype;
-    use chrono::Utc;
+    use serde_json;
     use uuid::Uuid;
 
     pub(super) fn create_test_genotype(id: &str) -> Genotype {
-        Genotype {
-            id: Uuid::parse_str(id).unwrap(),
-            generated_at: Utc::now(),
-            type_name: "test".to_string(),
-            type_hash: 123,
-            genome: vec![1, 2, 3],
-            genome_hash: Genotype::compute_genome_hash(&[1, 2, 3]),
-            request_id: Uuid::now_v7(),
-            generation_id: 1,
-        }
+        Genotype::new(
+            "test",
+            123,
+            serde_json::json!([1, 2, 3]),
+            Uuid::parse_str(id).unwrap(),
+            1,
+        )
     }
 }

@@ -16,110 +16,107 @@ use anyhow::Result;
 use fx_durable_ga::{
     bootstrap,
     models::{
-        Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, Request, Schedule, Selector, Temperature, Terminated,
+        Crossover, Distribution, FitnessGoal, GenotypeManager, Mutagen, MutationRate, Schedule,
+        Selector, Temperature, Terminated,
     },
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
 use fx_mq_jobs::Queries;
+use rand::{Rng, RngCore};
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use std::{env, sync::Arc};
 use uuid::Uuid;
 
-/// A 3D point with x, y, z coordinates.
-///
-/// This struct defines how we encode/decode between genetic representation (integers)
-/// and the actual problem space (floating-point coordinates).
-#[derive(Debug, Copy, Clone)]
+/// JSON-genome manager for 3D point optimization.
+/// Genome shape: {"x": f64, "y": f64, "z": f64}
+struct PointManager {
+    target: Point,
+}
+
+#[derive(Clone, Copy)]
 struct Point {
     x: f64,
     y: f64,
     z: f64,
 }
 
-impl Encodeable for Point {
-    const NAME: &'static str = "point";
-
-    type Phenotype = Point;
-
-    /// Defines the search space for each dimension.
-    ///
-    /// Each GeneBounds specifies the range and precision for one coordinate:
-    /// - x: 0.5 to 1.75 with 0.001 precision
-    /// - y: 0.75 to 2.0 with 0.001 precision
-    /// - z: 2.0 to 3.25 with 0.001 precision
-    fn morphology() -> Vec<GeneBounds> {
-        vec![
-            GeneBounds::decimal(0.5, 1.75, 1000, 3).unwrap(), // x: 0.500 to 1.750 (scaled: 500 to 1750)
-            GeneBounds::decimal(0.75, 2.00, 1000, 3).unwrap(), // y: 0.750 to 2.000 (scaled: 750 to 2000)
-            GeneBounds::decimal(2.00, 3.25, 1000, 3).unwrap(), // z: 2.000 to 3.250 (scaled: 2000 to 3250)
-        ]
+impl GenotypeManager for PointManager {
+    fn name(&self) -> &'static str {
+        "point"
     }
 
-    /// Converts this point to genetic representation.
-    ///
-    /// Uses the bounds' encode_f64 method to directly convert coordinates to gene indices.
-    fn encode(&self) -> Vec<i64> {
-        let bounds = Self::morphology();
-        vec![
-            bounds[0]
-                .encode_f64(self.x)
-                .expect("x coordinate within bounds"),
-            bounds[1]
-                .encode_f64(self.y)
-                .expect("y coordinate within bounds"),
-            bounds[2]
-                .encode_f64(self.z)
-                .expect("z coordinate within bounds"),
-        ]
+    fn random(&self, rng: &mut dyn RngCore) -> anyhow::Result<Value> {
+        let x = rng.random_range(0.5..1.75);
+        let y = rng.random_range(0.75..2.0);
+        let z = rng.random_range(2.0..3.25);
+        Ok(serde_json::json!({ "x": x, "y": y, "z": z }))
     }
 
-    /// Converts genotype (integer genes) to phenotype (Point).
-    ///
-    /// Maps integer gene values to floating-point coordinates within the defined bounds.
-    fn decode(genes: &[i64]) -> Self::Phenotype {
-        let bounds = Self::morphology();
-        Point {
-            x: bounds[0].decode_f64(genes[0]), // Convert to actual decimal coordinates
-            y: bounds[1].decode_f64(genes[1]), // e.g., gene 0 → 0.5, gene 999 → 1.75
-            z: bounds[2].decode_f64(genes[2]), // e.g., gene 0 → 2.0, gene 999 → 3.25
-        }
-    }
-}
-
-/// Fitness evaluator that finds points closest to the target point.
-///
-/// Returns the raw distance to target - lower distances are better (minimization problem).
-struct PointDistanceEvaluator {
-    target_point: Point,
-}
-
-impl Evaluator<Point> for PointDistanceEvaluator {
-    /// Returns the raw distance to the target point.
-    ///
-    /// Lower distances are better - this is a minimization problem.
-    fn fitness<'a>(
+    fn crossover(
         &self,
-        _genotype_id: Uuid,
-        phenotype: Point,
-        _: &Request,
-        terminated: &'a Box<dyn Terminated>,
-    ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
-        let target = self.target_point;
+        parent1: &Value,
+        parent2: &Value,
+        _rng: &mut dyn RngCore,
+    ) -> anyhow::Result<Value> {
+        let x = (parent1["x"].as_f64().unwrap_or(0.0) + parent2["x"].as_f64().unwrap_or(0.0)) / 2.0;
+        let y = (parent1["y"].as_f64().unwrap_or(0.0) + parent2["y"].as_f64().unwrap_or(0.0)) / 2.0;
+        let z = (parent1["z"].as_f64().unwrap_or(0.0) + parent2["z"].as_f64().unwrap_or(0.0)) / 2.0;
+        Ok(serde_json::json!({ "x": x, "y": y, "z": z }))
+    }
+
+    fn mutate(
+        &self,
+        genotype: &mut Value,
+        rng: &mut dyn RngCore,
+        mutation_rate: f64,
+        temperature: f64,
+    ) -> anyhow::Result<()> {
+        let maybe_mutate =
+            |v: &mut Value, lo: f64, hi: f64, rng: &mut dyn RngCore, rate: f64, temp: f64| {
+                if rng.random_range(0.0..1.0) < rate {
+                    let span = (hi - lo) * temp.max(0.05);
+                    let delta = rng.random_range(-span..span);
+                    if let Some(f) = v.as_f64() {
+                        *v = Value::from((f + delta).clamp(lo, hi));
+                    }
+                }
+            };
+
+        if let Some(obj) = genotype.as_object_mut() {
+            if let Some(x) = obj.get_mut("x") {
+                maybe_mutate(x, 0.5, 1.75, rng, mutation_rate, temperature);
+            }
+            if let Some(y) = obj.get_mut("y") {
+                maybe_mutate(y, 0.75, 2.0, rng, mutation_rate, temperature);
+            }
+            if let Some(z) = obj.get_mut("z") {
+                maybe_mutate(z, 2.0, 3.25, rng, mutation_rate, temperature);
+            }
+        }
+        Ok(())
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        genotype: &'a Value,
+        terminated: &'a dyn Terminated,
+    ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
+        let target = self.target;
+        let clone = genotype.clone();
         Box::pin(async move {
             if terminated.is_terminated().await {
-                return Ok(f64::MAX); // Return worst possible fitness if terminated
+                return Ok(f64::MAX);
             }
-
-            // Calculate direct distance to target point
-            let dx = phenotype.x - target.x;
-            let dy = phenotype.y - target.y;
-            let dz = phenotype.z - target.z;
-            let distance = (dx * dx + dy * dy + dz * dz).sqrt();
-
-            Ok(distance) // Raw distance - lower is better
+            let x = clone["x"].as_f64().unwrap_or(0.0);
+            let y = clone["y"].as_f64().unwrap_or(0.0);
+            let z = clone["z"].as_f64().unwrap_or(0.0);
+            let dx = x - target.x;
+            let dy = y - target.y;
+            let dz = z - target.z;
+            Ok((dx * dx + dy * dy + dz * dz).sqrt())
         })
     }
 }
@@ -150,13 +147,14 @@ async fn main() -> Result<()> {
         x: 1.0,
         y: 1.5,
         z: 2.5,
-    }; // Target point to find
-    let evaluator = PointDistanceEvaluator { target_point };
+    };
+    let manager = PointManager {
+        target: target_point,
+    };
     let service = Arc::new(
         bootstrap(pool.clone())
             .await?
-            .register::<Point, _>(evaluator)
-            .await?
+            .with_genotype_manager(manager)
             .build(),
     );
 
@@ -190,21 +188,19 @@ async fn main() -> Result<()> {
     });
 
     // Create multiple optimization requests with different genetic algorithm parameters
-    for _ in 0..1 {
-        service
-            .new_optimization_request(
-                Point::NAME,
-                Point::HASH,
-                FitnessGoal::minimize(0.01)?, // Stop when distance ≤ 0.01
-                Schedule::generational(200, 30),
-                Selector::tournament(7, 100)?,
-                Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.3)?),
-                Crossover::uniform(0.5)?,
-                Distribution::latin_hypercube(1000),
-                None::<()>,
-            )
-            .await?;
-    }
+    let request_id = service
+        .new_optimization_request(
+            "point",
+            const_fnv1a_hash::fnv1a_hash_str_32("point") as i32,
+            FitnessGoal::minimize(0.1)?, // Stop when distance ≤ to this value
+            Schedule::generational(200, 30),
+            Selector::tournament(7, 100)?,
+            Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.3)?),
+            Crossover::uniform(0.5)?,
+            Distribution::latin_hypercube(1000),
+            None::<()>,
+        )
+        .await?;
 
     let timeout_duration = Duration::from_secs(TIMEOUT_SECONDS);
     let start_time = std::time::Instant::now();
@@ -218,6 +214,20 @@ async fn main() -> Result<()> {
                 "Timeout reached after {} seconds. Stopping optimization.",
                 timeout_duration.as_secs()
             );
+            break;
+        }
+
+        // Exit when the request is concluded
+        if service.is_request_concluded(request_id).await? {
+            if let Some((best, fitness)) = service.get_best_genotype(request_id).await? {
+                println!(
+                    "Request completed. Best genotype: {} with fitness {:.6}",
+                    best.id(),
+                    fitness
+                );
+            } else {
+                println!("Request completed but no genotype results were recorded.");
+            }
             break;
         }
     }

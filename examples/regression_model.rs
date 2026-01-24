@@ -13,17 +13,20 @@
 //! This example handles that by running each training run as a subprocess, in which case all memory allocations are freed after each run.
 
 use anyhow::Result;
+use const_fnv1a_hash::fnv1a_hash_str_32;
 use fx_durable_ga::{
     bootstrap,
     models::{
-        Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, Request, Schedule, Selector, Temperature, Terminated,
+        Crossover, Distribution, FitnessGoal, GenotypeManager, Mutagen, MutationRate, Schedule,
+        Selector, Temperature, Terminated,
     },
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
 use fx_mq_jobs::Queries;
+use rand::{Rng, RngCore};
 use serde::Deserialize;
+use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
 use std::time::Duration;
 use std::{env, sync::Arc};
@@ -58,88 +61,76 @@ struct NeuralArchitecture {
     pub use_bias: bool,
     pub learning_rate: f64,
 }
+struct ArchitectureManager;
 
-impl Encodeable for NeuralArchitecture {
-    const NAME: &'static str = "neural_architecture";
+#[derive(Deserialize)]
+struct ResultOutput {
+    validation_loss: f64,
+}
 
-    type Phenotype = NeuralArchitecture;
+const TYPE_NAME: &str = "neural_architecture";
+const TYPE_HASH: i32 = fnv1a_hash_str_32(TYPE_NAME) as i32;
 
-    fn morphology() -> Vec<GeneBounds> {
-        vec![
-            GeneBounds::integer(0, 3, 4).unwrap(), // hidden_size: [32, 64, 128, 256]
-            GeneBounds::integer(0, 7, 8).unwrap(), // num_hidden_layers: [1, 2, 3, 4, 5, 6, 7, 8]
-            GeneBounds::integer(0, 2, 3).unwrap(), // activation_fn: [ReLU, GELU, Sigmoid]
-            GeneBounds::integer(0, 1, 2).unwrap(), // use_bias: [false, true]
-            GeneBounds::integer(0, 2, 3).unwrap(), // learning_rate: [1e-4, 1e-3, 1e-2]
-        ]
+impl ArchitectureManager {
+    fn random_arch(rng: &mut dyn RngCore) -> NeuralArchitecture {
+        let hidden_choices = [32usize, 64, 128, 256];
+        let layer_choices = [1usize, 2, 3, 4, 5, 6, 7, 8];
+        let activation_choices = [
+            ActivationFunction::Relu,
+            ActivationFunction::Gelu,
+            ActivationFunction::Sigmoid,
+        ];
+        let lr_choices = [1e-4f64, 1e-3, 1e-2];
+
+        NeuralArchitecture {
+            hidden_size: hidden_choices[rng.random_range(0..hidden_choices.len())],
+            num_hidden_layers: layer_choices[rng.random_range(0..layer_choices.len())],
+            activation_fn: activation_choices[rng.random_range(0..activation_choices.len())],
+            use_bias: rng.random_range(0..2) == 1,
+            learning_rate: lr_choices[rng.random_range(0..lr_choices.len())],
+        }
     }
 
-    fn encode(&self) -> Vec<i64> {
-        let hidden_size_idx = match self.hidden_size {
-            32 => 0,
-            64 => 1,
-            128 => 2,
-            256 => 3,
-            _ => 1,
-        };
-
-        let layers_idx = (self.num_hidden_layers - 1).min(2) as i64;
-
-        let activation_idx = match self.activation_fn {
-            ActivationFunction::Relu => 0,
-            ActivationFunction::Gelu => 1,
-            ActivationFunction::Sigmoid => 2,
-        };
-
-        let bias_idx = if self.use_bias { 1 } else { 0 };
-
-        let lr_idx = if self.learning_rate <= 1e-4 {
-            0
-        } else if self.learning_rate <= 1e-3 {
-            1
-        } else {
-            2
-        };
-
-        vec![
-            hidden_size_idx,
-            layers_idx,
-            activation_idx,
-            bias_idx,
-            lr_idx,
-        ]
+    fn to_json(arch: &NeuralArchitecture) -> Value {
+        serde_json::json!({
+            "hidden_size": arch.hidden_size,
+            "num_hidden_layers": arch.num_hidden_layers,
+            "activation_fn": arch.activation_fn.to_string(),
+            "use_bias": arch.use_bias,
+            "learning_rate": arch.learning_rate,
+        })
     }
 
-    fn decode(genes: &[i64]) -> Self::Phenotype {
-        let hidden_size = match genes[0] {
-            0 => 32,
-            1 => 64,
-            2 => 128,
-            3 => 256,
-            _ => 64,
-        };
-
-        let num_hidden_layers = (genes[1] + 1).clamp(1, 8) as usize;
-
-        let activation_fn = match genes[2] {
-            0 => ActivationFunction::Relu,
-            1 => ActivationFunction::Gelu,
-            2 => ActivationFunction::Sigmoid,
+    fn from_json(genome: &Value) -> NeuralArchitecture {
+        let hidden_size = genome
+            .get("hidden_size")
+            .and_then(Value::as_u64)
+            .unwrap_or(64) as usize;
+        let num_hidden_layers = genome
+            .get("num_hidden_layers")
+            .and_then(Value::as_u64)
+            .unwrap_or(2) as usize;
+        let activation_fn = match genome
+            .get("activation_fn")
+            .and_then(Value::as_str)
+            .unwrap_or("relu")
+        {
+            "gelu" => ActivationFunction::Gelu,
+            "sigmoid" => ActivationFunction::Sigmoid,
             _ => ActivationFunction::Relu,
         };
-
-        let use_bias = genes[3] == 1;
-
-        let learning_rate = match genes[4] {
-            0 => 1e-4,
-            1 => 1e-3,
-            2 => 1e-2,
-            _ => 1e-3,
-        };
+        let use_bias = genome
+            .get("use_bias")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let learning_rate = genome
+            .get("learning_rate")
+            .and_then(Value::as_f64)
+            .unwrap_or(1e-3);
 
         NeuralArchitecture {
             hidden_size,
-            num_hidden_layers,
+            num_hidden_layers: num_hidden_layers.clamp(1, 8),
             activation_fn,
             use_bias,
             learning_rate,
@@ -147,42 +138,115 @@ impl Encodeable for NeuralArchitecture {
     }
 }
 
-struct ArchitectureEvaluator;
+impl GenotypeManager for ArchitectureManager {
+    fn name(&self) -> &'static str {
+        TYPE_NAME
+    }
 
-#[derive(Deserialize)]
-struct ResultOutput {
-    validation_loss: f64,
-}
+    fn random(&self, rng: &mut dyn RngCore) -> anyhow::Result<Value> {
+        Ok(Self::to_json(&Self::random_arch(rng)))
+    }
 
-impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
-    fn fitness<'a>(
+    fn crossover(
         &self,
-        _genotype_id: Uuid,
-        phenotype: NeuralArchitecture,
-        _: &Request,
-        _: &'a Box<dyn Terminated>,
-    ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
+        parent1: &Value,
+        parent2: &Value,
+        rng: &mut dyn RngCore,
+    ) -> anyhow::Result<Value> {
+        let mut pick = |k: &str| {
+            if rng.random_range(0..2) == 0 {
+                parent1[k].clone()
+            } else {
+                parent2[k].clone()
+            }
+        };
+
+        Ok(serde_json::json!({
+            "hidden_size": pick("hidden_size"),
+            "num_hidden_layers": pick("num_hidden_layers"),
+            "activation_fn": pick("activation_fn"),
+            "use_bias": pick("use_bias"),
+            "learning_rate": pick("learning_rate"),
+        }))
+    }
+
+    fn mutate(
+        &self,
+        genome: &mut Value,
+        rng: &mut dyn RngCore,
+        mutation_rate: f64,
+        _temperature: f64,
+    ) -> anyhow::Result<()> {
+        let mut arch = Self::from_json(genome);
+
+        let maybe = |rate: f64, rng: &mut dyn RngCore| rng.random_range(0.0..1.0) < rate;
+
+        let hidden_choices = [32usize, 64, 128, 256];
+        let layer_choices = [1usize, 2, 3, 4, 5, 6, 7, 8];
+        let activation_choices = [
+            ActivationFunction::Relu,
+            ActivationFunction::Gelu,
+            ActivationFunction::Sigmoid,
+        ];
+        let lr_choices = [1e-4f64, 1e-3, 1e-2];
+
+        if maybe(mutation_rate, rng) {
+            arch.hidden_size = hidden_choices[rng.random_range(0..hidden_choices.len())];
+        }
+        if maybe(mutation_rate, rng) {
+            arch.num_hidden_layers = layer_choices[rng.random_range(0..layer_choices.len())];
+        }
+        if maybe(mutation_rate, rng) {
+            arch.activation_fn = activation_choices[rng.random_range(0..activation_choices.len())];
+        }
+        if maybe(mutation_rate, rng) {
+            arch.use_bias = !arch.use_bias;
+        }
+        if maybe(mutation_rate, rng) {
+            arch.learning_rate = lr_choices[rng.random_range(0..lr_choices.len())];
+        }
+
+        *genome = Self::to_json(&arch);
+        Ok(())
+    }
+
+    fn evaluate<'a>(
+        &'a self,
+        genome: &'a Value,
+        terminated: &'a dyn Terminated,
+    ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         Box::pin(async move {
-            // Spawn the binary
+            if terminated.is_terminated().await {
+                return Ok(f64::MAX);
+            }
+
+            let arch = ArchitectureManager::from_json(genome);
+
             let output = tokio::process::Command::new("fx-example-regression")
                 .args([
                     "--hidden-size",
-                    &phenotype.hidden_size.to_string(),
+                    &arch.hidden_size.to_string(),
                     "--num-hidden-layers",
-                    &phenotype.num_hidden_layers.to_string(),
+                    &arch.num_hidden_layers.to_string(),
                     "--activation-fn",
-                    &phenotype.activation_fn.to_string(),
+                    &arch.activation_fn.to_string(),
                     "--learning-rate",
-                    &phenotype.learning_rate.to_string(),
+                    &arch.learning_rate.to_string(),
                 ])
                 .output()
                 .await
                 .expect("Failed to run fx-example-regression");
 
-            // Print stderr logs (your tracing output)
+            if !output.status.success() {
+                anyhow::bail!(
+                    "fx-example-regression failed: status={} stderr={}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                );
+            }
+
             eprintln!("{}", String::from_utf8_lossy(&output.stderr));
 
-            // Parse stdout as JSON (the ResultOutput struct)
             let result: ResultOutput =
                 serde_json::from_slice(&output.stdout).expect("Invalid JSON from training binary");
 
@@ -212,8 +276,7 @@ async fn main() -> Result<()> {
     let service = Arc::new(
         bootstrap(pool.clone())
             .await?
-            .register::<NeuralArchitecture, _>(ArchitectureEvaluator)
-            .await?
+            .with_genotype_manager(ArchitectureManager)
             .build(),
     );
 
@@ -239,8 +302,8 @@ async fn main() -> Result<()> {
 
     service
         .new_optimization_request(
-            NeuralArchitecture::NAME,
-            NeuralArchitecture::HASH,
+            TYPE_NAME,
+            TYPE_HASH,
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(10, 10),
             Selector::tournament(5, 15)?,

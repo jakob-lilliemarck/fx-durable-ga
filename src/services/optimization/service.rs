@@ -155,6 +155,11 @@ impl Service {
 
         let terminator: Box<dyn Terminated> =
             Box::new(Terminator::new(self.requests.clone(), request_id));
+        // If the request is already concluded or interrupted, skip evaluation to avoid
+        // recording sentinel fitness values for cancelled work.
+        if terminator.is_terminated().await {
+            return Ok(());
+        }
 
         let fitness = manager
             .evaluate(&genotype.genome(), &terminator)
@@ -446,5 +451,14 @@ impl Service {
     ) -> Result<Vec<(Genotype, Option<f64>)>, Error> {
         let genotypes = self.genotypes.search_genotypes(filter, limit).await?;
         Ok(genotypes)
+    }
+
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub async fn is_request_concluded(&self, request_id: Uuid) -> Result<bool, Error> {
+        Ok(self
+            .requests
+            .get_request_conclusion(&request_id)
+            .await?
+            .is_some())
     }
 }
