@@ -17,16 +17,15 @@
 //! (11^7 source columns × 3^7 pipeline lengths × 12^7 transform_1 × 12^7 transform_2 × 6 hidden sizes × 3 learning rates × 10 sequence lengths)
 
 use anyhow::Result;
+use const_fnv1a_hash::fnv1a_hash_str_32;
 use fx_durable_ga::{
     bootstrap,
-    models::{
-        Crossover, Distribution, FitnessGoal, GenotypeManager, Mutagen, MutationRate, Schedule,
-        Selector, Temperature, Terminated,
-    },
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector, Terminated},
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
 use fx_mq_jobs::Queries;
+use rand::{Rng, RngCore};
 use serde::Deserialize;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
@@ -34,8 +33,6 @@ use std::time::Duration;
 use std::{env, sync::Arc};
 use tracing::Level;
 use uuid::Uuid;
-use rand::{Rng, RngCore};
-use const_fnv1a_hash::fnv1a_hash_str_32;
 
 const WORKERS: usize = 5;
 const FITNESS_TARGET: f64 = 1.0;
@@ -199,7 +196,11 @@ impl FeatureConfig {
             .unwrap_or_default()
             .into_iter()
             .map(|f| {
-                let source = f.get("source").and_then(Value::as_str).unwrap_or("TEMP").to_string();
+                let source = f
+                    .get("source")
+                    .and_then(Value::as_str)
+                    .unwrap_or("TEMP")
+                    .to_string();
                 let transforms = f
                     .get("transforms")
                     .and_then(Value::as_array)
@@ -214,7 +215,11 @@ impl FeatureConfig {
             .collect::<Vec<_>>();
 
         FeatureConfig {
-            features: if features.len() == 7 { features } else { FeatureConfig::random(&mut rand::rng()).features },
+            features: if features.len() == 7 {
+                features
+            } else {
+                FeatureConfig::random(&mut rand::rng()).features
+            },
             hidden_size: genome
                 .get("hidden_size")
                 .and_then(Value::as_u64)
@@ -244,8 +249,7 @@ impl GenotypeManager for FeatureManager {
     fn name(&self) -> &'static str {
         TYPE_NAME
     }
-
-    fn random(&self, rng: &mut dyn RngCore) -> anyhow::Result<Value> {
+    fn random(&self, rng: &mut dyn RngCore, _user_defined: &Value) -> anyhow::Result<Value> {
         Ok(FeatureConfig::random(rng).to_json())
     }
 
@@ -254,6 +258,7 @@ impl GenotypeManager for FeatureManager {
         parent1: &Value,
         parent2: &Value,
         rng: &mut dyn RngCore,
+        _user_defined: &Value,
     ) -> anyhow::Result<Value> {
         let random_feature = |rng: &mut dyn RngCore| {
             let source = SOURCE_COLUMNS[rng.random_range(0..SOURCE_COLUMNS.len())].to_string();
@@ -269,8 +274,16 @@ impl GenotypeManager for FeatureManager {
         };
 
         // Features: per index pick parent feature or random fallback
-        let feats1 = parent1.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
-        let feats2 = parent2.get("features").and_then(Value::as_array).cloned().unwrap_or_default();
+        let feats1 = parent1
+            .get("features")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let feats2 = parent2
+            .get("features")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
         let mut features = Vec::new();
         for i in 0..7 {
             let chosen = if rng.random_range(0..2) == 0 {
@@ -281,7 +294,13 @@ impl GenotypeManager for FeatureManager {
             features.push(chosen.cloned().unwrap_or_else(|| random_feature(rng)));
         }
 
-        let mut pick_scalar = |k: &str| if rng.random_range(0..2) == 0 { parent1[k].clone() } else { parent2[k].clone() };
+        let mut pick_scalar = |k: &str| {
+            if rng.random_range(0..2) == 0 {
+                parent1[k].clone()
+            } else {
+                parent2[k].clone()
+            }
+        };
 
         Ok(serde_json::json!({
             "features": features,
@@ -295,11 +314,18 @@ impl GenotypeManager for FeatureManager {
         &self,
         genome: &mut Value,
         rng: &mut dyn RngCore,
-        mutation_rate: f64,
-        _temperature: f64,
+        progress: f64,
+        user_defined: &Value,
     ) -> anyhow::Result<()> {
         let mut cfg = FeatureConfig::from_json(genome);
         let maybe = |rng: &mut dyn RngCore, rate: f64| rng.random_range(0.0..1.0) < rate;
+        let mutation_rate = user_defined
+            .get("mutate")
+            .and_then(Value::as_object)
+            .and_then(|o| o.get("mutation_rate"))
+            .and_then(Value::as_f64)
+            .unwrap_or(0.35)
+            * (1.0 - progress).max(0.0);
 
         if maybe(rng, mutation_rate) {
             cfg.hidden_size = [4usize, 8, 16, 32, 64, 128][rng.random_range(0..6)];
@@ -308,7 +334,8 @@ impl GenotypeManager for FeatureManager {
             cfg.learning_rate = [1e-4f64, 5e-4, 1e-3][rng.random_range(0..3)];
         }
         if maybe(rng, mutation_rate) {
-            cfg.sequence_length = [10usize, 20, 30, 40, 50, 60, 70, 80, 90, 100][rng.random_range(0..10)];
+            cfg.sequence_length =
+                [10usize, 20, 30, 40, 50, 60, 70, 80, 90, 100][rng.random_range(0..10)];
         }
 
         for feat in cfg.features.iter_mut() {
@@ -335,6 +362,7 @@ impl GenotypeManager for FeatureManager {
         &'a self,
         genome: &'a Value,
         terminated: &'a dyn Terminated,
+        _user_defined: &'a Value,
     ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         Box::pin(async move {
             if terminated.is_terminated().await {
@@ -478,9 +506,11 @@ async fn main() -> Result<()> {
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(40, 10),
             Selector::tournament(5, 45)?,
-            Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.35)?),
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(40),
+            serde_json::json!({
+                "crossover": { "probability": 0.5 },
+                "mutate": { "mutation_rate": 0.35, "temperature": 0.7 },
+                "distribution": { "population_size": 40 }
+            }),
             None::<()>,
         )
         .await?;

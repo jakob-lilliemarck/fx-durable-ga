@@ -16,10 +16,7 @@ use anyhow::Result;
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use fx_durable_ga::{
     bootstrap,
-    models::{
-        Crossover, Distribution, FitnessGoal, GenotypeManager, Mutagen, MutationRate, Schedule,
-        Selector, Temperature, Terminated,
-    },
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector, Terminated},
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -143,7 +140,7 @@ impl GenotypeManager for ArchitectureManager {
         TYPE_NAME
     }
 
-    fn random(&self, rng: &mut dyn RngCore) -> anyhow::Result<Value> {
+    fn random(&self, rng: &mut dyn RngCore, _user_defined: &Value) -> anyhow::Result<Value> {
         Ok(Self::to_json(&Self::random_arch(rng)))
     }
 
@@ -152,6 +149,7 @@ impl GenotypeManager for ArchitectureManager {
         parent1: &Value,
         parent2: &Value,
         rng: &mut dyn RngCore,
+        _user_defined: &Value,
     ) -> anyhow::Result<Value> {
         let mut pick = |k: &str| {
             if rng.random_range(0..2) == 0 {
@@ -174,10 +172,25 @@ impl GenotypeManager for ArchitectureManager {
         &self,
         genome: &mut Value,
         rng: &mut dyn RngCore,
-        mutation_rate: f64,
-        _temperature: f64,
+        progress: f64,
+        user_defined: &Value,
     ) -> anyhow::Result<()> {
         let mut arch = Self::from_json(genome);
+        let (mutation_rate, _temperature) = user_defined
+            .get("mutate")
+            .and_then(Value::as_object)
+            .map(|cfg| {
+                let mr = cfg
+                    .get("mutation_rate")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.4);
+                let temp = cfg
+                    .get("temperature")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.8);
+                (mr * (1.0 - progress).max(0.0), temp)
+            })
+            .unwrap_or((0.4, 0.8));
 
         let maybe = |rate: f64, rng: &mut dyn RngCore| rng.random_range(0.0..1.0) < rate;
 
@@ -214,6 +227,7 @@ impl GenotypeManager for ArchitectureManager {
         &'a self,
         genome: &'a Value,
         terminated: &'a dyn Terminated,
+        _user_defined: &'a Value,
     ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         Box::pin(async move {
             if terminated.is_terminated().await {
@@ -307,9 +321,11 @@ async fn main() -> Result<()> {
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(10, 10),
             Selector::tournament(5, 15)?,
-            Mutagen::new(Temperature::constant(0.8)?, MutationRate::constant(0.4)?),
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(15),
+            serde_json::json!({
+                "crossover": { "probability": 0.5 },
+                "mutate": { "mutation_rate": 0.4, "temperature": 0.8 },
+                "distribution": { "population_size": 15 }
+            }),
             None::<()>,
         )
         .await?;

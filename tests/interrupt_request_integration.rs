@@ -1,9 +1,6 @@
 use fx_durable_ga::{
     bootstrap, migrations,
-    models::{
-        Crossover, Distribution, FitnessGoal, GenotypeManager, Mutagen, MutationRate, Schedule,
-        Selector, Temperature, Terminated,
-    },
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector, Terminated},
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::Queries;
@@ -25,7 +22,11 @@ impl GenotypeManager for TestManager {
         123
     }
 
-    fn random(&self, _rng: &mut dyn rand::RngCore) -> anyhow::Result<serde_json::Value> {
+    fn random(
+        &self,
+        _rng: &mut dyn rand::RngCore,
+        _user_defined: &serde_json::Value,
+    ) -> anyhow::Result<serde_json::Value> {
         Ok(serde_json::json!({}))
     }
 
@@ -34,6 +35,7 @@ impl GenotypeManager for TestManager {
         _parent1: &serde_json::Value,
         _parent2: &serde_json::Value,
         _rng: &mut dyn rand::RngCore,
+        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
         Ok(serde_json::json!({}))
     }
@@ -42,8 +44,8 @@ impl GenotypeManager for TestManager {
         &self,
         _genotype: &mut serde_json::Value,
         _rng: &mut dyn rand::RngCore,
-        _mutation_rate: f64,
-        _temperature: f64,
+        _progress: f64,
+        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<()> {
         Ok(())
     }
@@ -52,6 +54,7 @@ impl GenotypeManager for TestManager {
         &'a self,
         _genotype: &'a serde_json::Value,
         _terminated: &'a dyn Terminated,
+        _user_defined: &'a serde_json::Value,
     ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         Box::pin(async { Ok(0.0) })
     }
@@ -110,9 +113,7 @@ async fn test_interrupt_request_end_to_end(pool: PgPool) -> anyhow::Result<()> {
             FitnessGoal::maximize(0.95)?,
             Schedule::generational(100, 10),
             Selector::tournament(3, 20)?,
-            Mutagen::new(Temperature::constant(0.5)?, MutationRate::constant(0.3)?),
-            Crossover::uniform(0.5)?,
-            Distribution::random(5),
+            serde_json::json!({"Uniform":{"probability":0.5}}),
             None::<()>,
         )
         .await?;

@@ -15,10 +15,7 @@
 use anyhow::Result;
 use fx_durable_ga::{
     bootstrap,
-    models::{
-        Crossover, Distribution, FitnessGoal, GenotypeManager, Mutagen, MutationRate, Schedule,
-        Selector, Temperature, Terminated,
-    },
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector, Terminated},
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -48,7 +45,7 @@ impl GenotypeManager for PointManager {
         "point"
     }
 
-    fn random(&self, rng: &mut dyn RngCore) -> anyhow::Result<Value> {
+    fn random(&self, rng: &mut dyn RngCore, _user_defined: &Value) -> anyhow::Result<Value> {
         let x = rng.random_range(0.5..1.75);
         let y = rng.random_range(0.75..2.0);
         let z = rng.random_range(2.0..3.25);
@@ -60,6 +57,7 @@ impl GenotypeManager for PointManager {
         parent1: &Value,
         parent2: &Value,
         _rng: &mut dyn RngCore,
+        _user_defined: &Value,
     ) -> anyhow::Result<Value> {
         let x = (parent1["x"].as_f64().unwrap_or(0.0) + parent2["x"].as_f64().unwrap_or(0.0)) / 2.0;
         let y = (parent1["y"].as_f64().unwrap_or(0.0) + parent2["y"].as_f64().unwrap_or(0.0)) / 2.0;
@@ -71,9 +69,26 @@ impl GenotypeManager for PointManager {
         &self,
         genotype: &mut Value,
         rng: &mut dyn RngCore,
-        mutation_rate: f64,
-        temperature: f64,
+        progress: f64,
+        user_defined: &Value,
     ) -> anyhow::Result<()> {
+        let (mutation_rate, temperature) = user_defined
+            .get("mutate")
+            .and_then(Value::as_object)
+            .map(|cfg| {
+                let mr = cfg
+                    .get("mutation_rate")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.3);
+                let temp = cfg
+                    .get("temperature")
+                    .and_then(Value::as_f64)
+                    .unwrap_or(0.7);
+                (mr, temp)
+            })
+            .unwrap_or((0.3, 0.7));
+        let mutation_rate = mutation_rate; // progress could be used to scale if desired
+        let temperature = temperature * (1.0 - progress).max(0.0);
         let maybe_mutate =
             |v: &mut Value, lo: f64, hi: f64, rng: &mut dyn RngCore, rate: f64, temp: f64| {
                 if rng.random_range(0.0..1.0) < rate {
@@ -103,6 +118,7 @@ impl GenotypeManager for PointManager {
         &'a self,
         genotype: &'a Value,
         terminated: &'a dyn Terminated,
+        _user_defined: &'a Value,
     ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         let target = self.target;
         let clone = genotype.clone();
@@ -195,9 +211,11 @@ async fn main() -> Result<()> {
             FitnessGoal::minimize(0.1)?, // Stop when distance ≤ to this value
             Schedule::generational(200, 30),
             Selector::tournament(7, 100)?,
-            Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.3)?),
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(1000),
+            serde_json::json!({
+                "crossover": { "probability": 0.5 },
+                "mutate": { "mutation_rate": 0.3, "temperature": 0.7 },
+                "distribution": { "population_size": 1000 }
+            }),
             None::<()>,
         )
         .await?;

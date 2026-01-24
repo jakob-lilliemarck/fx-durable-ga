@@ -1,4 +1,4 @@
-use super::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
+use super::{FitnessGoal, Schedule, Selector};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use tracing::instrument;
@@ -16,9 +16,7 @@ pub struct Request {
     pub(crate) goal: FitnessGoal,
     pub(crate) selector: Selector,
     pub(crate) schedule: Schedule,
-    pub(crate) mutagen: Mutagen,
-    pub(crate) crossover: Crossover,
-    pub(crate) distribution: Distribution,
+    pub(crate) user_defined: serde_json::Value,
     pub data: Option<serde_json::Value>,
 }
 
@@ -30,19 +28,18 @@ pub enum RequestValidationError {
 
 impl Request {
     /// Creates a new optimization request with the given parameters.
-    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal, mutagen = ?mutagen), skip(data))]
+    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal), skip(data))]
     pub(crate) fn new(
         type_name: &str,
         type_hash: i32,
         goal: FitnessGoal,
         selector: Selector,
         schedule: Schedule,
-        mutagen: Mutagen,
-        crossover: Crossover,
-        distribution: Distribution,
+        user_defined: impl Serialize + std::fmt::Debug,
         data: Option<impl Serialize>,
     ) -> Result<Self, RequestValidationError> {
         let data = data.map(|d| serde_json::to_value(d)).transpose()?;
+        let user_defined = serde_json::to_value(user_defined)?;
 
         Ok(Self {
             id: Uuid::now_v7(),
@@ -52,10 +49,8 @@ impl Request {
             goal,
             selector,
             schedule,
-            mutagen,
-            crossover,
-            distribution,
-            data: data,
+            user_defined,
+            data,
         })
     }
 
@@ -87,10 +82,7 @@ pub(crate) struct RequestConclusion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{
-        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector,
-        Temperature,
-    };
+    use crate::models::{FitnessGoal, Schedule, Selector};
 
     fn create_test_request(goal: FitnessGoal) -> Request {
         Request::new(
@@ -99,12 +91,7 @@ mod tests {
             goal,
             Selector::tournament(5, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::new(
-                Temperature::constant(0.5).unwrap(),
-                MutationRate::constant(0.1).unwrap(),
-            ),
-            Crossover::uniform(0.5).unwrap(),
-            Distribution::latin_hypercube(50),
+            serde_json::json!({"foo":"bar"}),
             None::<()>,
         )
         .unwrap()

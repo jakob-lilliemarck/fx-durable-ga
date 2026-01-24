@@ -69,9 +69,7 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_genotypes_tests {
     use super::*;
-    use crate::models::{
-        Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector,
-    };
+    use crate::models::{FitnessGoal, Request, Schedule, Selector};
     use crate::repositories::requests::queries::new_request;
     use chrono::SubsecRound;
 
@@ -86,9 +84,7 @@ mod new_genotypes_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -128,9 +124,7 @@ mod new_genotypes_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -174,7 +168,7 @@ pub(crate) async fn check_if_generation_exists<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod check_if_generation_exists_tests {
     use crate::{
-        models::{Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector},
+        models::{FitnessGoal, Request, Schedule, Selector},
         repositories::{
             genotypes::{new_genotypes, queries::check_if_generation_exists},
             requests::queries::new_request,
@@ -193,9 +187,7 @@ mod check_if_generation_exists_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -221,9 +213,7 @@ mod check_if_generation_exists_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -276,9 +266,7 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_genotype_tests {
     use super::*;
-    use crate::models::{
-        Crossover, Distribution, FitnessGoal, Mutagen, Request, Schedule, Selector,
-    };
+    use crate::models::{FitnessGoal, Request, Schedule, Selector};
     use crate::repositories::requests::queries::new_request;
 
     #[sqlx::test(migrations = false)]
@@ -292,9 +280,7 @@ mod get_genotype_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -350,10 +336,7 @@ pub(crate) async fn record_fitness<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod record_fitness_tests {
     use super::record_fitness;
-    use crate::models::{
-        Crossover, Distribution, Fitness, FitnessGoal, Genotype, Mutagen, Request, Schedule,
-        Selector,
-    };
+    use crate::models::{Fitness, FitnessGoal, Genotype, Request, Schedule, Selector};
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
     use chrono::SubsecRound;
@@ -369,9 +352,7 @@ mod record_fitness_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -401,9 +382,7 @@ mod record_fitness_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_clone = request.clone();
@@ -456,10 +435,7 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_population_tests {
     use super::{get_population, record_fitness};
-    use crate::models::{
-        Crossover, Distribution, Fitness, FitnessGoal, Genotype, Mutagen, Population, Request,
-        Schedule, Selector,
-    };
+    use crate::models::{Fitness, FitnessGoal, Genotype, Population, Request, Schedule, Selector};
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
     use uuid::Uuid;
@@ -475,9 +451,7 @@ mod get_population_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -544,9 +518,7 @@ mod get_population_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -1034,10 +1006,7 @@ mod tests {
 #[cfg(test)]
 mod seeding {
     use super::record_fitness;
-    use crate::models::{
-        Crossover, Distribution, Fitness, FitnessGoal, Genotype, Mutagen, Request, Schedule,
-        Selector,
-    };
+    use crate::models::{Fitness, FitnessGoal, Genotype, Request, Schedule, Selector};
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
     use uuid::Uuid;
@@ -1050,9 +1019,7 @@ mod seeding {
             FitnessGoal::maximize(0.9).unwrap(),
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1).unwrap(),
-            Crossover::uniform(0.5).unwrap(),
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )
         .unwrap();
@@ -1062,9 +1029,7 @@ mod seeding {
             FitnessGoal::maximize(0.9).unwrap(),
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1).unwrap(),
-            Crossover::uniform(0.5).unwrap(),
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )
         .unwrap();

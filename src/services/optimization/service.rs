@@ -50,9 +50,7 @@ impl Service {
         goal: FitnessGoal,
         schedule: crate::models::Schedule,
         selector: Selector,
-        mutagen: crate::models::Mutagen,
-        crossover: crate::models::Crossover,
-        distribution: crate::models::Distribution,
+        user_defined: impl serde::Serialize + Send + Sync + std::fmt::Debug,
         data: Option<impl serde::Serialize + Send + Sync>,
     ) -> Result<Uuid, Error> {
         if !self.genotype_managers.contains_key(&type_hash) {
@@ -73,9 +71,7 @@ impl Service {
                             goal,
                             selector,
                             schedule,
-                            mutagen,
-                            crossover,
-                            distribution,
+                            user_defined,
                             data,
                         )?)
                         .await?;
@@ -110,7 +106,9 @@ impl Service {
         {
             let mut rng = rand::rng();
             for _ in 0..population_size {
-                let genome = manager.random(&mut rng).map_err(Error::EvaluationError)?;
+                let genome = manager
+                    .random(&mut rng, &request.user_defined)
+                    .map_err(Error::EvaluationError)?;
                 let genotype =
                     Genotype::new(&request.type_name, request.type_hash, genome, request.id, 1);
                 events.push(GenotypeGenerated::new(request.id, genotype.id()));
@@ -144,6 +142,7 @@ impl Service {
         genotype_id: Uuid,
     ) -> Result<(), Error> {
         let genotype = self.genotypes.get_genotype(&genotype_id).await?;
+        let request = self.requests.get_request(request_id).await?;
 
         let manager =
             self.genotype_managers
@@ -162,7 +161,7 @@ impl Service {
         }
 
         let fitness = manager
-            .evaluate(&genotype.genome(), &terminator)
+            .evaluate(&genotype.genome(), &terminator, &request.user_defined)
             .await
             .map_err(Error::EvaluationError)?;
 
@@ -359,7 +358,8 @@ impl Service {
         request_conclusion: RequestConclusion,
     ) -> Result<(), Error> {
         let key = format!("conclude_request_{}", request_conclusion.request_id);
-        let _ = self.locking
+        let _ = self
+            .locking
             .lock_while(&key, || async {
                 if let Some(_) = self
                     .requests

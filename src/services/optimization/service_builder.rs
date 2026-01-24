@@ -21,7 +21,8 @@ impl ServiceBuilder {
     where
         M: GenotypeManager + 'static,
     {
-        self.genotype_managers.insert(manager.hash(), Box::new(manager));
+        self.genotype_managers
+            .insert(manager.hash(), Box::new(manager));
         self
     }
 

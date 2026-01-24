@@ -21,18 +21,24 @@ pub trait GenotypeManager: Send + Sync {
     }
 
     /// Generate a new, random genome as a JSON Value.
-    fn random(&self, rng: &mut dyn RngCore) -> Result<Value>;
+    fn random(&self, rng: &mut dyn RngCore, user_defined: &Value) -> Result<Value>;
 
     /// Perform crossover on two JSON values, returning a new JSON child.
-    fn crossover(&self, parent1: &Value, parent2: &Value, rng: &mut dyn RngCore) -> Result<Value>;
+    fn crossover(
+        &self,
+        parent1: &Value,
+        parent2: &Value,
+        rng: &mut dyn RngCore,
+        user_defined: &Value,
+    ) -> Result<Value>;
 
     /// Mutate a JSON genome in place.
     fn mutate(
         &self,
         genotype: &mut Value,
         rng: &mut dyn RngCore,
-        mutation_rate: f64,
-        temperature: f64,
+        progress: f64,
+        user_defined: &Value,
     ) -> Result<()>;
 
     /// Evaluate the fitness of a JSON genome.
@@ -40,5 +46,6 @@ pub trait GenotypeManager: Send + Sync {
         &'a self,
         genotype: &'a Value,
         terminated: &'a dyn Terminated,
+        user_defined: &'a Value,
     ) -> BoxFuture<'a, Result<f64>>;
 }

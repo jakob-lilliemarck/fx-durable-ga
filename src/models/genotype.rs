@@ -90,7 +90,6 @@ impl Genotype {
     pub(crate) fn generation_id(&self) -> i32 {
         self.generation_id
     }
-
 }
 
 fn canonicalize_json(value: &Value) -> Value {

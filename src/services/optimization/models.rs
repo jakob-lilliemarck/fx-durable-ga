@@ -1,7 +1,4 @@
-use crate::{
-    models::Terminated,
-    repositories::requests,
-};
+use crate::{models::Terminated, repositories::requests};
 use futures::future::BoxFuture;
 use tracing::instrument;
 use uuid::Uuid;

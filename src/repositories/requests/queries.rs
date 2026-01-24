@@ -25,12 +25,10 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 goal,
                 schedule,
                 selector,
-                mutagen,
-                crossover,
-                distribution,
+                user_defined,
                 data
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
             RETURNING
                 id,
                 requested_at,
@@ -39,9 +37,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
                 goal,
                 schedule,
                 selector,
-                mutagen,
-                crossover,
-                distribution,
+                user_defined,
                 data;
             "#,
         db_request.id,
@@ -51,9 +47,7 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
         db_request.goal,
         db_request.schedule,
         db_request.selector,
-        db_request.mutagen,
-        db_request.crossover,
-        db_request.distribution,
+        db_request.user_defined,
         db_request.data
     )
     .fetch_one(tx)
@@ -66,17 +60,14 @@ pub(crate) async fn new_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod new_request_tests {
     use super::*;
-    use crate::models::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
+    use crate::models::{FitnessGoal, Schedule, Selector};
     use chrono::SubsecRound;
 
     #[sqlx::test(migrations = false)]
     async fn it_inserts_a_new_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-
-        let mutagen = Mutagen::constant(0.5, 0.1)?;
-        let crossover = Crossover::uniform(0.5)?;
+        let user_defined = serde_json::json!({ "Uniform": { "probability": 0.5 } });
         let goal = FitnessGoal::maximize(0.9)?;
-        let distribution = Distribution::latin_hypercube(200);
 
         let request = Request::new(
             "test",
@@ -84,9 +75,7 @@ mod new_request_tests {
             goal,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            mutagen,
-            crossover,
-            distribution,
+            user_defined,
             None::<()>,
         )?;
         let request_clone = request.clone();
@@ -110,11 +99,8 @@ mod new_request_tests {
     #[sqlx::test(migrations = false)]
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-
-        let mutagen = Mutagen::constant(0.5, 0.1)?;
-        let crossover = Crossover::uniform(0.5)?;
         let goal = FitnessGoal::maximize(0.9)?;
-        let distribution = Distribution::latin_hypercube(200);
+        let user_defined = serde_json::json!({ "Uniform": { "probability": 0.5 } });
 
         let request = Request::new(
             "test",
@@ -122,9 +108,7 @@ mod new_request_tests {
             goal,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            mutagen,
-            crossover,
-            distribution,
+            user_defined,
             None::<()>,
         )?;
         let request_clone = request.clone();
@@ -155,9 +139,7 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
             goal,
             schedule,
             selector,
-            mutagen,
-            crossover,
-            distribution,
+            user_defined,
             data
         FROM fx_durable_ga.requests
         WHERE id = $1;
@@ -174,16 +156,13 @@ pub(crate) async fn get_request<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod get_request_tests {
     use super::*;
-    use crate::models::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
+    use crate::models::{FitnessGoal, Schedule, Selector};
 
     #[sqlx::test(migrations = false)]
     async fn it_gets_an_existing_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-
-        let mutagen = Mutagen::constant(0.5, 0.1)?;
-        let crossover = Crossover::uniform(0.5)?;
+        let user_defined = serde_json::json!({ "Uniform": { "probability": 0.5 } });
         let goal = FitnessGoal::maximize(0.9)?;
-        let distribution = Distribution::latin_hypercube(200);
 
         let request = Request::new(
             "test",
@@ -191,9 +170,7 @@ mod get_request_tests {
             goal,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            mutagen,
-            crossover,
-            distribution,
+            user_defined,
             None::<()>,
         )?;
         let request_id = request.id;
@@ -208,26 +185,8 @@ mod get_request_tests {
     #[sqlx::test(migrations = false)]
     async fn it_errors_on_not_found(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-
-        let mutagen = Mutagen::constant(0.5, 0.1)?;
-        let crossover = Crossover::uniform(0.5)?;
-        let goal = FitnessGoal::maximize(0.9)?;
-        let distribution = Distribution::latin_hypercube(200);
-
-        let request = Request::new(
-            "test",
-            1,
-            goal,
-            Selector::tournament(10, 20).expect("is valid"),
-            Schedule::generational(100, 10),
-            mutagen,
-            crossover,
-            distribution,
-            None::<()>,
-        )?;
-        let request_id = request.id;
-
-        let selected = get_request(&pool, &request_id).await;
+        let fake_id = Uuid::now_v7();
+        let selected = get_request(&pool, &fake_id).await;
 
         assert!(selected.is_err());
         Ok(())
@@ -267,13 +226,7 @@ pub(crate) async fn new_request_conclusion<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod new_request_conclusion_conclusion_tests {
-    use crate::models::Crossover;
-    use crate::models::Distribution;
-    use crate::models::FitnessGoal;
-    use crate::models::Mutagen;
-    use crate::models::Request;
-    use crate::models::Schedule;
-    use crate::models::Selector;
+    use crate::models::{FitnessGoal, Request, Schedule, Selector};
     use crate::repositories::requests::queries::new_request;
     use crate::{
         models::{Conclusion, RequestConclusion},
@@ -292,9 +245,7 @@ mod new_request_conclusion_conclusion_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -328,9 +279,7 @@ mod new_request_conclusion_conclusion_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -364,9 +313,7 @@ mod new_request_conclusion_conclusion_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -416,13 +363,7 @@ pub(crate) async fn get_request_conclusion<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod get_request_conclusion_tests {
-    use crate::models::Crossover;
-    use crate::models::Distribution;
-    use crate::models::FitnessGoal;
-    use crate::models::Mutagen;
-    use crate::models::Request;
-    use crate::models::Schedule;
-    use crate::models::Selector;
+    use crate::models::{FitnessGoal, Request, Schedule, Selector};
     use crate::repositories::requests::queries::get_request_conclusion;
     use crate::repositories::requests::queries::new_request;
     use crate::{
@@ -442,9 +383,7 @@ mod get_request_conclusion_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;
@@ -481,9 +420,7 @@ mod get_request_conclusion_tests {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1)?,
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(200),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
         )?;
         let request_id = request.id;

@@ -19,11 +19,9 @@ impl Breeder {
     ) -> anyhow::Result<Genotype> {
         let p1 = parent1.genome().clone();
         let p2 = parent2.genome().clone();
-        let mut child_genome = manager.crossover(&p1, &p2, rng)?;
+        let mut child_genome = manager.crossover(&p1, &p2, rng, &request.user_defined)?;
 
-        let mutation_rate = request.mutagen.mutation_rate().at_progress(progress);
-        let temperature = request.mutagen.temperature().at_progress(progress);
-        manager.mutate(&mut child_genome, rng, mutation_rate, temperature)?;
+        manager.mutate(&mut child_genome, rng, progress, &request.user_defined)?;
 
         let child = Genotype::new(
             &request.type_name,
@@ -65,10 +63,7 @@ impl Breeder {
 mod tests {
     use super::*;
     use crate::models::evolution::GenotypeManager;
-    use crate::models::{
-        Crossover, Distribution, FitnessGoal, Mutagen, MutationRate, Schedule, Selector,
-        Temperature, Terminated,
-    };
+    use crate::models::{FitnessGoal, Schedule, Selector, Terminated};
     use anyhow::Result;
     use futures::future::BoxFuture;
     use rand::Rng;
@@ -83,7 +78,7 @@ mod tests {
         fn name(&self) -> &'static str {
             "test"
         }
-        fn random(&self, rng: &mut dyn RngCore) -> anyhow::Result<Value> {
+        fn random(&self, rng: &mut dyn RngCore, _user: &Value) -> anyhow::Result<Value> {
             Ok(serde_json::json!([
                 rng.random_range(0..10),
                 rng.random_range(0..10)
@@ -94,6 +89,7 @@ mod tests {
             parent1: &Value,
             parent2: &Value,
             _rng: &mut dyn RngCore,
+            _user: &Value,
         ) -> Result<Value> {
             Ok(serde_json::json!([
                 parent1[0].as_i64().unwrap_or(0),
@@ -104,13 +100,11 @@ mod tests {
             &self,
             genotype: &mut Value,
             _rng: &mut dyn RngCore,
-            mutation_rate: f64,
-            _temperature: f64,
+            _progress: f64,
+            _user: &Value,
         ) -> Result<()> {
-            if mutation_rate > 0.0 {
-                if let Some(first) = genotype.as_array_mut().and_then(|a| a.get_mut(0)) {
-                    *first = serde_json::json!(first.as_i64().unwrap_or(0) + 1);
-                }
+            if let Some(first) = genotype.as_array_mut().and_then(|a| a.get_mut(0)) {
+                *first = serde_json::json!(first.as_i64().unwrap_or(0) + 1);
             }
             Ok(())
         }
@@ -118,6 +112,7 @@ mod tests {
             &'a self,
             _genotype: &'a Value,
             _terminated: &'a dyn Terminated,
+            _user: &'a Value,
         ) -> BoxFuture<'a, Result<f64>> {
             Box::pin(async { Ok(1.0) })
         }
@@ -134,12 +129,7 @@ mod tests {
             FitnessGoal::maximize(0.9).unwrap(),
             Selector::tournament(5, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::new(
-                Temperature::constant(0.5).unwrap(),
-                MutationRate::constant(0.1).unwrap(),
-            ),
-            Crossover::uniform(0.5).unwrap(),
-            Distribution::latin_hypercube(50),
+            serde_json::json!({"probability":0.5}),
             None::<()>,
         )
         .unwrap()

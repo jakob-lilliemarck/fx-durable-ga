@@ -15,9 +15,7 @@ pub(super) struct DbRequest {
     pub(super) goal: serde_json::Value,
     pub(super) schedule: serde_json::Value,
     pub(super) selector: serde_json::Value,
-    pub(super) mutagen: serde_json::Value,
-    pub(super) crossover: serde_json::Value,
-    pub(super) distribution: serde_json::Value,
+    pub(super) user_defined: serde_json::Value,
     pub(super) data: Option<serde_json::Value>,
 }
 
@@ -29,9 +27,7 @@ impl TryFrom<Request> for DbRequest {
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let schedule_json = serde_json::to_value(request.schedule)?;
         let selector_json = serde_json::to_value(request.selector)?;
-        let mutagen_json = serde_json::to_value(request.mutagen)?;
-        let crossover_json = serde_json::to_value(request.crossover)?;
-        let distribution_json = serde_json::to_value(request.distribution)?;
+        let user_defined_json = request.user_defined;
         let goal_json = serde_json::to_value(request.goal)?;
 
         Ok(DbRequest {
@@ -42,9 +38,7 @@ impl TryFrom<Request> for DbRequest {
             goal: goal_json,
             schedule: schedule_json,
             selector: selector_json,
-            mutagen: mutagen_json,
-            crossover: crossover_json,
-            distribution: distribution_json,
+            user_defined: user_defined_json,
             data: request.data,
         })
     }
@@ -58,9 +52,7 @@ impl TryFrom<DbRequest> for Request {
     fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
         let schedule = serde_json::from_value(request.schedule)?;
         let selector = serde_json::from_value(request.selector)?;
-        let mutagen = serde_json::from_value(request.mutagen)?;
-        let crossover = serde_json::from_value(request.crossover)?;
-        let distribution = serde_json::from_value(request.distribution)?;
+        let user_defined = request.user_defined;
         let goal = serde_json::from_value(request.goal)?;
 
         Ok(Request {
@@ -71,9 +63,7 @@ impl TryFrom<DbRequest> for Request {
             goal,
             schedule,
             selector,
-            mutagen,
-            crossover,
-            distribution,
+            user_defined,
             data: request.data,
         })
     }
@@ -82,7 +72,7 @@ impl TryFrom<DbRequest> for Request {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{Crossover, Distribution, FitnessGoal, Mutagen, Schedule, Selector};
+    use crate::models::{FitnessGoal, Schedule, Selector};
     use serde_json::json;
 
     fn create_test_request() -> Request {
@@ -92,9 +82,7 @@ mod tests {
             FitnessGoal::minimize(0.9).unwrap(),
             Selector::tournament(5, 20).expect("is valid"),
             Schedule::generational(100, 10),
-            Mutagen::constant(0.5, 0.1).unwrap(),
-            Crossover::uniform(0.5).unwrap(),
-            Distribution::latin_hypercube(50),
+            json!({"Uniform":{"probability":0.5}}),
             None::<()>,
         )
         .unwrap()
@@ -121,19 +109,8 @@ mod tests {
             json!({"method": {"Tournament": {"size": 5}}, "sample_size": 20})
         );
         assert_eq!(
-            db_request.mutagen,
-            json!({
-                "mutation_rate": {"decay": "Constant", "value": 0.1},
-                "temperature": {"decay": "Constant", "value": 0.5}
-            })
-        );
-        assert_eq!(
-            db_request.crossover,
-            json!({"probability": 0.5})
-        );
-        assert_eq!(
-            db_request.distribution,
-            json!({"LatinHypercube": {"population_size": 50}})
+            db_request.user_defined,
+            json!({"Uniform":{"probability":0.5}})
         );
     }
 
@@ -178,39 +155,6 @@ mod tests {
         let mut db_request = DbRequest::try_from(original_request).unwrap();
 
         db_request.selector = json!({"invalid": "selector"});
-        let result = Request::try_from(db_request);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::Serde(_)));
-    }
-
-    #[test]
-    fn test_invalid_mutagen_json_fails() {
-        let original_request = create_test_request();
-        let mut db_request = DbRequest::try_from(original_request).unwrap();
-
-        db_request.mutagen = json!({"invalid": "mutagen"});
-        let result = Request::try_from(db_request);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::Serde(_)));
-    }
-
-    #[test]
-    fn test_invalid_crossover_json_fails() {
-        let original_request = create_test_request();
-        let mut db_request = DbRequest::try_from(original_request).unwrap();
-
-        db_request.crossover = json!({"invalid": "crossover"});
-        let result = Request::try_from(db_request);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), Error::Serde(_)));
-    }
-
-    #[test]
-    fn test_invalid_distribution_json_fails() {
-        let original_request = create_test_request();
-        let mut db_request = DbRequest::try_from(original_request).unwrap();
-
-        db_request.distribution = json!({"invalid": "distribution"});
         let result = Request::try_from(db_request);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), Error::Serde(_)));
