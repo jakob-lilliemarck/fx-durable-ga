@@ -56,6 +56,10 @@ path = "examples/regression_model.rs"
 name = "feature_engineering"
 path = "examples/feature_engineering.rs"
 
+[[example]]
+name = "gp_point_search"
+path = "examples/gp_point_search.rs"
+
 [[bin]]
 name = "migrate"
 path = "src/bin/migrate.rs"
