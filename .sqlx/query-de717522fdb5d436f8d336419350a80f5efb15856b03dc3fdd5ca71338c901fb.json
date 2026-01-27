@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO fx_durable_ga.fitness (genotype_id, fitness, evaluated_at)\n            VALUES ($1, $2, $3)\n            RETURNING genotype_id, fitness, evaluated_at;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "genotype_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "fitness",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 2,
+        "name": "evaluated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Float8",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "de717522fdb5d436f8d336419350a80f5efb15856b03dc3fdd5ca71338c901fb"
+}

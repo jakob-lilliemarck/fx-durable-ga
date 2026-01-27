@@ -1,0 +1,52 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                request_id \"request_id!:Uuid\",\n                evaluated_genotypes \"evaluated_genotypes!:i64\",\n                live_genotypes \"live_genotypes!:i64\",\n                current_generation \"current_generation!:i32\",\n                min_fitness \"min_fitness\",\n                max_fitness \"max_fitness\"\n            FROM fx_durable_ga.populations\n            WHERE request_id = $1;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "request_id!:Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "evaluated_genotypes!:i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "live_genotypes!:i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "current_generation!:i32",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "min_fitness",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "max_fitness",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "019d807a1bf407d3b8b37b01c17b99e0fad0b9c79fc878b27e08a724c6198bc5"
+}
