@@ -5,38 +5,39 @@ use super::events::{
 };
 use crate::models::GenotypeManager;
 use crate::models::{
-    Breeder, Fitness, FitnessGoal, Genotype, Request, RequestConclusion, ScheduleDecision,
-    Selector, Terminated,
+    Breeder, Fitness, FitnessGoal, Genotype, Request, RequestConclusion, ScheduleDecision, Selector,
 };
+use crate::optimization::termination_listener::TerminationListener;
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, requests};
 use crate::services::lock;
-use crate::services::optimization::models::Terminator;
 use fx_event_bus::Publisher;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use tracing::instrument;
 use uuid::Uuid;
 
 /// Genetic algorithm optimization service that manages the entire optimization lifecycle.
 pub struct Service {
     pub(super) locking: lock::Service,
-    pub(super) requests: requests::Repository,
-    pub(super) genotypes: genotypes::Repository,
+    pub(super) requests: Arc<requests::Repository>,
+    pub(super) genotypes: Arc<genotypes::Repository>,
     pub(super) genotype_managers: HashMap<i32, Box<dyn GenotypeManager + 'static>>,
     pub(super) max_deduplication_attempts: i32,
+    pub(super) termination_listener: TerminationListener,
 }
 
 impl Service {
     #[instrument(level = "debug", skip_all)]
     pub(crate) fn builder(
         locking: lock::Service,
-        requests: requests::Repository,
-        genotypes: genotypes::Repository,
+        requests: &Arc<requests::Repository>,
+        genotypes: &Arc<genotypes::Repository>,
     ) -> super::ServiceBuilder {
         super::ServiceBuilder {
             locking,
-            requests,
-            genotypes,
+            requests: requests.clone(),
+            genotypes: genotypes.clone(),
             genotype_managers: HashMap::new(),
             max_deduplication_attempts: 5,
         }
@@ -152,18 +153,18 @@ impl Service {
                     type_name: genotype.type_name().to_string(),
                 })?;
 
-        let terminator: Box<dyn Terminated> =
-            Box::new(Terminator::new(self.requests.clone(), request_id));
-        // If the request is already concluded or interrupted, skip evaluation to avoid
-        // recording sentinel fitness values for cancelled work.
-        if terminator.is_terminated().await {
-            return Ok(());
-        }
-
-        let fitness = manager
-            .evaluate(&genotype.genome(), &terminator, &request.user_defined)
-            .await
-            .map_err(Error::EvaluationError)?;
+        // Race evaluation future against termination notifications so we can stop
+        // recording fitness once a request concludes.
+        let genome = genotype.genome();
+        let fitness = tokio::select! {
+            res = manager.evaluate(&genome, &request.user_defined) => {
+                res.map_err(Error::EvaluationError)?
+            }
+            termination = self.termination_listener.wait_for(request_id) => {
+                termination?;
+                return Ok(());
+            }
+        };
 
         self.genotypes
             .chain(|mut tx_genotypes| {
@@ -357,7 +358,8 @@ impl Service {
         &self,
         request_conclusion: RequestConclusion,
     ) -> Result<(), Error> {
-        let key = format!("conclude_request_{}", request_conclusion.request_id);
+        let request_id = request_conclusion.request_id;
+        let key = format!("conclude_request_{}", request_id);
         let _ = self
             .locking
             .lock_while(&key, || async {
@@ -372,6 +374,8 @@ impl Service {
                 self.requests
                     .new_request_conclusion(&request_conclusion)
                     .await?;
+
+                self.requests.notify_request_conclusion(&request_id).await?;
 
                 Ok(())
             })

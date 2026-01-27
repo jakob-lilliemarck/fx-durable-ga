@@ -16,7 +16,7 @@ use anyhow::Result;
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use fx_durable_ga::{
     bootstrap,
-    models::{FitnessGoal, GenotypeManager, Schedule, Selector, Terminated},
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector},
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -226,14 +226,9 @@ impl GenotypeManager for ArchitectureManager {
     fn evaluate<'a>(
         &'a self,
         genome: &'a Value,
-        terminated: &'a dyn Terminated,
         _user_defined: &'a Value,
     ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         Box::pin(async move {
-            if terminated.is_terminated().await {
-                return Ok(f64::MAX);
-            }
-
             let arch = ArchitectureManager::from_json(genome);
 
             let output = tokio::process::Command::new("fx-example-regression")
@@ -291,7 +286,8 @@ async fn main() -> Result<()> {
         bootstrap(pool.clone())
             .await?
             .with_genotype_manager(ArchitectureManager)
-            .build(),
+            .build()
+            .await?,
     );
 
     let mut registry = fx_event_bus::EventHandlerRegistry::new();

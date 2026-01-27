@@ -1,5 +1,4 @@
 mod breeder;
-mod evaluator;
 mod evolution;
 mod genotype;
 mod goal;
@@ -8,7 +7,6 @@ mod request;
 mod schedule;
 mod selector;
 
-pub use evaluator::Terminated;
 pub use evolution::GenotypeManager;
 pub use genotype::Genotype;
 pub use goal::FitnessGoal;

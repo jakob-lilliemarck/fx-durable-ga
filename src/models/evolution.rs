@@ -1,4 +1,3 @@
-use crate::models::Terminated;
 use anyhow::Result;
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
@@ -45,7 +44,6 @@ pub trait GenotypeManager: Send + Sync {
     fn evaluate<'a>(
         &'a self,
         genotype: &'a Value,
-        terminated: &'a dyn Terminated,
         user_defined: &'a Value,
     ) -> BoxFuture<'a, Result<f64>>;
 }

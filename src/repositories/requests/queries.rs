@@ -1,9 +1,11 @@
 use super::Error;
 use super::models::DbRequest;
 use crate::models::{Conclusion, Request, RequestConclusion};
-use sqlx::PgExecutor;
+use sqlx::{PgExecutor, PgPool, postgres::PgListener};
 use tracing::instrument;
 use uuid::Uuid;
+
+const REQUEST_CONCLUSION_CHANNEL: &str = "fx_durable_ga_request_concluded";
 
 /// Creates a new request record in the database.
 ///
@@ -361,6 +363,29 @@ pub(crate) async fn get_request_conclusion<'tx, E: PgExecutor<'tx>>(
     Ok(request_conclusion)
 }
 
+/// Subscribes to PostgreSQL notifications for request conclusions.
+#[instrument(level = "debug", skip(pool))]
+pub(crate) async fn listen_request_conclusions(pool: &PgPool) -> Result<PgListener, Error> {
+    let mut listener = PgListener::connect_with(pool).await?;
+    listener.listen(REQUEST_CONCLUSION_CHANNEL).await?;
+    Ok(listener)
+}
+
+/// Notifies listeners that a request has reached a conclusion.
+#[instrument(level = "debug", skip(tx), fields(request_id = %request_id))]
+pub(crate) async fn notify_request_conclusion<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    request_id: &Uuid,
+) -> Result<(), Error> {
+    sqlx::query("SELECT pg_notify($1, $2)")
+        .bind(REQUEST_CONCLUSION_CHANNEL)
+        .bind(request_id.to_string())
+        .execute(tx)
+        .await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod get_request_conclusion_tests {
     use crate::models::{FitnessGoal, Request, Schedule, Selector};
@@ -428,6 +453,28 @@ mod get_request_conclusion_tests {
 
         let actual = get_request_conclusion(&pool, &request_id).await?;
         assert!(actual.is_none());
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod request_conclusion_notifications_tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    #[sqlx::test(migrations = false)]
+    async fn it_notifies_and_listens_for_conclusions(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        let request_id = Uuid::now_v7();
+
+        let mut listener = listen_request_conclusions(&pool).await?;
+        notify_request_conclusion(&pool, &request_id).await?;
+
+        let notification = timeout(Duration::from_secs(1), listener.recv()).await??;
+        assert_eq!(notification.channel(), REQUEST_CONCLUSION_CHANNEL);
+        assert_eq!(notification.payload(), request_id.to_string());
 
         Ok(())
     }

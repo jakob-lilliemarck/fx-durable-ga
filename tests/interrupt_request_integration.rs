@@ -1,10 +1,10 @@
 use fx_durable_ga::{
     bootstrap, migrations,
-    models::{FitnessGoal, GenotypeManager, Schedule, Selector, Terminated},
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector},
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::Queries;
-use sqlx::PgPool;
+use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -53,7 +53,6 @@ impl GenotypeManager for TestManager {
     fn evaluate<'a>(
         &'a self,
         _genotype: &'a serde_json::Value,
-        _terminated: &'a dyn Terminated,
         _user_defined: &'a serde_json::Value,
     ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         Box::pin(async { Ok(0.0) })
@@ -61,7 +60,16 @@ impl GenotypeManager for TestManager {
 }
 
 #[sqlx::test(migrations = false)]
-async fn test_interrupt_request_end_to_end(pool: PgPool) -> anyhow::Result<()> {
+async fn test_interrupt_request_end_to_end(
+    pool_opts: PgPoolOptions,
+    connect_opts: PgConnectOptions,
+) -> anyhow::Result<()> {
+    let pool = pool_opts
+        .clone()
+        .max_connections(12)
+        .connect_with(connect_opts.clone())
+        .await?;
+
     // Run migrations
     migrations::run_default_migrations(&pool).await?;
 
@@ -70,7 +78,8 @@ async fn test_interrupt_request_end_to_end(pool: PgPool) -> anyhow::Result<()> {
         bootstrap(pool.clone())
             .await?
             .with_genotype_manager(TestManager)
-            .build(),
+            .build()
+            .await?,
     );
 
     // Register event handlers

@@ -3,7 +3,7 @@ use super::repository_tx::TxRepository;
 use crate::models::{Request, RequestConclusion};
 use crate::repositories::chainable::{Chain, FromOther, ToTx, TxType};
 use futures::future::{BoxFuture, Future};
-use sqlx::{PgPool, PgTransaction};
+use sqlx::{PgPool, PgTransaction, postgres::PgListener};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -41,6 +41,18 @@ impl Repository {
         request_conclusion: &RequestConclusion,
     ) -> impl Future<Output = Result<RequestConclusion, Error>> {
         super::queries::new_request_conclusion(&self.pool, request_conclusion)
+    }
+
+    /// Listens for PostgreSQL notifications whenever a request concludes.
+    #[instrument(level = "debug", skip(self))]
+    pub(crate) async fn listen_request_conclusions(&self) -> Result<PgListener, Error> {
+        super::queries::listen_request_conclusions(&self.pool).await
+    }
+
+    /// Sends a notification that a request has concluded.
+    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
+    pub(crate) async fn notify_request_conclusion(&self, request_id: &Uuid) -> Result<(), Error> {
+        super::queries::notify_request_conclusion(&self.pool, request_id).await
     }
 }
 

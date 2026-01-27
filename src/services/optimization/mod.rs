@@ -3,8 +3,7 @@ mod events;
 mod jobs;
 mod service;
 mod service_builder;
-
-pub(crate) mod models;
+mod termination_listener;
 
 pub use errors::Error;
 pub use events::register_event_handlers;

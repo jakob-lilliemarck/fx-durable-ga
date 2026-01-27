@@ -15,7 +15,7 @@
 use anyhow::Result;
 use fx_durable_ga::{
     bootstrap,
-    models::{FitnessGoal, GenotypeManager, Schedule, Selector, Terminated},
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector},
     register_event_handlers, register_job_handlers,
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -117,15 +117,11 @@ impl GenotypeManager for PointManager {
     fn evaluate<'a>(
         &'a self,
         genotype: &'a Value,
-        terminated: &'a dyn Terminated,
         _user_defined: &'a Value,
     ) -> futures::future::BoxFuture<'a, anyhow::Result<f64>> {
         let target = self.target;
         let clone = genotype.clone();
         Box::pin(async move {
-            if terminated.is_terminated().await {
-                return Ok(f64::MAX);
-            }
             let x = clone["x"].as_f64().unwrap_or(0.0);
             let y = clone["y"].as_f64().unwrap_or(0.0);
             let z = clone["z"].as_f64().unwrap_or(0.0);
@@ -171,7 +167,8 @@ async fn main() -> Result<()> {
         bootstrap(pool.clone())
             .await?
             .with_genotype_manager(manager)
-            .build(),
+            .build()
+            .await?,
     );
 
     // setup event handling and spawn an event handling agent

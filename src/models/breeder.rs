@@ -63,7 +63,7 @@ impl Breeder {
 mod tests {
     use super::*;
     use crate::models::evolution::GenotypeManager;
-    use crate::models::{FitnessGoal, Schedule, Selector, Terminated};
+    use crate::models::{FitnessGoal, Schedule, Selector};
     use anyhow::Result;
     use futures::future::BoxFuture;
     use rand::Rng;
@@ -111,7 +111,6 @@ mod tests {
         fn evaluate<'a>(
             &'a self,
             _genotype: &'a Value,
-            _terminated: &'a dyn Terminated,
             _user: &'a Value,
         ) -> BoxFuture<'a, Result<f64>> {
             Box::pin(async { Ok(1.0) })

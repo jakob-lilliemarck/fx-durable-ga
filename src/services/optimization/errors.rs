@@ -1,3 +1,4 @@
+use crate::optimization::termination_listener::TerminationListenerError;
 use crate::services::lock;
 use crate::{
     models::SelectionError,
@@ -19,4 +20,6 @@ pub enum Error {
     SelectionError(#[from] SelectionError),
     #[error("Lock error: {0}")]
     LockError(#[from] lock::Error),
+    #[error("Termination listener error: {0}")]
+    TerminationListener(#[from] TerminationListenerError),
 }
