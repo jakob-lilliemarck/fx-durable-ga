@@ -1,5 +1,5 @@
 use super::Error;
-use crate::models::{Fitness, Genotype};
+use crate::models::{Evaluation, Genotype};
 use crate::repositories::chainable::ToTx;
 use futures::Future;
 use sqlx::PgTransaction;
@@ -16,13 +16,13 @@ impl<'tx> TxRepository<'tx> {
         Self { tx }
     }
 
-    /// Records a fitness evaluation result within the current transaction.
-    #[instrument(level = "debug", skip(self), fields(fitness = ?fitness))]
-    pub(crate) fn record_fitness(
+    /// Records a evaluation result within the current transaction.
+    #[instrument(level = "debug", skip(self), fields(evaluation = ?evaluation))]
+    pub(crate) fn record_evaluation(
         &mut self,
-        fitness: &Fitness,
-    ) -> impl Future<Output = Result<Fitness, Error>> {
-        super::queries::record_fitness(&mut *self.tx, fitness)
+        evaluation: &Evaluation,
+    ) -> impl Future<Output = Result<Evaluation, Error>> {
+        super::queries::record_evaluation(&mut *self.tx, evaluation)
     }
 
     /// Inserts multiple genotypes within the current transaction.

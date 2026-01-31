@@ -15,7 +15,7 @@ pub use schedule::Schedule;
 pub use selector::{SelectionError, Selector};
 
 pub(crate) use breeder::Breeder;
-pub(crate) use genotype::Fitness;
+pub(crate) use genotype::Evaluation;
 pub(crate) use population::Population;
 pub(crate) use request::{Conclusion, RequestConclusion};
 pub(crate) use schedule::ScheduleDecision;

@@ -21,6 +21,8 @@ pub struct Genotype {
     pub(crate) request_id: Uuid,
     #[allow(dead_code)]
     pub(crate) generation_id: i32,
+    pub(crate) parent_a: Option<Uuid>,
+    pub(crate) parent_b: Option<Uuid>,
 }
 
 impl Genotype {
@@ -32,6 +34,8 @@ impl Genotype {
         genome: G,
         request_id: Uuid,
         generation_id: i32,
+        parent_a: Option<&Uuid>,
+        parent_b: Option<&Uuid>,
     ) -> Self {
         // FIXME: add a named error or a better logging here. We know its "serializable" because the compiler guarantees it, but there could still be an error during serialization.
         let genome_value = serde_json::to_value(genome).expect("genome must be serializable");
@@ -46,6 +50,8 @@ impl Genotype {
             genome_hash,
             request_id,
             generation_id,
+            parent_a: parent_a.map(Clone::clone),
+            parent_b: parent_b.map(Clone::clone),
         }
     }
 
@@ -140,20 +146,27 @@ mod tests {
 /// Represents a fitness evaluation result for a genotype.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(crate) struct Fitness {
+pub(crate) struct Evaluation {
     pub(crate) genotype_id: Uuid,
     pub(crate) fitness: f64,
-    pub(crate) evaluated_at: DateTime<Utc>,
+    pub(crate) started_at: Option<DateTime<Utc>>,
+    pub(crate) completed_at: Option<DateTime<Utc>>,
 }
 
-impl Fitness {
+impl Evaluation {
     /// Creates a new fitness record for a genotype.
-    #[instrument(level = "debug", fields(genotype_id = %genotype_id, fitness = fitness))]
-    pub(crate) fn new(genotype_id: Uuid, fitness: f64) -> Self {
+    #[instrument(level = "debug", fields(genotype_id = %genotype_id, fitness = fitness, started_at = ?started_at, completed_at = ?completed_at))]
+    pub(crate) fn new(
+        genotype_id: Uuid,
+        fitness: f64,
+        started_at: Option<DateTime<Utc>>,
+        completed_at: Option<DateTime<Utc>>,
+    ) -> Self {
         Self {
             genotype_id,
             fitness,
-            evaluated_at: Utc::now(),
+            started_at,
+            completed_at,
         }
     }
 }

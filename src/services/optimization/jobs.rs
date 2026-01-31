@@ -58,7 +58,7 @@ impl Handler for GenerateInitialPopulationHandler {
 // EvaluateGenotype
 // ============================================================
 
-/// Message to trigger fitness evaluation for a specific genotype.
+/// Message to trigger evaluation for a specific genotype.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluateGenotypeMessage {
     pub request_id: Uuid,

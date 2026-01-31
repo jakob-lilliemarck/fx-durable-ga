@@ -144,7 +144,7 @@ impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
 // GenotypeEvaluated
 // ============================================================
 
-/// Event published when a genotype's fitness has been evaluated.
+/// Event published when a genotype has been evaluated.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GenotypeEvaluatedEvent {
     request_id: Uuid,

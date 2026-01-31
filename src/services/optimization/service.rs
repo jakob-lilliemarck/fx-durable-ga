@@ -5,12 +5,14 @@ use super::events::{
 };
 use crate::models::GenotypeManager;
 use crate::models::{
-    Breeder, Fitness, FitnessGoal, Genotype, Request, RequestConclusion, ScheduleDecision, Selector,
+    Breeder, Evaluation, FitnessGoal, Genotype, Request, RequestConclusion, ScheduleDecision,
+    Selector,
 };
 use crate::optimization::termination_listener::TerminationListener;
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, requests};
 use crate::services::lock;
+use chrono::Utc;
 use fx_event_bus::Publisher;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -110,8 +112,15 @@ impl Service {
                 let genome = manager
                     .random(&mut rng, &request.user_defined)
                     .map_err(Error::EvaluationError)?;
-                let genotype =
-                    Genotype::new(&request.type_name, request.type_hash, genome, request.id, 1);
+                let genotype = Genotype::new(
+                    &request.type_name,
+                    request.type_hash,
+                    genome,
+                    request.id,
+                    1,    // First generation
+                    None, // No parent_a
+                    None, // No parent_b
+                );
                 events.push(GenotypeGenerated::new(request.id, genotype.id()));
                 genotypes.push(genotype);
             }
@@ -154,11 +163,20 @@ impl Service {
                 })?;
 
         // Race evaluation future against termination notifications so we can stop
-        // recording fitness once a request concludes.
+        // once a request concludes.
         let genome = genotype.genome();
-        let fitness = tokio::select! {
+        let (fitness, started_at, completed_at) = tokio::select! {
             res = manager.evaluate(&genome, &request.user_defined) => {
-                res.map_err(Error::EvaluationError)?
+                // Evalutation started at this time
+                let started_at = Utc::now();
+
+                // Map error and escape early
+                let fitness = res.map_err(Error::EvaluationError)?;
+
+                // Evaluation completed at this time
+                let completed_at = Utc::now();
+
+                (fitness, started_at, completed_at)
             }
             termination = self.termination_listener.wait_for(request_id) => {
                 termination?;
@@ -166,11 +184,19 @@ impl Service {
             }
         };
 
+        // FIXME:
+        // write started_at and completed_at do the database!
+        //
         self.genotypes
             .chain(|mut tx_genotypes| {
                 Box::pin(async move {
                     tx_genotypes
-                        .record_fitness(&Fitness::new(genotype_id, fitness))
+                        .record_evaluation(&Evaluation::new(
+                            genotype_id,
+                            fitness,
+                            Some(started_at),
+                            Some(completed_at),
+                        ))
                         .await?;
                     let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
                     publisher
@@ -212,7 +238,7 @@ impl Service {
             .search_genotypes(
                 &genotypes::Filter::default()
                     .with_request_id(request.id)
-                    .with_fitness(true)
+                    .with_evaluation(true)
                     .with_order_random(),
                 request.selector.sample_size(),
             )
@@ -222,6 +248,8 @@ impl Service {
         let best_fitness = *request
             .goal
             .best_fitness(&population.min_fitness, &population.max_fitness);
+
+        // FIXME: this does not return anything useful!!
         let progress = request.goal.calculate_progress(best_fitness);
 
         let mut final_genotypes = Vec::with_capacity(num_offspring);
@@ -430,11 +458,11 @@ impl Service {
         let filter = match request.goal {
             FitnessGoal::Minimize { .. } => genotypes::Filter::default()
                 .with_request_id(request_id)
-                .with_fitness(true)
+                .with_evaluation(true)
                 .with_order_fitness_asc(),
             FitnessGoal::Maximize { .. } => genotypes::Filter::default()
                 .with_request_id(request_id)
-                .with_fitness(true)
+                .with_evaluation(true)
                 .with_order_fitness_desc(),
         };
 

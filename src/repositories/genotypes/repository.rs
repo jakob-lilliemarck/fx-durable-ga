@@ -6,7 +6,7 @@ use sqlx::{PgPool, PgTransaction};
 use tracing::instrument;
 use uuid::Uuid;
 
-/// Repository for genotype and fitness data operations.
+/// Repository for genotype and evaluation operations.
 pub(crate) struct Repository {
     pool: PgPool,
 }

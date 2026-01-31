@@ -7,28 +7,33 @@ pub(crate) struct Breeder;
 
 impl Breeder {
     /// Creates a single child from two parents using crossover and mutation.
-    #[instrument(level = "debug", skip(request, manager, parent1, parent2, rng), fields(parent1_id = %parent1.id(), parent2_id = %parent2.id(), generation_id = next_generation_id, progress = progress, type_hash = request.type_hash))]
+    #[instrument(level = "debug", skip(request, manager, parent_a, parent_b, rng), fields(parent_a_id = %parent_a.id(), parent_b_id = %parent_b.id(), generation_id = next_generation_id, progress = progress, type_hash = request.type_hash))]
     fn breed_child(
         request: &Request,
         manager: &dyn GenotypeManager,
-        parent1: &Genotype,
-        parent2: &Genotype,
+        parent_a: &Genotype,
+        parent_b: &Genotype,
         next_generation_id: i32,
         progress: f64,
         rng: &mut dyn rand::RngCore,
     ) -> anyhow::Result<Genotype> {
-        let p1 = parent1.genome().clone();
-        let p2 = parent2.genome().clone();
+        let p1 = parent_a.genome().clone();
+        let p2 = parent_b.genome().clone();
         let mut child_genome = manager.crossover(&p1, &p2, rng, &request.user_defined)?;
 
         manager.mutate(&mut child_genome, rng, progress, &request.user_defined)?;
 
+        // FIXME:
+        // Add parent1.id and parent2.id to the Genotype here!
+        //
         let child = Genotype::new(
             &request.type_name,
             request.type_hash,
             child_genome,
             request.id,
             next_generation_id,
+            Some(&parent_a.id),
+            Some(&parent_b.id),
         );
         Ok(child)
     }
@@ -118,7 +123,15 @@ mod tests {
     }
 
     fn create_test_genotype(id: &str, genome: Value) -> Genotype {
-        Genotype::new("test", 123, genome, Uuid::parse_str(id).unwrap(), 1)
+        Genotype::new(
+            "test",
+            123,
+            genome,
+            Uuid::parse_str(id).unwrap(),
+            1,
+            None,
+            None,
+        )
     }
 
     fn create_test_request() -> Request {

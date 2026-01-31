@@ -128,6 +128,8 @@ mod spin_roulette_tests {
             serde_json::json!([1, 2, 3]),
             Uuid::parse_str(id).unwrap(),
             1,
+            None,
+            None,
         )
     }
 
@@ -859,6 +861,8 @@ mod test_utilities {
             serde_json::json!([1, 2, 3]),
             Uuid::parse_str(id).unwrap(),
             1,
+            None,
+            None,
         )
     }
 }

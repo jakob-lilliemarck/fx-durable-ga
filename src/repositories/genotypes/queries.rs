@@ -1,4 +1,4 @@
-use crate::models::{Fitness, Genotype, Population};
+use crate::models::{Evaluation, Genotype, Population};
 use sqlx::PgExecutor;
 use std::fmt::Display;
 use tracing::instrument;
@@ -20,7 +20,9 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             genome,
             genome_hash,
             request_id,
-            generation_id
+            generation_id,
+            parent_a,
+            parent_b
         ) VALUES ",
     );
 
@@ -52,10 +54,14 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             .push_bind(g.request_id())
             .push(", ")
             .push_bind(g.generation_id())
+            .push(", ")
+            .push_bind(g.parent_a)
+            .push(", ")
+            .push_bind(g.parent_b)
             .push(")");
     }
     query_builder.push(
-        " RETURNING id, generated_at, type_name, type_hash, genome, genome_hash, request_id, generation_id",
+        " RETURNING id, generated_at, type_name, type_hash, genome, genome_hash, request_id, generation_id, parent_a, parent_b",
     );
 
     let genotypes = query_builder
@@ -96,6 +102,8 @@ mod new_genotypes_tests {
             serde_json::json!([1, 2, 3]),
             request_id,
             1,
+            None,
+            None,
         )];
         let genotypes_clone = genotypes.clone();
 
@@ -130,7 +138,15 @@ mod new_genotypes_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1);
+        let genotype = Genotype::new(
+            "test",
+            1,
+            serde_json::json!([1, 2, 3]),
+            request_id,
+            1,
+            None,
+            None,
+        );
         let genotype_clone = genotype.clone();
 
         new_genotypes(&pool, vec![genotype]).await?;
@@ -193,7 +209,15 @@ mod check_if_generation_exists_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1);
+        let genotype = Genotype::new(
+            "test",
+            1,
+            serde_json::json!([1, 2, 3]),
+            request_id,
+            1,
+            None,
+            None,
+        );
 
         new_genotypes(&pool, vec![genotype]).await?;
 
@@ -241,7 +265,9 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
                 genome,
                 genome_hash,
                 request_id,
-                generation_id
+                generation_id,
+                parent_a,
+                parent_b
             FROM fx_durable_ga.genotypes
             WHERE id = $1;
         "#,
@@ -256,6 +282,8 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
         genome_hash: row.genome_hash,
         request_id: row.request_id,
         generation_id: row.generation_id,
+        parent_a: row.parent_a,
+        parent_b: row.parent_b,
     })
     .fetch_one(tx)
     .await?;
@@ -286,7 +314,15 @@ mod get_genotype_tests {
         let request_id = request.id;
         new_request(&pool, request).await?;
 
-        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1);
+        let genotype = Genotype::new(
+            "test",
+            1,
+            serde_json::json!([1, 2, 3]),
+            request_id,
+            1,
+            None,
+            None,
+        );
         let genotype_id = genotype.id;
 
         new_genotypes(&pool, vec![genotype]).await?;
@@ -311,21 +347,22 @@ mod get_genotype_tests {
 }
 
 /// Records a fitness evaluation result for a genotype.
-#[instrument(level = "debug", skip(tx), fields(fitness = ?fitness))]
-pub(crate) async fn record_fitness<'tx, E: PgExecutor<'tx>>(
+#[instrument(level = "debug", skip(tx), fields(evaluation = ?evaluation))]
+pub(crate) async fn record_evaluation<'tx, E: PgExecutor<'tx>>(
     tx: E,
-    fitness: &Fitness,
-) -> Result<Fitness, super::Error> {
+    evaluation: &Evaluation,
+) -> Result<Evaluation, super::Error> {
     let inserted = sqlx::query_as!(
-        Fitness,
+        Evaluation,
         r#"
-            INSERT INTO fx_durable_ga.fitness (genotype_id, fitness, evaluated_at)
-            VALUES ($1, $2, $3)
-            RETURNING genotype_id, fitness, evaluated_at;
+            INSERT INTO fx_durable_ga.evaluations (genotype_id, fitness, started_at, completed_at)
+            VALUES ($1, $2, $3, $4)
+            RETURNING genotype_id, fitness, started_at, completed_at;
         "#,
-        fitness.genotype_id,
-        fitness.fitness,
-        fitness.evaluated_at
+        evaluation.genotype_id,
+        evaluation.fitness,
+        evaluation.started_at,
+        evaluation.completed_at
     )
     .fetch_one(tx)
     .await?;
@@ -335,11 +372,11 @@ pub(crate) async fn record_fitness<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod record_fitness_tests {
-    use super::record_fitness;
-    use crate::models::{Fitness, FitnessGoal, Genotype, Request, Schedule, Selector};
+    use super::record_evaluation;
+    use crate::models::{Evaluation, FitnessGoal, Genotype, Request, Schedule, Selector};
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
-    use chrono::SubsecRound;
+    use chrono::{SubsecRound, Utc};
 
     #[sqlx::test(migrations = false)]
     async fn it_records_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
@@ -359,16 +396,31 @@ mod record_fitness_tests {
         new_request(&pool, request).await?;
 
         // Create a genotype
-        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1);
+        let genotype = Genotype::new(
+            "test",
+            1,
+            serde_json::json!([1, 2, 3]),
+            request_id,
+            1,
+            None,
+            None,
+        );
         let genotype_id = genotype.id;
         new_genotypes(&pool, vec![genotype]).await?;
 
-        let fitness = Fitness::new(genotype_id, 0.543);
-        let recorded = record_fitness(&pool, &fitness).await?;
+        let fitness = Evaluation::new(genotype_id, 0.543, Some(Utc::now()), Some(Utc::now()));
+        let recorded = record_evaluation(&pool, &fitness).await?;
 
         assert_eq!(recorded.genotype_id, fitness.genotype_id);
         assert_eq!(recorded.fitness, fitness.fitness);
-        assert_eq!(recorded.evaluated_at, fitness.evaluated_at.trunc_subsecs(6));
+        assert_eq!(
+            recorded.started_at,
+            fitness.started_at.map(|ts| ts.trunc_subsecs(6))
+        );
+        assert_eq!(
+            recorded.completed_at,
+            fitness.completed_at.map(|ts| ts.trunc_subsecs(6))
+        );
         Ok(())
     }
 
@@ -434,10 +486,13 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod get_population_tests {
-    use super::{get_population, record_fitness};
-    use crate::models::{Fitness, FitnessGoal, Genotype, Population, Request, Schedule, Selector};
+    use super::{get_population, record_evaluation};
+    use crate::models::{
+        Evaluation, FitnessGoal, Genotype, Population, Request, Schedule, Selector,
+    };
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
+    use chrono::Utc;
     use uuid::Uuid;
 
     #[sqlx::test(migrations = false)]
@@ -464,6 +519,8 @@ mod get_population_tests {
                 serde_json::json!([1, 2, 3]),
                 request_id,
                 i as i32,
+                None,
+                None,
             ));
         }
         new_genotypes(&pool, genotypes).await?;
@@ -525,9 +582,33 @@ mod get_population_tests {
         new_request(&pool, request).await?;
 
         let genotypes = vec![
-            Genotype::new("test", 1, serde_json::json!([1, 2, 3]), request_id, 1),
-            Genotype::new("test", 1, serde_json::json!([4, 5, 6]), request_id, 1),
-            Genotype::new("test", 1, serde_json::json!([7, 8, 9]), request_id, 1),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([1, 2, 3]),
+                request_id,
+                1,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([4, 5, 6]),
+                request_id,
+                1,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([7, 8, 9]),
+                request_id,
+                1,
+                None,
+                None,
+            ),
         ];
 
         // Create genotypes
@@ -538,9 +619,21 @@ mod get_population_tests {
         new_genotypes(&pool, genotypes).await?;
 
         // Record fitness values
-        record_fitness(&pool, &Fitness::new(a_id, 0.50)).await?;
-        record_fitness(&pool, &Fitness::new(b_id, 0.99)).await?;
-        record_fitness(&pool, &Fitness::new(c_id, 0.01)).await?;
+        record_evaluation(
+            &pool,
+            &Evaluation::new(a_id, 0.50, Some(Utc::now()), Some(Utc::now())),
+        )
+        .await?;
+        record_evaluation(
+            &pool,
+            &Evaluation::new(b_id, 0.99, Some(Utc::now()), Some(Utc::now())),
+        )
+        .await?;
+        record_evaluation(
+            &pool,
+            &Evaluation::new(c_id, 0.01, Some(Utc::now()), Some(Utc::now())),
+        )
+        .await?;
 
         let population = get_population(&pool, &request_id).await?;
 
@@ -597,7 +690,7 @@ impl Display for Order {
 pub struct Filter {
     request_id: Option<Uuid>,
     generation_id: Option<i32>,
-    has_fitness: Option<bool>,
+    has_evaluation: Option<bool>,
     order: Option<Order>,
 }
 
@@ -606,7 +699,7 @@ impl Default for Filter {
         Filter {
             request_id: None,
             generation_id: None,
-            has_fitness: None,
+            has_evaluation: None,
             order: None,
         }
     }
@@ -626,8 +719,8 @@ impl Filter {
     }
 
     /// Filters genotypes based on whether they have fitness evaluations.
-    pub fn with_fitness(mut self, has_fitness: bool) -> Self {
-        self.has_fitness = Some(has_fitness);
+    pub fn with_evaluation(mut self, has_evaluation: bool) -> Self {
+        self.has_evaluation = Some(has_evaluation);
         self
     }
 
@@ -668,9 +761,11 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
                 g.genome_hash,
                 g.request_id,
                 g.generation_id,
-                f.fitness "fitness!:Option<f64>"
+                g.parent_a,
+                g.parent_b,
+                e.fitness "fitness!:Option<f64>"
             FROM fx_durable_ga.genotypes g
-            LEFT JOIN fx_durable_ga.fitness f ON g.id = f.genotype_id
+            LEFT JOIN fx_durable_ga.evaluations e ON g.id = e.genotype_id
             WHERE (
                 $1::uuid IS NULL OR g.request_id = $1
             )
@@ -680,17 +775,17 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
             AND (
                 $3::bool IS NULL OR
                 CASE
-                    WHEN $3 = true THEN f.fitness IS NOT NULL
-                    ELSE f.fitness IS NULL
+                    WHEN $3 = true THEN e.fitness IS NOT NULL
+                    ELSE e.fitness IS NULL
                 END
             )
             ORDER BY
                 CASE
-                    WHEN $4 = 'fitness_desc' THEN f.fitness
+                    WHEN $4 = 'fitness_desc' THEN e.fitness
                     ELSE NULL
                 END DESC NULLS LAST,
                 CASE
-                    WHEN $4 = 'fitness_asc' THEN f.fitness
+                    WHEN $4 = 'fitness_asc' THEN e.fitness
                     ELSE NULL
                 END ASC NULLS LAST,
                 CASE
@@ -702,7 +797,7 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
         "#,
         filter.request_id,
         filter.generation_id,
-        filter.has_fitness,
+        filter.has_evaluation,
         filter.order.as_ref().map(|o| o.to_string()),
         limit
     )
@@ -721,6 +816,8 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
                 genome_hash: row.genome_hash,
                 request_id: row.request_id,
                 generation_id: row.generation_id,
+                parent_a: row.parent_a,
+                parent_b: row.parent_b,
             };
             (genotype, row.fitness)
         })
@@ -776,7 +873,7 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(&pool, &Filter::default().with_fitness(true), 5).await?;
+        let found = search_genotypes(&pool, &Filter::default().with_evaluation(true), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -804,7 +901,7 @@ mod search_genotypes_tests {
         let found = search_genotypes(
             &pool,
             &Filter::default()
-                .with_fitness(true)
+                .with_evaluation(true)
                 .with_order_fitness_desc(),
             5,
         )
@@ -836,7 +933,7 @@ mod search_genotypes_tests {
         let found = search_genotypes(
             &pool,
             &Filter::default()
-                .with_fitness(true)
+                .with_evaluation(true)
                 .with_order_fitness_asc(),
             5,
         )
@@ -865,7 +962,7 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(&pool, &Filter::default().with_fitness(false), 5).await?;
+        let found = search_genotypes(&pool, &Filter::default().with_evaluation(false), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -889,7 +986,7 @@ mod search_genotypes_tests {
             &pool,
             &Filter::default()
                 .with_request_id(rid_1)
-                .with_fitness(true)
+                .with_evaluation(true)
                 .with_order_random(),
             5,
         )
@@ -1005,10 +1102,11 @@ mod tests {
 
 #[cfg(test)]
 mod seeding {
-    use super::record_fitness;
-    use crate::models::{Fitness, FitnessGoal, Genotype, Request, Schedule, Selector};
+    use super::record_evaluation;
+    use crate::models::{Evaluation, FitnessGoal, Genotype, Request, Schedule, Selector};
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
+    use chrono::Utc;
     use uuid::Uuid;
 
     pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
@@ -1041,11 +1139,51 @@ mod seeding {
         new_request(pool, request_2).await.unwrap();
 
         let genotypes = vec![
-            Genotype::new("test", 1, serde_json::json!([1, 2, 3]), rid_1, 1),
-            Genotype::new("test", 1, serde_json::json!([4, 5, 6]), rid_1, 2),
-            Genotype::new("test", 1, serde_json::json!([7, 8, 9]), rid_2, 1),
-            Genotype::new("test", 1, serde_json::json!([10, 11, 12]), rid_2, 1),
-            Genotype::new("test", 1, serde_json::json!([13, 14, 15]), rid_2, 2),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([1, 2, 3]),
+                rid_1,
+                1,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([4, 5, 6]),
+                rid_1,
+                2,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([7, 8, 9]),
+                rid_2,
+                1,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([10, 11, 12]),
+                rid_2,
+                1,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([13, 14, 15]),
+                rid_2,
+                2,
+                None,
+                None,
+            ),
         ];
 
         let gid_1 = genotypes[0].id;
@@ -1056,16 +1194,25 @@ mod seeding {
 
         new_genotypes(pool, genotypes).await.unwrap();
 
-        record_fitness(pool, &Fitness::new(gid_1, 0.11))
-            .await
-            .unwrap();
+        record_evaluation(
+            pool,
+            &Evaluation::new(gid_1, 0.11, Some(Utc::now()), Some(Utc::now())),
+        )
+        .await
+        .unwrap();
         // genotype_id_2 has not fitness
-        record_fitness(pool, &Fitness::new(gid_3, 0.12))
-            .await
-            .unwrap();
-        record_fitness(pool, &Fitness::new(gid_4, 0.42))
-            .await
-            .unwrap();
+        record_evaluation(
+            pool,
+            &Evaluation::new(gid_3, 0.12, Some(Utc::now()), Some(Utc::now())),
+        )
+        .await
+        .unwrap();
+        record_evaluation(
+            pool,
+            &Evaluation::new(gid_4, 0.42, Some(Utc::now()), Some(Utc::now())),
+        )
+        .await
+        .unwrap();
         // genotype_id_5 has not fitness
         (rid_1, rid_2, [gid_1, gid_2, gid_3, gid_4, gid_5])
     }
