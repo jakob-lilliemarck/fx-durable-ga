@@ -123,7 +123,7 @@ async fn test_interrupt_request_end_to_end(
             123,
             FitnessGoal::maximize(0.95)?,
             Schedule::generational(100, 10),
-            Selector::tournament(3, 20)?,
+            Selector::tournament(3),
             serde_json::json!({"Uniform":{"probability":0.5}}),
             None::<()>,
         )

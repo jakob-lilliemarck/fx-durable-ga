@@ -40,13 +40,13 @@ use tracing::instrument;
 pub struct Schedule {
     /// Total evaluation budget before optimization terminates.
     /// Higher values allow more exploration but take longer to complete.
-    pub max_evaluations: u32,
+    pub(crate) max_evaluations: u32,
     /// Maximum number of genotypes that can be active simultaneously.
     /// Larger populations explore more diverse solutions but use more resources.
-    pub population_size: u32,
+    pub(crate) population_size: u32,
     /// Number of offspring created per breeding cycle.
     /// Smaller values provide faster feedback, larger values are more efficient.
-    pub selection_interval: u32,
+    pub(crate) selection_interval: u32,
 }
 
 /// Decision about what action to take based on current population state.
@@ -187,6 +187,14 @@ impl Schedule {
             num_offspring: self.selection_interval as usize,
             next_generation_id: population.current_generation + 1,
         }
+    }
+
+    pub(crate) fn is_generational(&self) -> bool {
+        self.population_size == self.selection_interval
+    }
+
+    pub(crate) fn population_size(&self) -> u32 {
+        self.population_size
     }
 }
 

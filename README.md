@@ -97,7 +97,7 @@ service.new_optimization_request(
     MyParams::HASH,
     FitnessGoal::maximize(0.95)?, // Fitness value to stop at while trying to maximize
     Schedule::generational(100, 10), // 100 generations, 10 per generation.
-    Selector::tournament(3, 25),  // Tournament selection
+    Selector::tournament(3),  // Tournament selection
     Mutagen::new(
         Temperature::constant(0.5)?,
         MutationRate::constant(0.1)?,

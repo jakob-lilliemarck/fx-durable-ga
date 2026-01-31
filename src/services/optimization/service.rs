@@ -238,16 +238,31 @@ impl Service {
                     type_name: request.type_name.clone(),
                 })?;
 
+        let mut selection_filter = genotypes::SearchFilter::default()
+            .with_request_id(request.id)
+            .with_evaluation(true);
+
+        if request.schedule.is_generational() {
+            selection_filter = selection_filter
+                .with_generation_id(next_generation_id - 1)
+                .with_order_random();
+        } else {
+            selection_filter = selection_filter.with_order_completed_at_desc();
+        }
+
+        // Get candidates with fitness. Error out if any candidate is missing fitness
         let candidates_with_fitness = self
             .genotypes
-            .search_genotypes(
-                &genotypes::SearchFilter::default()
-                    .with_request_id(request.id)
-                    .with_evaluation(true)
-                    .with_order_random(),
-                request.selector.sample_size(),
-            )
-            .await?;
+            .search_genotypes(&selection_filter, request.schedule.population_size() as i64)
+            .await?
+            .into_iter()
+            .map(|(genotype, fitness_opt)| match fitness_opt {
+                Some(fitness) => Ok((genotype, fitness)),
+                None => Err(Error::NoFitness {
+                    genotype_id: genotype.id,
+                }),
+            })
+            .collect::<Result<Vec<(Genotype, f64)>, Error>>()?;
 
         let population = self.genotypes.get_population(&request.id).await?;
         let best_fitness = *request

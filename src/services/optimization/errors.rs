@@ -1,3 +1,5 @@
+use uuid::Uuid;
+
 use crate::optimization::termination_listener::TerminationListenerError;
 use crate::services::lock;
 use crate::{
@@ -28,4 +30,7 @@ pub enum Error {
 
     #[error("Termination listener error: {0}")]
     TerminationListener(#[from] TerminationListenerError),
+
+    #[error("No fitness available for genotype: {genotype_id}")]
+    NoFitness { genotype_id: Uuid },
 }

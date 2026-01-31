@@ -139,7 +139,7 @@ mod tests {
             "TestType",
             123,
             FitnessGoal::maximize(0.9).unwrap(),
-            Selector::tournament(5, 20).expect("is valid"),
+            Selector::tournament(5),
             Schedule::generational(100, 10),
             serde_json::json!({"probability":0.5}),
             None::<()>,

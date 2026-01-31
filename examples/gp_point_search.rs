@@ -443,7 +443,7 @@ async fn main() -> Result<()> {
             fnv1a_hash_str_32("gp_point") as i32,
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(150, 25),
-            Selector::tournament(5, 60)?,
+            Selector::tournament(5),
             user_config,
             None::<()>,
         )

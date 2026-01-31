@@ -504,7 +504,7 @@ async fn main() -> Result<()> {
             TYPE_HASH,
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(40, 10),
-            Selector::tournament(5, 45)?,
+            Selector::tournament(5),
             serde_json::json!({
                 "crossover": { "probability": 0.5 },
                 "mutate": { "mutation_rate": 0.35, "temperature": 0.7 },

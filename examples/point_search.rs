@@ -210,7 +210,7 @@ async fn main() -> Result<()> {
             const_fnv1a_hash::fnv1a_hash_str_32("point") as i32,
             FitnessGoal::minimize(0.1)?, // Stop when distance ≤ to this value
             Schedule::generational(200, 30),
-            Selector::tournament(7, 100)?,
+            Selector::tournament(7),
             serde_json::json!({
                 "crossover": { "probability": 0.5 },
                 "mutate": { "mutation_rate": 0.3, "temperature": 0.7 },

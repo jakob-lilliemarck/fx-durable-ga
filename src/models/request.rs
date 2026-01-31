@@ -89,7 +89,7 @@ mod tests {
             "TestType",
             123,
             goal,
-            Selector::tournament(5, 20).expect("is valid"),
+            Selector::tournament(5),
             Schedule::generational(100, 10),
             serde_json::json!({"foo":"bar"}),
             None::<()>,

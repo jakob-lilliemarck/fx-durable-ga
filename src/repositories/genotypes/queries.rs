@@ -89,7 +89,7 @@ mod new_genotypes_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -131,7 +131,7 @@ mod new_genotypes_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -202,7 +202,7 @@ mod check_if_generation_exists_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -236,7 +236,7 @@ mod check_if_generation_exists_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -307,7 +307,7 @@ mod get_genotype_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -392,7 +392,7 @@ mod record_fitness_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -443,7 +443,7 @@ mod record_fitness_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -515,7 +515,7 @@ mod get_population_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -584,7 +584,7 @@ mod get_population_tests {
             "test",
             1,
             FitnessGoal::maximize(0.9)?,
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -705,6 +705,7 @@ impl Display for SortOrder {
 enum SearchResultsOrder {
     Random,
     Fitness(SortOrder),
+    CompletedAt(SortOrder),
 }
 
 impl Display for SearchResultsOrder {
@@ -712,6 +713,7 @@ impl Display for SearchResultsOrder {
         match self {
             Self::Random => write!(f, "random"),
             Self::Fitness(order) => write!(f, "fitness_{}", order),
+            Self::CompletedAt(order) => write!(f, "completed_at_{}", order),
         }
     }
 }
@@ -771,6 +773,18 @@ impl SearchFilter {
         self.order = Some(SearchResultsOrder::Fitness(SortOrder::Desc));
         self
     }
+
+    #[allow(dead_code)]
+    pub fn with_order_completed_at_desc(mut self) -> Self {
+        self.order = Some(SearchResultsOrder::CompletedAt(SortOrder::Desc));
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_order_completed_at_asc(mut self) -> Self {
+        self.order = Some(SearchResultsOrder::CompletedAt(SortOrder::Asc));
+        self
+    }
 }
 
 /// Searches genotypes with optional filtering, ordering, and limits.
@@ -823,6 +837,14 @@ pub(crate) async fn search<'tx, E: PgExecutor<'tx>>(
                     WHEN $4 = 'random' THEN RANDOM()
                     ELSE NULL
                 END NULLS LAST,
+                CASE
+                    WHEN $4 = 'completed_at_desc' THEN e.completed_at
+                    ELSE NULL
+                END DESC NULLS LAST,
+                CASE
+                    WHEN $4 = 'completed_at_asc' THEN e.completed_at
+                    ELSE NULL
+                END ASC NULLS LAST,
                 g.id ASC
             LIMIT $5;
         "#,
@@ -1413,7 +1435,7 @@ mod seeding {
             "test",
             1,
             FitnessGoal::maximize(0.9).unwrap(),
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,
@@ -1423,7 +1445,7 @@ mod seeding {
             "test",
             1,
             FitnessGoal::maximize(0.9).unwrap(),
-            Selector::tournament(10, 20).expect("is valid"),
+            Selector::tournament(10),
             Schedule::generational(100, 10),
             serde_json::json!({ "Uniform": { "probability": 0.5 } }),
             None::<()>,

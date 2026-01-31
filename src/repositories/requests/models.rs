@@ -80,7 +80,7 @@ mod tests {
             "TestType",
             123,
             FitnessGoal::minimize(0.9).unwrap(),
-            Selector::tournament(5, 20).expect("is valid"),
+            Selector::tournament(5),
             Schedule::generational(100, 10),
             json!({"Uniform":{"probability":0.5}}),
             None::<()>,
@@ -106,7 +106,7 @@ mod tests {
         );
         assert_eq!(
             db_request.selector,
-            json!({"method": {"Tournament": {"size": 5}}, "sample_size": 20})
+            json!({"method": {"Tournament": {"size": 5}}})
         );
         assert_eq!(
             db_request.user_defined,
