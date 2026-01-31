@@ -64,6 +64,8 @@ async fn test_interrupt_request_end_to_end(
     pool_opts: PgPoolOptions,
     connect_opts: PgConnectOptions,
 ) -> anyhow::Result<()> {
+    let host_id = Uuid::now_v7();
+
     let pool = pool_opts
         .clone()
         .max_connections(12)
@@ -75,7 +77,7 @@ async fn test_interrupt_request_end_to_end(
 
     // Bootstrap service
     let service = Arc::new(
-        bootstrap(pool.clone())
+        bootstrap(host_id, pool.clone())
             .await?
             .with_genotype_manager(TestManager)
             .build()

@@ -6,9 +6,11 @@ use crate::{
 };
 use std::{collections::HashMap, sync::Arc};
 use tracing::instrument;
+use uuid::Uuid;
 
 /// Builder for creating optimization services with registered genotype managers.
 pub struct ServiceBuilder {
+    pub(super) host_id: Uuid,
     pub(super) locking: lock::Service,
     pub(super) requests: Arc<requests::Repository>,
     pub(super) genotypes: Arc<genotypes::Repository>,
@@ -45,6 +47,7 @@ impl ServiceBuilder {
         let termination_listener = TerminationListener::new(&self.requests);
 
         Ok(Service {
+            host_id: self.host_id,
             locking: self.locking,
             requests: self.requests,
             genotypes: self.genotypes,

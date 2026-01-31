@@ -17,8 +17,8 @@ use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
-use std::time::Duration;
 use std::{env, sync::Arc};
+use std::{str::FromStr, time::Duration};
 use uuid::Uuid;
 
 const PROGRAM_OUTPUTS: usize = 3;
@@ -378,6 +378,9 @@ async fn main() -> Result<()> {
         .with_max_level(tracing::Level::INFO)
         .init();
 
+    let host_id_str = env::var("HOST_ID").expect("HOST_ID must be set");
+    let host_id = Uuid::from_str(&host_id_str).expect("HOST_ID could not be parsed to UUID");
+
     let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
         .max_connections(20)
@@ -395,7 +398,7 @@ async fn main() -> Result<()> {
         },
     };
     let service = Arc::new(
-        bootstrap(pool.clone())
+        bootstrap(host_id, pool.clone())
             .await?
             .with_genotype_manager(manager)
             .build()

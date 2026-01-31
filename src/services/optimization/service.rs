@@ -21,6 +21,7 @@ use uuid::Uuid;
 
 /// Genetic algorithm optimization service that manages the entire optimization lifecycle.
 pub struct Service {
+    pub(super) host_id: Uuid,
     pub(super) locking: lock::Service,
     pub(super) requests: Arc<requests::Repository>,
     pub(super) genotypes: Arc<genotypes::Repository>,
@@ -32,11 +33,13 @@ pub struct Service {
 impl Service {
     #[instrument(level = "debug", skip_all)]
     pub(crate) fn builder(
+        host_id: Uuid,
         locking: lock::Service,
         requests: &Arc<requests::Repository>,
         genotypes: &Arc<genotypes::Repository>,
     ) -> super::ServiceBuilder {
         super::ServiceBuilder {
+            host_id,
             locking,
             requests: requests.clone(),
             genotypes: genotypes.clone(),
@@ -162,13 +165,14 @@ impl Service {
                     type_name: genotype.type_name().to_string(),
                 })?;
 
+        let genome = genotype.genome();
+        let started_at = Utc::now();
+
         // Race evaluation future against termination notifications so we can stop
         // once a request concludes.
-        let genome = genotype.genome();
         let (fitness, started_at, completed_at) = tokio::select! {
             res = manager.evaluate(&genome, &request.user_defined) => {
-                // Evalutation started at this time
-                let started_at = Utc::now();
+
 
                 // Map error and escape early
                 let fitness = res.map_err(Error::EvaluationError)?;
@@ -196,6 +200,7 @@ impl Service {
                             fitness,
                             Some(started_at),
                             Some(completed_at),
+                            Some(self.host_id.clone()),
                         ))
                         .await?;
                     let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
@@ -236,7 +241,7 @@ impl Service {
         let candidates_with_fitness = self
             .genotypes
             .search_genotypes(
-                &genotypes::Filter::default()
+                &genotypes::SearchFilter::default()
                     .with_request_id(request.id)
                     .with_evaluation(true)
                     .with_order_random(),
@@ -456,11 +461,11 @@ impl Service {
         let request = self.requests.get_request(request_id).await?;
 
         let filter = match request.goal {
-            FitnessGoal::Minimize { .. } => genotypes::Filter::default()
+            FitnessGoal::Minimize { .. } => genotypes::SearchFilter::default()
                 .with_request_id(request_id)
                 .with_evaluation(true)
                 .with_order_fitness_asc(),
-            FitnessGoal::Maximize { .. } => genotypes::Filter::default()
+            FitnessGoal::Maximize { .. } => genotypes::SearchFilter::default()
                 .with_request_id(request_id)
                 .with_evaluation(true)
                 .with_order_fitness_desc(),
@@ -478,7 +483,7 @@ impl Service {
     #[instrument(level = "debug", skip(self), fields(type_name))]
     pub async fn search_genotypes(
         &self,
-        filter: &genotypes::Filter,
+        filter: &genotypes::SearchFilter,
         limit: i64,
     ) -> Result<Vec<(Genotype, Option<f64>)>, Error> {
         let genotypes = self.genotypes.search_genotypes(filter, limit).await?;

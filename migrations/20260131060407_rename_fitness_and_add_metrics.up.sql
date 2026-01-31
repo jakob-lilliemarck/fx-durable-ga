@@ -9,7 +9,8 @@ ALTER TABLE fx_durable_ga.fitness
 ALTER TABLE fx_durable_ga.evaluations
     DROP COLUMN evaluated_at,
     ADD COLUMN started_at TIMESTAMPTZ,
-    ADD COLUMN completed_at TIMESTAMPTZ;
+    ADD COLUMN completed_at TIMESTAMPTZ,
+    ADD COLUMN evaluated_by UUID;
 
 -- Adds parent columns (nullable, referencing genotypes)
 ALTER TABLE fx_durable_ga.genotypes

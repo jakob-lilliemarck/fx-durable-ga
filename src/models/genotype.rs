@@ -3,6 +3,7 @@ use serde_json::{Map, Value};
 use sqlx::prelude::FromRow;
 use std::collections::{BTreeMap, hash_map::DefaultHasher};
 use std::hash::{Hash, Hasher};
+use std::time::Duration;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -73,28 +74,36 @@ impl Genotype {
         self.genome.clone()
     }
 
-    pub(crate) fn type_hash(&self) -> i32 {
+    pub fn type_hash(&self) -> i32 {
         self.type_hash
     }
 
-    pub(crate) fn type_name(&self) -> &str {
+    pub fn type_name(&self) -> &str {
         &self.type_name
     }
 
-    pub(crate) fn generated_at(&self) -> DateTime<Utc> {
+    pub fn generated_at(&self) -> DateTime<Utc> {
         self.generated_at
     }
 
-    pub(crate) fn genome_hash(&self) -> i64 {
+    pub fn genome_hash(&self) -> i64 {
         self.genome_hash
     }
 
-    pub(crate) fn request_id(&self) -> Uuid {
+    pub fn request_id(&self) -> Uuid {
         self.request_id
     }
 
-    pub(crate) fn generation_id(&self) -> i32 {
+    pub fn generation_id(&self) -> i32 {
         self.generation_id
+    }
+
+    pub fn parent_a(&self) -> &Option<Uuid> {
+        &self.parent_a
+    }
+
+    pub fn parent_b(&self) -> &Option<Uuid> {
+        &self.parent_b
     }
 }
 
@@ -146,27 +155,82 @@ mod tests {
 /// Represents a fitness evaluation result for a genotype.
 #[derive(Debug)]
 #[cfg_attr(test, derive(PartialEq))]
-pub(crate) struct Evaluation {
+pub struct Evaluation {
     pub(crate) genotype_id: Uuid,
     pub(crate) fitness: f64,
     pub(crate) started_at: Option<DateTime<Utc>>,
     pub(crate) completed_at: Option<DateTime<Utc>>,
+    pub(crate) evaluated_by: Option<Uuid>,
 }
 
 impl Evaluation {
     /// Creates a new fitness record for a genotype.
-    #[instrument(level = "debug", fields(genotype_id = %genotype_id, fitness = fitness, started_at = ?started_at, completed_at = ?completed_at))]
+    #[instrument(level = "debug", fields(
+        genotype_id = %genotype_id,
+        fitness = fitness,
+        started_at = ?started_at,
+        completed_at = ?completed_at,
+        evaluated_by = ?evaluated_by
+    ))]
     pub(crate) fn new(
         genotype_id: Uuid,
         fitness: f64,
         started_at: Option<DateTime<Utc>>,
         completed_at: Option<DateTime<Utc>>,
+        evaluated_by: Option<Uuid>,
     ) -> Self {
         Self {
             genotype_id,
             fitness,
             started_at,
             completed_at,
+            evaluated_by,
         }
+    }
+
+    pub fn genotype_id(&self) -> &Uuid {
+        &self.genotype_id
+    }
+
+    pub fn fitness(&self) -> f64 {
+        self.fitness
+    }
+
+    pub fn started_at(&self) -> &Option<DateTime<Utc>> {
+        &self.started_at
+    }
+
+    pub fn completed_at(&self) -> &Option<DateTime<Utc>> {
+        &self.completed_at
+    }
+}
+
+pub struct TimingsSummary {
+    pub(crate) total: i64,
+    pub(crate) lowest: Duration,
+    pub(crate) highest: Duration,
+    pub(crate) median: Duration,
+    pub(crate) average: Duration,
+}
+
+impl TimingsSummary {
+    pub fn total(&self) -> i64 {
+        self.total
+    }
+
+    pub fn lowest(&self) -> &Duration {
+        &self.lowest
+    }
+
+    pub fn highest(&self) -> &Duration {
+        &self.highest
+    }
+
+    pub fn median(&self) -> &Duration {
+        &self.median
+    }
+
+    pub fn average(&self) -> &Duration {
+        &self.average
     }
 }

@@ -1,6 +1,7 @@
-use crate::models::{Evaluation, Genotype, Population};
+use crate::models::{Evaluation, Genotype, Population, TimingsSummary};
+use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
-use std::fmt::Display;
+use std::{fmt::Display, time::Duration};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -278,7 +279,7 @@ pub(crate) async fn get_genotype<'tx, E: PgExecutor<'tx>>(
         generated_at: row.generated_at,
         type_name: row.type_name,
         type_hash: row.type_hash,
-        genome: serde_json::to_value(row.genome).unwrap_or(serde_json::Value::Null),
+        genome: row.genome,
         genome_hash: row.genome_hash,
         request_id: row.request_id,
         generation_id: row.generation_id,
@@ -355,14 +356,15 @@ pub(crate) async fn record_evaluation<'tx, E: PgExecutor<'tx>>(
     let inserted = sqlx::query_as!(
         Evaluation,
         r#"
-            INSERT INTO fx_durable_ga.evaluations (genotype_id, fitness, started_at, completed_at)
-            VALUES ($1, $2, $3, $4)
-            RETURNING genotype_id, fitness, started_at, completed_at;
+            INSERT INTO fx_durable_ga.evaluations (genotype_id, fitness, started_at, completed_at, evaluated_by)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING genotype_id, fitness, started_at, completed_at, evaluated_by;
         "#,
         evaluation.genotype_id,
         evaluation.fitness,
         evaluation.started_at,
-        evaluation.completed_at
+        evaluation.completed_at,
+        evaluation.evaluated_by
     )
     .fetch_one(tx)
     .await?;
@@ -377,10 +379,13 @@ mod record_fitness_tests {
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
     use chrono::{SubsecRound, Utc};
+    use uuid::Uuid;
 
     #[sqlx::test(migrations = false)]
     async fn it_records_fitness(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
+
+        let host_id = Uuid::now_v7();
 
         // Create a request first
         let request = Request::new(
@@ -408,7 +413,13 @@ mod record_fitness_tests {
         let genotype_id = genotype.id;
         new_genotypes(&pool, vec![genotype]).await?;
 
-        let fitness = Evaluation::new(genotype_id, 0.543, Some(Utc::now()), Some(Utc::now()));
+        let fitness = Evaluation::new(
+            genotype_id,
+            0.543,
+            Some(Utc::now()),
+            Some(Utc::now()),
+            Some(host_id.clone()),
+        );
         let recorded = record_evaluation(&pool, &fitness).await?;
 
         assert_eq!(recorded.genotype_id, fitness.genotype_id);
@@ -455,7 +466,7 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request_id: &Uuid,
 ) -> Result<Population, super::Error> {
-    let state = sqlx::query_as!(
+    let population = sqlx::query_as!(
         Population,
         r#"
             SELECT
@@ -474,7 +485,7 @@ pub(crate) async fn get_population<'tx, E: PgExecutor<'tx>>(
     .await?;
 
     // Handle case where request has no genotypes yet
-    Ok(state.unwrap_or(Population {
+    Ok(population.unwrap_or(Population {
         request_id: *request_id,
         evaluated_genotypes: 0,
         live_genotypes: 0,
@@ -611,6 +622,8 @@ mod get_population_tests {
             ),
         ];
 
+        let host_id = Uuid::now_v7();
+
         // Create genotypes
         let a_id = genotypes[0].id;
         let b_id = genotypes[1].id;
@@ -621,17 +634,35 @@ mod get_population_tests {
         // Record fitness values
         record_evaluation(
             &pool,
-            &Evaluation::new(a_id, 0.50, Some(Utc::now()), Some(Utc::now())),
+            &Evaluation::new(
+                a_id,
+                0.50,
+                Some(Utc::now()),
+                Some(Utc::now()),
+                Some(host_id.clone()),
+            ),
         )
         .await?;
         record_evaluation(
             &pool,
-            &Evaluation::new(b_id, 0.99, Some(Utc::now()), Some(Utc::now())),
+            &Evaluation::new(
+                b_id,
+                0.99,
+                Some(Utc::now()),
+                Some(Utc::now()),
+                Some(host_id.clone()),
+            ),
         )
         .await?;
         record_evaluation(
             &pool,
-            &Evaluation::new(c_id, 0.01, Some(Utc::now()), Some(Utc::now())),
+            &Evaluation::new(
+                c_id,
+                0.01,
+                Some(Utc::now()),
+                Some(Utc::now()),
+                Some(host_id.clone()),
+            ),
         )
         .await?;
 
@@ -671,12 +702,12 @@ impl Display for SortOrder {
 
 /// Query ordering options for genotype searches.
 #[derive(Debug)]
-enum Order {
+enum SearchResultsOrder {
     Random,
     Fitness(SortOrder),
 }
 
-impl Display for Order {
+impl Display for SearchResultsOrder {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Random => write!(f, "random"),
@@ -687,16 +718,16 @@ impl Display for Order {
 
 /// Filter criteria for searching genotypes with various conditions.
 #[derive(Debug)]
-pub struct Filter {
+pub struct SearchFilter {
     request_id: Option<Uuid>,
     generation_id: Option<i32>,
     has_evaluation: Option<bool>,
-    order: Option<Order>,
+    order: Option<SearchResultsOrder>,
 }
 
-impl Default for Filter {
+impl Default for SearchFilter {
     fn default() -> Self {
-        Filter {
+        SearchFilter {
             request_id: None,
             generation_id: None,
             has_evaluation: None,
@@ -705,7 +736,7 @@ impl Default for Filter {
     }
 }
 
-impl Filter {
+impl SearchFilter {
     /// Filters genotypes by request ID.
     pub fn with_request_id(mut self, request_id: Uuid) -> Self {
         self.request_id = Some(request_id);
@@ -725,19 +756,19 @@ impl Filter {
     }
 
     pub fn with_order_random(mut self) -> Self {
-        self.order = Some(Order::Random);
+        self.order = Some(SearchResultsOrder::Random);
         self
     }
 
     #[allow(dead_code)]
     pub fn with_order_fitness_asc(mut self) -> Self {
-        self.order = Some(Order::Fitness(SortOrder::Asc));
+        self.order = Some(SearchResultsOrder::Fitness(SortOrder::Asc));
         self
     }
 
     #[allow(dead_code)]
     pub fn with_order_fitness_desc(mut self) -> Self {
-        self.order = Some(Order::Fitness(SortOrder::Desc));
+        self.order = Some(SearchResultsOrder::Fitness(SortOrder::Desc));
         self
     }
 }
@@ -745,9 +776,9 @@ impl Filter {
 /// Searches genotypes with optional filtering, ordering, and limits.
 /// Returns genotypes paired with their fitness values (if available).
 #[instrument(level = "debug", skip(tx), fields(filter = ?filter))]
-pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
+pub(crate) async fn search<'tx, E: PgExecutor<'tx>>(
     tx: E,
-    filter: &Filter,
+    filter: &SearchFilter,
     limit: i64,
 ) -> Result<Vec<(Genotype, Option<f64>)>, super::Error> {
     let rows = sqlx::query!(
@@ -812,7 +843,7 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
                 generated_at: row.generated_at,
                 type_name: row.type_name,
                 type_hash: row.type_hash,
-                genome: serde_json::to_value(row.genome).unwrap_or(serde_json::Value::Null),
+                genome: serde_json::to_value(row.genome).expect("Expected genome"),
                 genome_hash: row.genome_hash,
                 request_id: row.request_id,
                 generation_id: row.generation_id,
@@ -828,7 +859,7 @@ pub(crate) async fn search_genotypes<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod search_genotypes_tests {
-    use super::{Filter, search_genotypes};
+    use super::{SearchFilter, search};
     use uuid::Uuid;
 
     #[sqlx::test(migrations = false)]
@@ -837,7 +868,7 @@ mod search_genotypes_tests {
 
         let (rid_1, _, gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(&pool, &Filter::default().with_request_id(rid_1), 5).await?;
+        let found = search(&pool, &SearchFilter::default().with_request_id(rid_1), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -855,7 +886,7 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(&pool, &Filter::default().with_generation_id(2), 5).await?;
+        let found = search(&pool, &SearchFilter::default().with_generation_id(2), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -873,7 +904,7 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(&pool, &Filter::default().with_evaluation(true), 5).await?;
+        let found = search(&pool, &SearchFilter::default().with_evaluation(true), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -898,9 +929,9 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(
+        let found = search(
             &pool,
-            &Filter::default()
+            &SearchFilter::default()
                 .with_evaluation(true)
                 .with_order_fitness_desc(),
             5,
@@ -930,9 +961,9 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(
+        let found = search(
             &pool,
-            &Filter::default()
+            &SearchFilter::default()
                 .with_evaluation(true)
                 .with_order_fitness_asc(),
             5,
@@ -962,7 +993,7 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(&pool, &Filter::default().with_evaluation(false), 5).await?;
+        let found = search(&pool, &SearchFilter::default().with_evaluation(false), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -982,9 +1013,9 @@ mod search_genotypes_tests {
 
         let (rid_1, _, gids) = super::seeding::seed(&pool).await;
 
-        let found = search_genotypes(
+        let found = search(
             &pool,
-            &Filter::default()
+            &SearchFilter::default()
                 .with_request_id(rid_1)
                 .with_evaluation(true)
                 .with_order_random(),
@@ -1100,6 +1131,273 @@ mod tests {
     }
 }
 
+/// Get the anscestors of a genotype
+#[instrument(level = "debug", skip(tx), fields(genotype_id = %genotype_id, degree=?degree))]
+pub(crate) async fn get_ancestors<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    genotype_id: &Uuid,
+    degree: i32, // Limits recursive search to a specified degree
+) -> Result<Vec<(Genotype, Evaluation)>, super::Error> {
+    let rows = sqlx::query!(
+        r#"
+            WITH RECURSIVE ancestor_tree AS (
+                SELECT g.*, 0 AS degree
+                FROM fx_durable_ga.genotypes g
+                WHERE g.id = $1
+                UNION
+                SELECT parent.*, child.degree + 1
+                FROM ancestor_tree child
+                JOIN fx_durable_ga.genotypes parent
+                ON parent.id = child.parent_a
+                OR parent.id = child.parent_b
+                WHERE child.degree + 1 <= $2::INTEGER
+            )
+            select *
+            FROM ancestor_tree a
+            JOIN evaluations e ON e.genotype_id = a.id
+            ORDER BY a.degree, a.id ASC;
+        "#,
+        genotype_id,
+        degree,
+    )
+    .fetch_all(tx)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            // These fields are options due to the CTE, however they're not nullable in the schema
+            // expect() is used to get a better error message in case of panic than sqlx would provide
+            let genotype = Genotype {
+                id: row.id.expect("Expected id"),
+                generated_at: row.generated_at.expect("Expected generated_at"),
+                type_name: row.type_name.expect("Expected type_name"),
+                type_hash: row.type_hash.expect("Expected type_hash"),
+                genome: row.genome.expect("Expected genome"),
+                genome_hash: row.genome_hash.expect("Expected genome_hash"),
+                request_id: row.request_id.expect("Expected request_id"),
+                generation_id: row.generation_id.expect("Expected generation_id"),
+                parent_a: row.parent_a,
+                parent_b: row.parent_b,
+            };
+
+            let evaluation = Evaluation {
+                genotype_id: row.genotype_id,
+                fitness: row.fitness,
+                started_at: row.started_at,
+                completed_at: row.completed_at,
+                evaluated_by: row.evaluated_by,
+            };
+
+            (genotype, evaluation)
+        })
+        .collect())
+}
+
+/// Get the descendants of a genotype
+#[instrument(level = "debug", skip(tx), fields(genotype_id = %genotype_id, degree=?degree))]
+pub(crate) async fn get_descendants<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    genotype_id: &Uuid,
+    degree: i32, // Limits recursive search to a specified degree
+) -> Result<Vec<(Genotype, Evaluation)>, super::Error> {
+    let rows = sqlx::query!(
+        r#"
+            WITH RECURSIVE descendant_tree AS (
+                SELECT g.*, 0 AS degree
+                FROM fx_durable_ga.genotypes g
+                WHERE g.id = $1
+                UNION
+                SELECT child.*, parent.degree + 1
+                FROM descendant_tree parent
+                JOIN fx_durable_ga.genotypes child
+                ON child.parent_a = parent.id
+                OR child.parent_b = parent.id
+                WHERE parent.degree + 1 <= $2::INTEGER
+            )
+            SELECT *
+            FROM descendant_tree d
+            JOIN fx_durable_ga.evaluations e ON e.genotype_id = d.id
+            ORDER BY d.degree, d.id ASC
+        "#,
+        genotype_id,
+        degree,
+    )
+    .fetch_all(tx)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            // These fields are options due to the CTE, however they're not nullable in the schema
+            // expect() is used to get a better error message in case of panic than sqlx would provide
+            let genotype = Genotype {
+                id: row.id.expect("Expected id"),
+                generated_at: row.generated_at.expect("Expected generated_at"),
+                type_name: row.type_name.expect("Expected type_name"),
+                type_hash: row.type_hash.expect("Expected type_hash"),
+                genome: row.genome.expect("Expected genome"),
+                genome_hash: row.genome_hash.expect("Expected genome_hash"),
+                request_id: row.request_id.expect("Expected request_id"),
+                generation_id: row.generation_id.expect("Expected generation_id"),
+                parent_a: row.parent_a,
+                parent_b: row.parent_b,
+            };
+
+            let evaluation = Evaluation {
+                genotype_id: row.genotype_id,
+                fitness: row.fitness,
+                started_at: row.started_at,
+                completed_at: row.completed_at,
+                evaluated_by: row.evaluated_by,
+            };
+
+            (genotype, evaluation)
+        })
+        .collect())
+}
+
+#[derive(Debug, Hash)]
+pub struct GetTimingsFilter<'a> {
+    ids: Option<&'a [Uuid]>,
+    type_name: Option<String>,
+    type_hash: Option<i32>,
+    request_id: Option<Uuid>,
+    generation_id: Option<i32>,
+    started_within: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    completed_within: Option<(DateTime<Utc>, DateTime<Utc>)>,
+    evaluated_by: Option<Uuid>,
+}
+
+impl<'a> Default for GetTimingsFilter<'a> {
+    fn default() -> Self {
+        Self {
+            ids: None,
+            type_name: None,
+            type_hash: None,
+            request_id: None,
+            generation_id: None,
+            started_within: None,
+            completed_within: None,
+            evaluated_by: None,
+        }
+    }
+}
+
+impl<'a> GetTimingsFilter<'a> {
+    pub fn with_ids(mut self, ids: &'a [Uuid]) -> Self {
+        self.ids = Some(ids);
+        self
+    }
+
+    pub fn with_type_name(mut self, type_name: String) -> Self {
+        self.type_name = Some(type_name);
+        self
+    }
+
+    pub fn with_type_hash(mut self, type_hash: i32) -> Self {
+        self.type_hash = Some(type_hash);
+        self
+    }
+
+    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
+        self.request_id = Some(request_id);
+        self
+    }
+
+    pub fn with_generation_id(mut self, generation_id: i32) -> Self {
+        self.generation_id = Some(generation_id);
+        self
+    }
+
+    pub fn with_started_within(mut self, since: DateTime<Utc>, until: DateTime<Utc>) -> Self {
+        self.started_within = Some((since, until));
+        self
+    }
+
+    pub fn with_completed_within(mut self, since: DateTime<Utc>, until: DateTime<Utc>) -> Self {
+        self.completed_within = Some((since, until));
+        self
+    }
+
+    pub fn with_evaluated_by(mut self, evaluated_by: Uuid) -> Self {
+        self.evaluated_by = Some(evaluated_by);
+        self
+    }
+}
+
+struct DbTimingsSummary {
+    total: i64,
+    min_duration_micros: i64,
+    max_duration_micros: i64,
+    avg_duration_micros: i64,
+    median_duration_micros: i64,
+}
+
+impl From<DbTimingsSummary> for TimingsSummary {
+    fn from(value: DbTimingsSummary) -> Self {
+        TimingsSummary {
+            total: value.total,
+            lowest: Duration::from_micros(value.min_duration_micros as u64),
+            highest: Duration::from_micros(value.max_duration_micros as u64),
+            median: Duration::from_micros(value.median_duration_micros as u64),
+            average: Duration::from_micros(value.avg_duration_micros as u64),
+        }
+    }
+}
+
+/// Get evaluation timing summary information
+#[instrument(level = "debug", skip(tx), fields())]
+pub(crate) async fn get_timings<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    filter: &GetTimingsFilter<'tx>,
+) -> Result<TimingsSummary, super::Error> {
+    let db_timings = sqlx::query_as!(
+        DbTimingsSummary,
+        r#"
+            SELECT
+                COUNT(*) AS "total!",
+                MIN((EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::bigint) AS "min_duration_micros!",
+                MAX((EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::bigint) AS "max_duration_micros!",
+                AVG((EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::numeric)::bigint AS "avg_duration_micros!",
+                percentile_cont(0.5) WITHIN GROUP (
+                    ORDER BY (EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::numeric
+                )::bigint AS "median_duration_micros!"
+            FROM fx_durable_ga.genotypes g
+            JOIN fx_durable_ga.evaluations e ON e.genotype_id = g.id
+            WHERE
+                ($1::uuid[] IS NULL OR g.id = ANY($1::uuid[]))
+            AND ($2::text IS NULL OR g.type_name = $2::text)
+            AND ($3::integer IS NULL OR g.type_hash = $3::integer)
+            AND ($4::uuid IS NULL OR g.request_id = $4::uuid)
+            AND ($5::integer IS NULL OR g.generation_id = $5::integer)
+            AND (
+                ($6::timestamptz IS NULL OR $7::timestamptz IS NULL)
+                OR e.started_at BETWEEN $6::timestamptz AND $7::timestamptz
+            )
+            AND (
+                ($8::timestamptz IS NULL OR $9::timestamptz IS NULL)
+                OR e.completed_at BETWEEN $8::timestamptz AND $9::timestamptz
+            )
+            AND ($10::uuid IS NULL OR e.evaluated_by = $10::uuid);
+        "#,
+        filter.ids,
+        filter.type_name,
+        filter.type_hash,
+        filter.request_id,
+        filter.generation_id,
+        filter.started_within.map(|(since, ..)|since),
+        filter.started_within.map(|(until, ..)|until),
+        filter.completed_within.map(|(since, ..)|since),
+        filter.started_within.map(|(until, ..)|until),
+        filter.evaluated_by
+    )
+    .fetch_one(tx)
+    .await?;
+
+    Ok(db_timings.into())
+}
+
 #[cfg(test)]
 mod seeding {
     use super::record_evaluation;
@@ -1194,22 +1492,42 @@ mod seeding {
 
         new_genotypes(pool, genotypes).await.unwrap();
 
+        let host_id = Uuid::now_v7();
+
         record_evaluation(
             pool,
-            &Evaluation::new(gid_1, 0.11, Some(Utc::now()), Some(Utc::now())),
+            &Evaluation::new(
+                gid_1,
+                0.11,
+                Some(Utc::now()),
+                Some(Utc::now()),
+                Some(host_id.clone()),
+            ),
         )
         .await
         .unwrap();
         // genotype_id_2 has not fitness
         record_evaluation(
             pool,
-            &Evaluation::new(gid_3, 0.12, Some(Utc::now()), Some(Utc::now())),
+            &Evaluation::new(
+                gid_3,
+                0.12,
+                Some(Utc::now()),
+                Some(Utc::now()),
+                Some(host_id.clone()),
+            ),
         )
         .await
         .unwrap();
         record_evaluation(
             pool,
-            &Evaluation::new(gid_4, 0.42, Some(Utc::now()), Some(Utc::now())),
+            &Evaluation::new(
+                gid_4,
+                0.42,
+                Some(Utc::now()),
+                Some(Utc::now()),
+                Some(host_id.clone()),
+            ),
         )
         .await
         .unwrap();

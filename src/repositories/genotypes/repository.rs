@@ -1,6 +1,7 @@
 use super::{Error, TxRepository};
-use crate::models::{Genotype, Population};
+use crate::models::{Evaluation, Genotype, Population, TimingsSummary};
 use crate::repositories::chainable::{Chain, ToTx, TxType};
+use crate::repositories::genotypes::GetTimingsFilter;
 use futures::{Future, future::BoxFuture};
 use sqlx::{PgPool, PgTransaction};
 use tracing::instrument;
@@ -35,10 +36,10 @@ impl Repository {
     #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
     pub(crate) fn search_genotypes(
         &self,
-        filter: &super::queries::Filter,
+        filter: &super::queries::SearchFilter,
         limit: i64,
     ) -> impl Future<Output = Result<Vec<(Genotype, Option<f64>)>, Error>> {
-        super::queries::search_genotypes(&self.pool, filter, limit)
+        super::queries::search(&self.pool, filter, limit)
     }
 
     /// Finds which genome hashes already exist for deduplication.
@@ -59,6 +60,32 @@ impl Repository {
         generation_id: i32,
     ) -> impl Future<Output = Result<bool, Error>> {
         super::queries::check_if_generation_exists(&self.pool, request_id, generation_id)
+    }
+
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %genotype_id, degree = degree))]
+    pub(crate) fn get_ancestors(
+        &self,
+        genotype_id: &Uuid,
+        degree: i32,
+    ) -> impl Future<Output = Result<Vec<(Genotype, Evaluation)>, Error>> {
+        super::queries::get_ancestors(&self.pool, genotype_id, degree)
+    }
+
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %genotype_id, degree = degree))]
+    pub(crate) fn get_descendants(
+        &self,
+        genotype_id: &Uuid,
+        degree: i32,
+    ) -> impl Future<Output = Result<Vec<(Genotype, Evaluation)>, Error>> {
+        super::queries::get_descendants(&self.pool, genotype_id, degree)
+    }
+
+    #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
+    pub(crate) fn get_timings(
+        &self,
+        filter: &GetTimingsFilter,
+    ) -> impl Future<Output = Result<TimingsSummary, Error>> {
+        super::queries::get_timings(&self.pool, filter)
     }
 }
 
