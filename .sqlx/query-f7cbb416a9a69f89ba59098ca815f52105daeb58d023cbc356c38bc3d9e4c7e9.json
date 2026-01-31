@@ -1,0 +1,86 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                g.id,\n                g.generated_at,\n                g.type_name,\n                g.type_hash,\n                g.genome,\n                g.genome_hash,\n                g.request_id,\n                g.generation_id,\n                g.parent_a,\n                g.parent_b,\n                e.fitness \"fitness!:Option<f64>\"\n            FROM fx_durable_ga.genotypes g\n            LEFT JOIN fx_durable_ga.evaluations e ON g.id = e.genotype_id\n            WHERE (\n                $1::uuid IS NULL OR g.request_id = $1\n            )\n            AND (\n                $2::int IS NULL OR g.generation_id = $2\n            )\n            AND (\n                $3::bool IS NULL OR\n                CASE\n                    WHEN $3 = true THEN e.fitness IS NOT NULL\n                    ELSE e.fitness IS NULL\n                END\n            )\n            ORDER BY\n                CASE\n                    WHEN $4 = 'fitness_desc' THEN e.fitness\n                    ELSE NULL\n                END DESC NULLS LAST,\n                CASE\n                    WHEN $4 = 'fitness_asc' THEN e.fitness\n                    ELSE NULL\n                END ASC NULLS LAST,\n                CASE\n                    WHEN $4 = 'random' THEN RANDOM()\n                    ELSE NULL\n                END NULLS LAST,\n                CASE\n                    WHEN $4 = 'completed_at_desc' THEN e.completed_at\n                    ELSE NULL\n                END DESC NULLS LAST,\n                CASE\n                    WHEN $4 = 'completed_at_asc' THEN e.completed_at\n                    ELSE NULL\n                END ASC NULLS LAST,\n                g.id ASC\n            LIMIT $5;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "generated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "type_hash",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "genome",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "genome_hash",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "request_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "generation_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "parent_a",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "parent_b",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "fitness!:Option<f64>",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4",
+        "Bool",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "f7cbb416a9a69f89ba59098ca815f52105daeb58d023cbc356c38bc3d9e4c7e9"
+}
