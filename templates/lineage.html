@@ -215,7 +215,9 @@
                     });
 
                     const height = x1 - x0 + dx * 2;
-                    const width = container.clientWidth || 800;
+                    const minWidth = container.clientWidth || 800;
+                    const contentWidth = Math.max((root.height + 1) * dy, minWidth);
+                    const width = contentWidth;
                     const margin = { top: 24, right: 32, bottom: 24, left: 48 };
 
                     const svg = d3
@@ -227,7 +229,7 @@
                             width + margin.left + margin.right,
                             height + margin.top + margin.bottom,
                         ])
-                        .attr("width", "100%")
+                        .attr("width", width + margin.left + margin.right)
                         .attr("height", height + margin.top + margin.bottom)
                         .attr("class", "lineage-svg")
                         .attr("xmlns:xlink", "http://www.w3.org/1999/xlink");
