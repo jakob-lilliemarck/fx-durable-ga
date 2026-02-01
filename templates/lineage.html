@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Genotype Lineage</title>
+        <style>
+            body {
+                font-family:
+                    system-ui,
+                    -apple-system,
+                    BlinkMacSystemFont,
+                    sans-serif;
+                margin: 0 auto;
+                max-width: 1200px;
+                padding: 24px;
+                line-height: 1.5;
+            }
+
+            .graph {
+                width: 100%;
+                overflow-x: auto;
+            }
+
+            :root {
+                --primary-hue: 257;
+                --primary-saturation: 80%;
+                --primary-lightness: 34%;
+                --primary: hsl(var(--primary-hue), var(--primary-saturation), var(--primary-lightness));
+                --primary-soft: hsl(var(--primary-hue), var(--primary-saturation), 92%);
+            }
+
+            .controls {
+                display: flex;
+                gap: 16px;
+                align-items: flex-end;
+                margin-bottom: 24px;
+                flex-wrap: wrap;
+            }
+
+            .controls__field {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                font-size: 14px;
+                color: #374151;
+            }
+
+            .controls__input {
+                border: 1px solid #d1d5db;
+                border-radius: 6px;
+                padding: 6px 12px;
+                height: 1.5rem;
+                font-size: 15px;
+                font-family: inherit;
+                transition: border-color 120ms ease, box-shadow 120ms ease;
+            }
+
+            .controls__input:focus {
+                outline: none;
+                border-color: var(--primary);
+                box-shadow: 0 0 0 2px var(--primary-soft);
+            }
+
+            .controls__input--genotype {
+                min-width: 360px;
+            }
+
+            .controls__input--degree {
+                width: 120px;
+            }
+
+            .controls__radios {
+                display: flex;
+                gap: 12px;
+            }
+
+            .controls__radio {
+                position: absolute;
+                opacity: 0;
+                pointer-events: none;
+            }
+            .controls__radio-label {
+                border: 1px solid #9ca3af;
+                border-radius: 6px;
+                min-height: 1.5rem;
+                padding: 6px 16px;
+                cursor: pointer;
+                font-weight: 500;
+                color: #111827;
+                background: white;
+                transition: border-color 120ms ease, background 120ms ease;
+            }
+
+            .controls__radio-label:hover {
+                border-color: #4b5563;
+            }
+
+            .controls__radio:checked + .controls__radio-label {
+                border-color: var(--primary);
+                background: var(--primary-soft);
+                color: var(--primary);
+            }
+
+            .graph svg {
+                display: block;
+                max-width: 100%;
+                height: auto;
+            }
+        </style>
+    </head>
+    <body>
+        <h1>Lineage</h1>
+        <form class="controls" id="lineage-controls" method="get" action="/lineage">
+            <label class="controls__field">
+                Genotype ID
+                <input
+                    class="controls__input controls__input--genotype"
+                    type="text"
+                    name="genotype_id"
+                    value="{% match genotype_id %}{% when Some with (id) %}{{ id }}{% when None %}{% endmatch %}"
+                    placeholder="00000000-0000-0000-0000-000000000000"
+                />
+            </label>
+            <label class="controls__field">
+                Degree
+                <input
+                    class="controls__input controls__input--degree"
+                    type="number"
+                    name="degree"
+                    min="1"
+                    value="{{ degree }}"
+                />
+            </label>
+                <div class="controls__radios">
+                    <input
+                        class="controls__radio"
+                        type="radio"
+                        id="direction-ancestors"
+                        name="direction"
+                        value="ancestors"
+                        {% if direction == "ancestors" %}checked{% endif %}
+                    />
+                    <label class="controls__radio-label" for="direction-ancestors">
+                        Ancestors
+                    </label>
+                    <input
+                        class="controls__radio"
+                        type="radio"
+                        id="direction-descendants"
+                        name="direction"
+                        value="descendants"
+                        {% if direction == "descendants" %}checked{% endif %}
+                    />
+                    <label class="controls__radio-label" for="direction-descendants">
+                        Descendants
+                    </label>
+                </div>
+        </form>
+        {% if genotype_id.is_none() %}
+        <p>No genotype selected.</p>
+        {% endif %} {% match lineage_json %} {% when Some with (json) %}
+        <section>
+            <div class="graph graph--client" id="client-graph"></div>
+            <script type="application/json" id="lineage-data">
+                {{ json|safe }}
+            </script>
+            <script type="module">
+                import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+                const form = document.getElementById("lineage-controls");
+                if (form) {
+                    const updateUrl = () => {
+                        const data = new FormData(form);
+                        const params = new URLSearchParams();
+                        const genotypeId = (data.get("genotype_id") ?? "").toString().trim();
+                        if (genotypeId.length > 0) {
+                            params.set("genotype_id", genotypeId);
+                        }
+                        const degree = data.get("degree");
+                        if (degree) {
+                            params.set("degree", degree.toString());
+                        }
+                        const direction = data.get("direction");
+                        if (direction) {
+                            params.set("direction", direction.toString());
+                        }
+                        const query = params.toString();
+                        const next = query.length > 0 ? `?${query}` : "";
+                        const target = `${form.action}${next}`;
+                        if (target !== window.location.href) {
+                            window.location.assign(target);
+                        }
+                    };
+
+                    form.addEventListener("change", updateUrl);
+                    form.addEventListener("blur", updateUrl, true);
+                }
+                const container = document.getElementById("client-graph");
+                const dataEl = document.getElementById("lineage-data");
+                if (container && dataEl?.textContent) {
+                    const lineage = JSON.parse(dataEl.textContent);
+                    const dx = 24;
+                    const dy = 140;
+                    const formatFitness = (value) =>
+                        Number(value ?? 0).toFixed(3);
+
+                    const root = d3.hierarchy(lineage);
+                    const tree = d3.tree().nodeSize([dx, dy]);
+                    tree(root);
+
+                    let x0 = Infinity;
+                    let x1 = -Infinity;
+                    root.each((d) => {
+                        if (d.x > x1) x1 = d.x;
+                        if (d.x < x0) x0 = d.x;
+                    });
+
+                    const height = x1 - x0 + dx * 2;
+                    const width = container.clientWidth || 800;
+                    const margin = { top: 24, right: 32, bottom: 24, left: 48 };
+
+                    const svg = d3
+                        .select(container)
+                        .append("svg")
+                        .attr("viewBox", [
+                            0,
+                            0,
+                            width + margin.left + margin.right,
+                            height + margin.top + margin.bottom,
+                        ])
+                        .attr("width", "100%")
+                        .attr("height", height + margin.top + margin.bottom)
+                        .attr("class", "lineage-svg")
+                        .attr("xmlns:xlink", "http://www.w3.org/1999/xlink");
+
+                    const g = svg
+                        .append("g")
+                        .attr(
+                            "transform",
+                            `translate(${margin.left},${margin.top - x0 + dx})`,
+                        );
+
+                    const link = g
+                        .append("g")
+                        .attr("fill", "none")
+                        .attr("stroke", "#9CA3AF")
+                        .attr("stroke-width", 1.5)
+                        .selectAll("path")
+                        .data(root.links())
+                        .join("path")
+                        .attr(
+                            "d",
+                            d3
+                                .linkHorizontal()
+                                .x((d) => d.y)
+                                .y((d) => d.x),
+                        );
+
+                    const node = g
+                        .append("g")
+                        .selectAll("a")
+                        .data(root.descendants())
+                        .join("a")
+                        .attr("xlink:href", (d) => d.data.href)
+                        .attr("target", "_self") // or "_blank"
+                        .append("g") // continue building the node inside the anchor
+                        .attr("transform", (d) => `translate(${d.y},${d.x})`)
+                        .on("mouseenter", (event, d) => {
+                            console.log("client hover", d.data);
+                        });
+
+                    node.append("circle").attr("r", 5).attr("fill", "#111827");
+
+                    node.append("text")
+                        .attr("dy", "0.32em")
+                        .attr("x", (d) => (d.children ? -8 : 8))
+                        .attr("text-anchor", (d) =>
+                            d.children ? "end" : "start",
+                        )
+                        .attr("font-family", "system-ui, sans-serif")
+                        .attr("font-size", 12)
+                        .attr("stroke", "none")
+                        .attr("fill", "#111827")
+                        .text(
+                            (d) => d.data.name ?? formatFitness(d.data.fitness),
+                        );
+                }
+            </script>
+        </section>
+        {% when None %} {% endmatch %}
+    </body>
+</html>

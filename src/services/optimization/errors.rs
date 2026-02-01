@@ -1,11 +1,10 @@
-use uuid::Uuid;
-
-use crate::optimization::termination_listener::TerminationListenerError;
 use crate::services::lock;
+use crate::services::optimization::termination_listener::TerminationListenerError;
 use crate::{
     models::SelectionError,
     repositories::{genotypes, requests},
 };
+use uuid::Uuid;
 
 /// Errors that can occur during optimization operations.
 #[derive(Debug, thiserror::Error)]

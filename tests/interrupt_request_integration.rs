@@ -1,7 +1,8 @@
 use fx_durable_ga::{
-    bootstrap, migrations,
+    bootstrap::bootstrap,
+    migrations,
     models::{FitnessGoal, GenotypeManager, Schedule, Selector},
-    register_event_handlers, register_job_handlers,
+    services::optimization::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_jobs::Queries;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -80,8 +81,7 @@ async fn test_interrupt_request_end_to_end(
         bootstrap(host_id, pool.clone())
             .await?
             .with_genotype_manager(TestManager)
-            .build()
-            .await?,
+            .build(),
     );
 
     // Register event handlers

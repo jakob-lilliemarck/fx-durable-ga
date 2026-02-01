@@ -14,9 +14,9 @@
 
 use anyhow::Result;
 use fx_durable_ga::{
-    bootstrap,
+    bootstrap::bootstrap,
     models::{FitnessGoal, GenotypeManager, Schedule, Selector},
-    register_event_handlers, register_job_handlers,
+    services::optimization::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
 use fx_mq_jobs::Queries;
@@ -170,8 +170,7 @@ async fn main() -> Result<()> {
         bootstrap(host_id, pool.clone())
             .await?
             .with_genotype_manager(manager)
-            .build()
-            .await?,
+            .build(),
     );
 
     // setup event handling and spawn an event handling agent

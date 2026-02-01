@@ -153,7 +153,7 @@ mod tests {
 }
 
 /// Represents a fitness evaluation result for a genotype.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct Evaluation {
     pub(crate) genotype_id: Uuid,

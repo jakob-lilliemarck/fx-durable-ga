@@ -12,6 +12,13 @@ pub struct Service {
 }
 
 impl Service {
+    #[instrument(level = "debug", skip(genotypes))]
+    pub(crate) fn new(genotypes: &Arc<genotypes::Repository>) -> Self {
+        Self {
+            genotypes: genotypes.clone(),
+        }
+    }
+
     #[instrument(level = "debug", skip(self), fields(genotype_id = %genotype_id, degree=degree))]
     pub async fn get_ancestors(
         &self,

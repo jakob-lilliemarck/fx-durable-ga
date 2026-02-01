@@ -8,10 +8,10 @@ use crate::models::{
     Breeder, Evaluation, FitnessGoal, Genotype, Request, RequestConclusion, ScheduleDecision,
     Selector,
 };
-use crate::optimization::termination_listener::TerminationListener;
 use crate::repositories::chainable::{Chain, FromTx, ToTx};
 use crate::repositories::{genotypes, requests};
 use crate::services::lock;
+use crate::services::optimization::termination_listener::TerminationListener;
 use chrono::Utc;
 use fx_event_bus::Publisher;
 use std::collections::{HashMap, HashSet};
@@ -22,7 +22,7 @@ use uuid::Uuid;
 /// Genetic algorithm optimization service that manages the entire optimization lifecycle.
 pub struct Service {
     pub(super) host_id: Uuid,
-    pub(super) locking: lock::Service,
+    pub(super) locking: Arc<lock::Service>,
     pub(super) requests: Arc<requests::Repository>,
     pub(super) genotypes: Arc<genotypes::Repository>,
     pub(super) genotype_managers: HashMap<i32, Box<dyn GenotypeManager + 'static>>,
@@ -34,13 +34,13 @@ impl Service {
     #[instrument(level = "debug", skip_all)]
     pub(crate) fn builder(
         host_id: Uuid,
-        locking: lock::Service,
+        locking: &Arc<lock::Service>,
         requests: &Arc<requests::Repository>,
         genotypes: &Arc<genotypes::Repository>,
     ) -> super::ServiceBuilder {
         super::ServiceBuilder {
             host_id,
-            locking,
+            locking: locking.clone(),
             requests: requests.clone(),
             genotypes: genotypes.clone(),
             genotype_managers: HashMap::new(),

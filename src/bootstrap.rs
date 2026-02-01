@@ -1,9 +1,9 @@
+use crate::infrastructure::typesafe_builder::{Set, Unset};
+use crate::repositories::{genotypes, requests};
+use crate::services::{self, genotype_explorer, lock, optimization};
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
-
-use crate::repositories::{genotypes, requests};
-use crate::services::{lock, optimization};
 
 /// Bootstraps the optimization service with all required dependencies.
 ///
@@ -17,9 +17,68 @@ pub async fn bootstrap(
 
     let requests = Arc::new(requests::Repository::new(pool.clone()));
 
-    let locking = lock::Service::new(pool.clone());
+    let lock = Arc::new(lock::Service::new(pool.clone()));
 
-    let builder = optimization::Service::builder(host_id, locking, &requests, &genotypes);
+    let builder = optimization::Service::builder(host_id, &lock, &requests, &genotypes);
 
     Ok(builder)
+}
+
+pub struct ServiceBuilder<T1> {
+    _pool: T1,
+    genotypes: Option<Arc<genotypes::Repository>>,
+    requests: Option<Arc<requests::Repository>>,
+    lock: Option<Arc<lock::Service>>,
+}
+
+impl Default for ServiceBuilder<Unset<PgPool>> {
+    fn default() -> Self {
+        Self {
+            _pool: Unset::new(),
+            genotypes: None,
+            requests: None,
+            lock: None,
+        }
+    }
+}
+
+impl ServiceBuilder<Unset<PgPool>> {
+    pub fn with_pool(self, pool: PgPool) -> ServiceBuilder<Set<PgPool>> {
+        // Construct everything that depends on pool
+        let genotypes = Arc::new(genotypes::Repository::new(pool.clone()));
+        let requests = Arc::new(requests::Repository::new(pool.clone()));
+        let lock = Arc::new(lock::Service::new(pool.clone()));
+
+        ServiceBuilder {
+            _pool: Set::new(pool),
+            genotypes: Some(genotypes),
+            requests: Some(requests),
+            lock: Some(lock),
+        }
+    }
+}
+
+impl ServiceBuilder<Set<PgPool>> {
+    pub fn build_explorer_svc(&self) -> services::genotype_explorer::Service {
+        match self {
+            ServiceBuilder {
+                genotypes: Some(genotypes),
+                ..
+            } => genotype_explorer::Service::new(&genotypes),
+            _ => panic!("Missing dependency while constructing explorer service"),
+        }
+    }
+
+    pub fn build_optimization_svc(&self, host_id: &Uuid) -> services::optimization::Service {
+        match self {
+            ServiceBuilder {
+                genotypes: Some(genotypes),
+                requests: Some(requests),
+                lock: Some(lock),
+                ..
+            } => optimization::Service::builder(host_id.clone(), &lock, &requests, &genotypes)
+                .build(),
+            _ => panic!("Missing dependency while constructing optimization service"),
+        }
+    }
 }

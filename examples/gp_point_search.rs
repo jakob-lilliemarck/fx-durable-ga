@@ -8,9 +8,9 @@
 use anyhow::Result;
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use fx_durable_ga::{
-    bootstrap,
+    bootstrap::bootstrap,
     models::{FitnessGoal, GenotypeManager, Schedule, Selector},
-    register_event_handlers, register_job_handlers,
+    services::optimization::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_jobs::{FX_MQ_JOBS_SCHEMA_NAME, Queries};
 use rand::{Rng, RngCore};
@@ -401,8 +401,7 @@ async fn main() -> Result<()> {
         bootstrap(host_id, pool.clone())
             .await?
             .with_genotype_manager(manager)
-            .build()
-            .await?,
+            .build(),
     );
 
     let mut registry = fx_event_bus::EventHandlerRegistry::new();

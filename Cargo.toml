@@ -27,6 +27,8 @@ sqlx = { version = "0.8", default-features = false, features = [
     "uuid",
 ] }
 tracing = "0.1.41"
+axum = "0.8.8"
+askama = "0.15.4"
 rand = "0.9.2"
 const-fnv1a-hash = "1.1"
 futures = "0.3.31"
@@ -63,3 +65,7 @@ path = "examples/gp_point_search.rs"
 [[bin]]
 name = "migrate"
 path = "src/bin/migrate.rs"
+
+[[bin]]
+name = "lineage"
+path = "src/bin/lineage/main.rs"

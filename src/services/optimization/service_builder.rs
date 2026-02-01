@@ -1,7 +1,7 @@
 use crate::{
     models::GenotypeManager,
-    optimization::termination_listener::TerminationListener,
-    repositories::{self, genotypes, requests},
+    repositories::{genotypes, requests},
+    services::optimization::termination_listener::TerminationListener,
     services::{lock, optimization::Service},
 };
 use std::{collections::HashMap, sync::Arc};
@@ -11,17 +11,11 @@ use uuid::Uuid;
 /// Builder for creating optimization services with registered genotype managers.
 pub struct ServiceBuilder {
     pub(super) host_id: Uuid,
-    pub(super) locking: lock::Service,
+    pub(super) locking: Arc<lock::Service>,
     pub(super) requests: Arc<requests::Repository>,
     pub(super) genotypes: Arc<genotypes::Repository>,
     pub(super) genotype_managers: HashMap<i32, Box<dyn GenotypeManager + 'static>>,
     pub(super) max_deduplication_attempts: i32,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ServiceBuilderError {
-    #[error("Listener error: {0}")]
-    Requests(#[from] repositories::requests::Error),
 }
 
 impl ServiceBuilder {
@@ -43,10 +37,10 @@ impl ServiceBuilder {
 
     /// Builds the optimization service with all registered managers.
     #[instrument(level = "debug", skip(self), fields(managers_count = self.genotype_managers.len()))]
-    pub async fn build(self) -> Result<Service, ServiceBuilderError> {
+    pub fn build(self) -> Service {
         let termination_listener = TerminationListener::new(&self.requests);
 
-        Ok(Service {
+        Service {
             host_id: self.host_id,
             locking: self.locking,
             requests: self.requests,
@@ -54,6 +48,6 @@ impl ServiceBuilder {
             genotype_managers: self.genotype_managers,
             max_deduplication_attempts: self.max_deduplication_attempts,
             termination_listener,
-        })
+        }
     }
 }
