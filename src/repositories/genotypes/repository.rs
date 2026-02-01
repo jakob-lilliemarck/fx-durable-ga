@@ -84,8 +84,9 @@ impl Repository {
     pub(crate) fn get_timings(
         &self,
         filter: &GetTimingsFilter,
+        percentiles: &[f64],
     ) -> impl Future<Output = Result<TimingsSummary, Error>> {
-        super::queries::get_timings(&self.pool, filter)
+        super::queries::get_timings(&self.pool, filter, percentiles)
     }
 }
 

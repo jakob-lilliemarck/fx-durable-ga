@@ -62,8 +62,9 @@ impl Service {
     pub async fn get_timing_summary<'a>(
         &self,
         filter: &genotypes::GetTimingsFilter<'a>,
+        percentiles: &[f64],
     ) -> Result<TimingsSummary, Error> {
-        let timings = self.genotypes.get_timings(filter).await?;
+        let timings = self.genotypes.get_timings(filter, percentiles).await?;
         Ok(timings)
     }
 }

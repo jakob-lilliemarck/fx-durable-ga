@@ -206,31 +206,31 @@ impl Evaluation {
 }
 
 pub struct TimingsSummary {
-    pub(crate) total: i64,
-    pub(crate) lowest: Duration,
-    pub(crate) highest: Duration,
-    pub(crate) median: Duration,
-    pub(crate) average: Duration,
+    pub(crate) records: i64,
+    pub(crate) min: Duration,
+    pub(crate) max: Duration,
+    pub(crate) avg: Duration,
+    pub(crate) percentiles: Vec<Duration>,
 }
 
 impl TimingsSummary {
     pub fn total(&self) -> i64 {
-        self.total
+        self.records
     }
 
     pub fn lowest(&self) -> &Duration {
-        &self.lowest
+        &self.min
     }
 
     pub fn highest(&self) -> &Duration {
-        &self.highest
-    }
-
-    pub fn median(&self) -> &Duration {
-        &self.median
+        &self.max
     }
 
     pub fn average(&self) -> &Duration {
-        &self.average
+        &self.avg
+    }
+
+    pub fn percentiles(&self) -> &[Duration] {
+        &self.percentiles
     }
 }

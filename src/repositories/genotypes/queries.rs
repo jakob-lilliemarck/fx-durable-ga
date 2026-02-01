@@ -72,6 +72,28 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
 
     Ok(genotypes)
 }
+#[cfg(test)]
+mod search_filter_ordering_tests {
+    use super::{SearchFilter, SearchResultsOrder, SortOrder};
+
+    #[test]
+    fn it_sets_completed_at_desc_order() {
+        let filter = SearchFilter::default().with_order_completed_at_desc();
+        assert!(matches!(
+            filter.order,
+            Some(SearchResultsOrder::CompletedAt(SortOrder::Desc))
+        ));
+    }
+
+    #[test]
+    fn it_sets_completed_at_asc_order() {
+        let filter = SearchFilter::default().with_order_completed_at_asc();
+        assert!(matches!(
+            filter.order,
+            Some(SearchResultsOrder::CompletedAt(SortOrder::Asc))
+        ));
+    }
+}
 
 #[cfg(test)]
 mod new_genotypes_tests {
@@ -1216,6 +1238,33 @@ pub(crate) async fn get_ancestors<'tx, E: PgExecutor<'tx>>(
         .collect())
 }
 
+#[cfg(test)]
+mod get_ancestors_tests {
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_each_ancestor(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        // FIXME
+        // Add a case testing that we get each ancestor when degree >= degrees in the tree
+        unimplemented!()
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_is_bounded_by_degree(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        // FIXME
+        // Add a case testing that we get ancestor up to degree, when degree < degrees in the tree
+        unimplemented!()
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_no_ancestors_when_there_are_none(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        // FIXME
+        // Add a case testing that we don't get any ancestor if there are none
+        unimplemented!()
+    }
+}
+
 /// Get the descendants of a genotype
 #[instrument(level = "debug", skip(tx), fields(genotype_id = %genotype_id, degree=?degree))]
 pub(crate) async fn get_descendants<'tx, E: PgExecutor<'tx>>(
@@ -1277,6 +1326,35 @@ pub(crate) async fn get_descendants<'tx, E: PgExecutor<'tx>>(
             (genotype, evaluation)
         })
         .collect())
+}
+
+#[cfg(test)]
+mod get_descendants_tests {
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_each_descendants(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        // FIXME
+        // Add a case testing that we get each descendant when degree >= degrees in the tree
+        unimplemented!()
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_is_bounded_by_degree(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        // FIXME
+        // Add a case testing that we get descendant down to degree, when degree < degrees in the tree
+        unimplemented!()
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_no_descendant_when_there_are_none(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        // FIXME
+        // Add a case testing that we don't get any descendant if there are none
+        unimplemented!()
+    }
 }
 
 #[derive(Debug, Hash)]
@@ -1353,17 +1431,22 @@ struct DbTimingsSummary {
     min_duration_micros: i64,
     max_duration_micros: i64,
     avg_duration_micros: i64,
-    median_duration_micros: i64,
+    percentile_durations: Option<Vec<i64>>,
 }
 
 impl From<DbTimingsSummary> for TimingsSummary {
     fn from(value: DbTimingsSummary) -> Self {
         TimingsSummary {
-            total: value.total,
-            lowest: Duration::from_micros(value.min_duration_micros as u64),
-            highest: Duration::from_micros(value.max_duration_micros as u64),
-            median: Duration::from_micros(value.median_duration_micros as u64),
-            average: Duration::from_micros(value.avg_duration_micros as u64),
+            records: value.total,
+            min: Duration::from_micros(value.min_duration_micros as u64),
+            max: Duration::from_micros(value.max_duration_micros as u64),
+            avg: Duration::from_micros(value.avg_duration_micros as u64),
+            percentiles: value.percentile_durations.map_or(vec![], |values| {
+                values
+                    .iter()
+                    .map(|micros| Duration::from_micros(*micros as u64))
+                    .collect()
+            }),
         }
     }
 }
@@ -1373,51 +1456,92 @@ impl From<DbTimingsSummary> for TimingsSummary {
 pub(crate) async fn get_timings<'tx, E: PgExecutor<'tx>>(
     tx: E,
     filter: &GetTimingsFilter<'tx>,
+    percentiles: &[f64],
 ) -> Result<TimingsSummary, super::Error> {
     let db_timings = sqlx::query_as!(
         DbTimingsSummary,
         r#"
+        SELECT
+            COUNT(*) AS "total!",
+            MIN(duration_micros) AS "min_duration_micros!",
+            MAX(duration_micros) AS "max_duration_micros!",
+            AVG(duration_micros)::bigint AS "avg_duration_micros!",
+            ARRAY(
+                SELECT ROUND(val)::bigint
+                FROM UNNEST(
+                    percentile_cont($11::double PRECISION[])
+                    WITHIN GROUP (ORDER BY duration_micros)
+                ) AS val
+            ) AS "percentile_durations"
+        FROM
+            (
             SELECT
-                COUNT(*) AS "total!",
-                MIN((EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::bigint) AS "min_duration_micros!",
-                MAX((EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::bigint) AS "max_duration_micros!",
-                AVG((EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::numeric)::bigint AS "avg_duration_micros!",
-                percentile_cont(0.5) WITHIN GROUP (
-                    ORDER BY (EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::numeric
-                )::bigint AS "median_duration_micros!"
-            FROM fx_durable_ga.genotypes g
-            JOIN fx_durable_ga.evaluations e ON e.genotype_id = g.id
+                e.genotype_id,
+                (EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::bigint AS duration_micros
+            FROM
+                fx_durable_ga.genotypes g
+            JOIN fx_durable_ga.evaluations e ON
+                e.genotype_id = g.id
             WHERE
-                ($1::uuid[] IS NULL OR g.id = ANY($1::uuid[]))
-            AND ($2::text IS NULL OR g.type_name = $2::text)
-            AND ($3::integer IS NULL OR g.type_hash = $3::integer)
-            AND ($4::uuid IS NULL OR g.request_id = $4::uuid)
-            AND ($5::integer IS NULL OR g.generation_id = $5::integer)
-            AND (
-                ($6::timestamptz IS NULL OR $7::timestamptz IS NULL)
+                ($1::uuid[] IS NULL
+                    OR g.id = ANY($1::uuid[]))
+                AND ($2::text IS NULL
+                    OR g.type_name = $2::text)
+                AND ($3::integer IS NULL
+                    OR g.type_hash = $3::integer)
+                AND ($4::uuid IS NULL
+                    OR g.request_id = $4::uuid)
+                AND ($5::integer IS NULL
+                    OR g.generation_id = $5::integer)
+                AND (
+                    ($6::timestamptz IS NULL
+                    OR $7::timestamptz IS NULL)
                 OR e.started_at BETWEEN $6::timestamptz AND $7::timestamptz
-            )
-            AND (
-                ($8::timestamptz IS NULL OR $9::timestamptz IS NULL)
+              )
+                AND (
+                    ($8::timestamptz IS NULL
+                    OR $9::timestamptz IS NULL)
                 OR e.completed_at BETWEEN $8::timestamptz AND $9::timestamptz
-            )
-            AND ($10::uuid IS NULL OR e.evaluated_by = $10::uuid);
-        "#,
+              )
+                AND ($10::uuid IS NULL
+                    OR e.evaluated_by = $10::uuid)
+        ) timed;
+		"#,
         filter.ids,
         filter.type_name,
         filter.type_hash,
         filter.request_id,
         filter.generation_id,
-        filter.started_within.map(|(since, ..)|since),
-        filter.started_within.map(|(until, ..)|until),
-        filter.completed_within.map(|(since, ..)|since),
-        filter.started_within.map(|(until, ..)|until),
-        filter.evaluated_by
+        filter.started_within.map(|(since, ..)| since),
+        filter.started_within.map(|(until, ..)| until),
+        filter.completed_within.map(|(since, ..)| since),
+        filter.started_within.map(|(until, ..)| until),
+        filter.evaluated_by,
+        percentiles
     )
     .fetch_one(tx)
     .await?;
 
     Ok(db_timings.into())
+}
+
+#[cfg(test)]
+mod get_timings_tests {
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_timing_data_with_percentiles(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        // FIXME
+        // When we pass percentiles we should get the number of durations back
+        unimplemented!()
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_timing_data_without_percentiles(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        // FIXME
+        // When no percentiles are passed we should get empty vec
+        unimplemented!()
+    }
 }
 
 #[cfg(test)]

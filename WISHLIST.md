@@ -1,7 +1,4 @@
-[x] Example using GP (genetic programming)
-[ ] Re-think `Selector` struct, should it be user defined?
-[ ] Provide GenotypeManager methods with some optimization metadata, like generation number
-[ ] ability to stop/abour/pause running optimization requests
+[ ] ability to stop/abort/pause running optimization requests
 [ ] expose repository methods to check on running optimizations
   [ ] best fitness
   [ ] live genotypes
