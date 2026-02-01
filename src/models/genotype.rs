@@ -214,19 +214,19 @@ pub struct TimingsSummary {
 }
 
 impl TimingsSummary {
-    pub fn total(&self) -> i64 {
+    pub fn records(&self) -> i64 {
         self.records
     }
 
-    pub fn lowest(&self) -> &Duration {
+    pub fn min(&self) -> &Duration {
         &self.min
     }
 
-    pub fn highest(&self) -> &Duration {
+    pub fn max(&self) -> &Duration {
         &self.max
     }
 
-    pub fn average(&self) -> &Duration {
+    pub fn avg(&self) -> &Duration {
         &self.avg
     }
 

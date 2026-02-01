@@ -1240,28 +1240,54 @@ pub(crate) async fn get_ancestors<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod get_ancestors_tests {
+    use super::get_ancestors;
+    use uuid::Uuid;
     #[sqlx::test(migrations = false)]
     async fn it_returns_each_ancestor(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        // FIXME
-        // Add a case testing that we get each ancestor when degree >= degrees in the tree
-        unimplemented!()
+
+        let lineage = super::seeding::seed_lineage(&pool).await;
+        // indexes: [0] root, [1] child, [2] grandchild
+        let ancestors = get_ancestors(&pool, &lineage[2], 5).await?;
+        let ids: Vec<Uuid> = ancestors
+            .iter()
+            .map(|(genotype, _)| genotype.id())
+            .collect();
+
+        assert_eq!(ids, vec![lineage[2], lineage[1], lineage[0]]);
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]
     async fn it_is_bounded_by_degree(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        // FIXME
-        // Add a case testing that we get ancestor up to degree, when degree < degrees in the tree
-        unimplemented!()
+
+        let lineage = super::seeding::seed_lineage(&pool).await;
+        // indexes: [0] root, [1] child, [2] grandchild
+        let ancestors = get_ancestors(&pool, &lineage[2], 1).await?;
+        let ids: Vec<Uuid> = ancestors
+            .iter()
+            .map(|(genotype, _)| genotype.id())
+            .collect();
+
+        assert_eq!(ids, vec![lineage[2], lineage[1]]);
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]
     async fn it_returns_no_ancestors_when_there_are_none(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        // FIXME
-        // Add a case testing that we don't get any ancestor if there are none
-        unimplemented!()
+
+        let lineage = super::seeding::seed_lineage(&pool).await;
+        // indexes: [0] root, [1] child, [2] grandchild
+        let ancestors = get_ancestors(&pool, &lineage[0], 5).await?;
+        let ids: Vec<Uuid> = ancestors
+            .iter()
+            .map(|(genotype, _)| genotype.id())
+            .collect();
+
+        assert_eq!(ids, vec![lineage[0]]);
+        Ok(())
     }
 }
 
@@ -1330,20 +1356,38 @@ pub(crate) async fn get_descendants<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod get_descendants_tests {
+    use super::get_descendants;
+    use uuid::Uuid;
     #[sqlx::test(migrations = false)]
     async fn it_returns_each_descendants(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        // FIXME
-        // Add a case testing that we get each descendant when degree >= degrees in the tree
-        unimplemented!()
+
+        let lineage = super::seeding::seed_lineage(&pool).await;
+        // indexes: [0] root, [1] child, [2] grandchild
+        let descendants = get_descendants(&pool, &lineage[0], 5).await?;
+        let ids: Vec<Uuid> = descendants
+            .iter()
+            .map(|(genotype, _)| genotype.id())
+            .collect();
+
+        assert_eq!(ids, vec![lineage[0], lineage[1], lineage[2]]);
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]
     async fn it_is_bounded_by_degree(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        // FIXME
-        // Add a case testing that we get descendant down to degree, when degree < degrees in the tree
-        unimplemented!()
+
+        let lineage = super::seeding::seed_lineage(&pool).await;
+        // indexes: [0] root, [1] child, [2] grandchild
+        let descendants = get_descendants(&pool, &lineage[0], 1).await?;
+        let ids: Vec<Uuid> = descendants
+            .iter()
+            .map(|(genotype, _)| genotype.id())
+            .collect();
+
+        assert_eq!(ids, vec![lineage[0], lineage[1]]);
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]
@@ -1351,9 +1395,17 @@ mod get_descendants_tests {
         pool: sqlx::PgPool,
     ) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        // FIXME
-        // Add a case testing that we don't get any descendant if there are none
-        unimplemented!()
+
+        let lineage = super::seeding::seed_lineage(&pool).await;
+        // indexes: [0] root, [1] child, [2] grandchild
+        let descendants = get_descendants(&pool, &lineage[2], 5).await?;
+        let ids: Vec<Uuid> = descendants
+            .iter()
+            .map(|(genotype, _)| genotype.id())
+            .collect();
+
+        assert_eq!(ids, vec![lineage[2]]);
+        Ok(())
     }
 }
 
@@ -1527,20 +1579,121 @@ pub(crate) async fn get_timings<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod get_timings_tests {
+    use super::{GetTimingsFilter, get_timings};
+    use crate::models::{Evaluation, FitnessGoal, Genotype, Request, Schedule, Selector};
+    use crate::repositories::{genotypes::new_genotypes, requests::queries::new_request};
+    use chrono::{Duration as ChronoDuration, TimeZone, Utc};
+    use std::time::Duration;
+    use uuid::Uuid;
+
+    async fn seed_timed_genotypes(pool: &sqlx::PgPool) -> anyhow::Result<(Uuid, Vec<Uuid>)> {
+        let request = Request::new(
+            "timings",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10),
+            Schedule::generational(100, 10),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
+            None::<()>,
+        )?;
+        let request_id = request.id;
+        new_request(pool, request).await?;
+
+        let genotypes = vec![
+            Genotype::new(
+                "timings",
+                1,
+                serde_json::json!([1]),
+                request_id,
+                1,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "timings",
+                1,
+                serde_json::json!([2]),
+                request_id,
+                1,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "timings",
+                1,
+                serde_json::json!([3]),
+                request_id,
+                1,
+                None,
+                None,
+            ),
+        ];
+        let ids: Vec<Uuid> = genotypes.iter().map(|g| g.id).collect();
+        new_genotypes(pool, genotypes).await?;
+
+        let host = Uuid::now_v7();
+        let base = Utc
+            .with_ymd_and_hms(2025, 1, 1, 0, 0, 0)
+            .single()
+            .expect("valid timestamp");
+        let durations = [100_000i64, 200_000, 300_000]; // microseconds
+
+        for (idx, genotype_id) in ids.iter().enumerate() {
+            let started_at = base + ChronoDuration::seconds(idx as i64);
+            let completed_at = started_at + ChronoDuration::microseconds(durations[idx]);
+            super::record_evaluation(
+                pool,
+                &Evaluation::new(
+                    *genotype_id,
+                    0.5,
+                    Some(started_at),
+                    Some(completed_at),
+                    Some(host),
+                ),
+            )
+            .await?;
+        }
+
+        Ok((request_id, ids))
+    }
+
     #[sqlx::test(migrations = false)]
     async fn it_returns_timing_data_with_percentiles(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        // FIXME
-        // When we pass percentiles we should get the number of durations back
-        unimplemented!()
+
+        let (request_id, _) = seed_timed_genotypes(&pool).await?;
+
+        let summary = get_timings(
+            &pool,
+            &GetTimingsFilter::default().with_request_id(request_id),
+            &[0.5, 0.9],
+        )
+        .await?;
+
+        assert_eq!(summary.records(), 3);
+        assert_eq!(summary.min(), &Duration::from_micros(100_000));
+        assert_eq!(summary.max(), &Duration::from_micros(300_000));
+        assert_eq!(summary.avg(), &Duration::from_micros(200_000));
+        assert_eq!(summary.percentiles().len(), 2);
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]
     async fn it_returns_timing_data_without_percentiles(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        // FIXME
-        // When no percentiles are passed we should get empty vec
-        unimplemented!()
+
+        let (request_id, _) = seed_timed_genotypes(&pool).await?;
+
+        let summary = get_timings(
+            &pool,
+            &GetTimingsFilter::default().with_request_id(request_id),
+            &[],
+        )
+        .await?;
+
+        assert_eq!(summary.records(), 3);
+        assert!(summary.percentiles().is_empty());
+        Ok(())
     }
 }
 
@@ -1679,5 +1832,76 @@ mod seeding {
         .unwrap();
         // genotype_id_5 has not fitness
         (rid_1, rid_2, [gid_1, gid_2, gid_3, gid_4, gid_5])
+    }
+
+    pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
+        let request = Request::new(
+            "lineage",
+            1,
+            FitnessGoal::maximize(0.9).unwrap(),
+            Selector::tournament(10),
+            Schedule::generational(100, 10),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
+            None::<()>,
+        )
+        .unwrap();
+        let request_id = request.id;
+        new_request(pool, request).await.unwrap();
+
+        let root = Genotype::new(
+            "lineage",
+            1,
+            serde_json::json!([0]),
+            request_id,
+            1,
+            None,
+            None,
+        );
+        let root_id = root.id();
+
+        let child = Genotype::new(
+            "lineage",
+            1,
+            serde_json::json!([1]),
+            request_id,
+            2,
+            Some(&root_id),
+            None,
+        );
+        let child_id = child.id();
+
+        let grandchild = Genotype::new(
+            "lineage",
+            1,
+            serde_json::json!([2]),
+            request_id,
+            3,
+            Some(&child_id),
+            None,
+        );
+        let grandchild_id = grandchild.id();
+
+        new_genotypes(pool, vec![root, child, grandchild])
+            .await
+            .unwrap();
+
+        let host_id = Uuid::now_v7();
+        for genotype_id in [root_id, child_id, grandchild_id] {
+            record_evaluation(
+                pool,
+                &Evaluation::new(
+                    genotype_id,
+                    0.5,
+                    Some(Utc::now()),
+                    Some(Utc::now()),
+                    Some(host_id),
+                ),
+            )
+            .await
+            .unwrap();
+        }
+
+        // indexes: [0] root, [1] child, [2] grandchild
+        vec![root_id, child_id, grandchild_id]
     }
 }
