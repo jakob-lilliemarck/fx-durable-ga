@@ -45,7 +45,6 @@ impl GenotypeManager for TestManager {
         &self,
         _genotype: &mut serde_json::Value,
         _rng: &mut dyn rand::RngCore,
-        _progress: f64,
         _user_defined: &serde_json::Value,
     ) -> anyhow::Result<()> {
         Ok(())

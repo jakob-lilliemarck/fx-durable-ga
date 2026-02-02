@@ -87,16 +87,6 @@ impl FitnessGoal {
         }
     }
 
-    /// FIXME: Progress calculation needs to be redesigned for unbounded fitness values.
-    /// For now, always returns 0.0 which means decay strategies will use constant values.
-    /// Returns 0.0 if best_fitness is None.
-    #[instrument(level = "debug", skip(self), fields(goal = ?self))]
-    pub(crate) fn calculate_progress(&self, _fitness: Option<f64>) -> f64 {
-        // FIXME: Implement proper progress calculation for unbounded fitness
-        // Options: generation-based progress, improvement-rate based, or user-defined decay functions
-        0.0
-    }
-
     /// Validates that the threshold is a valid f64 value (not NaN or infinite).
     fn validate(threshold: f64) -> Result<f64, ThresholdOutOfRange> {
         if !threshold.is_finite() {
@@ -162,42 +152,5 @@ mod tests {
         assert!(max_goal.is_reached(100.0));
         assert!(max_goal.is_reached(150.0)); // Higher values pass
         assert!(!max_goal.is_reached(99.9)); // Lower values fail
-    }
-
-    #[test]
-    fn test_progress_calculation_maximize() {
-        let goal = FitnessGoal::maximize(0.8).unwrap();
-
-        // FIXME: Progress calculation always returns 0.0 for now
-        assert_eq!(goal.calculate_progress(None), 0.0);
-        assert_eq!(goal.calculate_progress(Some(0.0)), 0.0);
-        assert_eq!(goal.calculate_progress(Some(0.4)), 0.0);
-        assert_eq!(goal.calculate_progress(Some(0.8)), 0.0);
-        assert_eq!(goal.calculate_progress(Some(1.0)), 0.0);
-        assert_eq!(goal.calculate_progress(Some(-0.1)), 0.0);
-    }
-
-    #[test]
-    fn test_progress_calculation_minimize() {
-        let goal = FitnessGoal::minimize(0.2).unwrap();
-
-        // FIXME: Progress calculation always returns 0.0 for now
-        assert_eq!(goal.calculate_progress(None), 0.0);
-        assert_eq!(goal.calculate_progress(Some(1.0)), 0.0);
-        assert_eq!(goal.calculate_progress(Some(0.6)), 0.0);
-        assert_eq!(goal.calculate_progress(Some(0.2)), 0.0);
-        assert_eq!(goal.calculate_progress(Some(0.1)), 0.0);
-        assert_eq!(goal.calculate_progress(Some(1.1)), 0.0);
-    }
-
-    #[test]
-    fn test_progress_calculation_edge_cases() {
-        // FIXME: Progress calculation always returns 0.0 for now
-        let min_goal_edge = FitnessGoal::minimize(1.0).unwrap();
-        assert_eq!(min_goal_edge.calculate_progress(Some(0.5)), 0.0);
-        assert_eq!(min_goal_edge.calculate_progress(Some(1.0)), 0.0);
-
-        let max_goal_edge = FitnessGoal::maximize(0.001).unwrap();
-        assert_eq!(max_goal_edge.calculate_progress(Some(0.0005)), 0.0);
     }
 }

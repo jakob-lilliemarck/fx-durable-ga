@@ -314,7 +314,6 @@ impl GenotypeManager for FeatureManager {
         &self,
         genome: &mut Value,
         rng: &mut dyn RngCore,
-        progress: f64,
         user_defined: &Value,
     ) -> anyhow::Result<()> {
         let mut cfg = FeatureConfig::from_json(genome);
@@ -324,8 +323,7 @@ impl GenotypeManager for FeatureManager {
             .and_then(Value::as_object)
             .and_then(|o| o.get("mutation_rate"))
             .and_then(Value::as_f64)
-            .unwrap_or(0.35)
-            * (1.0 - progress).max(0.0);
+            .unwrap_or(0.35);
 
         if maybe(rng, mutation_rate) {
             cfg.hidden_size = [4usize, 8, 16, 32, 64, 128][rng.random_range(0..6)];

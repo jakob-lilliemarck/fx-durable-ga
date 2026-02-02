@@ -1,6 +1,6 @@
 use crate::models::{Evaluation, Genotype, Population, TimingsSummary};
 use chrono::{DateTime, Utc};
-use sqlx::PgExecutor;
+use sqlx::{PgExecutor, Row};
 use std::{fmt::Display, time::Duration};
 use tracing::instrument;
 use uuid::Uuid;
@@ -37,14 +37,13 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
             query_builder.push(", ");
         }
 
-        let type_name = g.type_name().to_string();
         query_builder
             .push("(")
             .push_bind(g.id())
             .push(", ")
             .push_bind(g.generated_at())
             .push(", ")
-            .push_bind(type_name)
+            .push_bind(g.type_name().to_string())
             .push(", ")
             .push_bind(g.type_hash())
             .push(", ")
@@ -72,6 +71,7 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
 
     Ok(genotypes)
 }
+
 #[cfg(test)]
 mod search_filter_ordering_tests {
     use super::{SearchFilter, SearchResultsOrder, SortOrder};
@@ -375,28 +375,97 @@ pub(crate) async fn record_evaluation<'tx, E: PgExecutor<'tx>>(
     tx: E,
     evaluation: &Evaluation,
 ) -> Result<Evaluation, super::Error> {
-    let inserted = sqlx::query_as!(
-        Evaluation,
+    let row = sqlx::query!(
         r#"
-            INSERT INTO fx_durable_ga.evaluations (genotype_id, fitness, started_at, completed_at, evaluated_by)
-            VALUES ($1, $2, $3, $4, $5)
-            RETURNING genotype_id, fitness, started_at, completed_at, evaluated_by;
+            INSERT INTO fx_durable_ga.evaluations (genotype_id, fitness, started_at, completed_at, evaluated_by, copied_from)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING genotype_id, fitness, started_at, completed_at, evaluated_by, copied_from;
         "#,
         evaluation.genotype_id,
         evaluation.fitness,
         evaluation.started_at,
         evaluation.completed_at,
-        evaluation.evaluated_by
+        evaluation.evaluated_by,
+        evaluation.copied_from
     )
     .fetch_one(tx)
     .await?;
+    Ok(Evaluation {
+        genotype_id: row.genotype_id,
+        fitness: row.fitness,
+        started_at: row.started_at,
+        completed_at: row.completed_at,
+        evaluated_by: row.evaluated_by,
+        copied_from: row.copied_from,
+    })
+}
 
-    Ok(inserted) // ← Return the inserted record
+#[instrument(level = "debug", skip(tx), fields(evaluations = ?evaluations))]
+pub(crate) async fn record_evaluations<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    evaluations: &[Evaluation],
+) -> Result<Vec<Evaluation>, super::Error> {
+    if evaluations.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let mut query_builder = sqlx::QueryBuilder::new(
+        "INSERT INTO fx_durable_ga.evaluations (
+            genotype_id,
+            fitness,
+            started_at,
+            completed_at,
+            evaluated_by,
+            copied_from
+        ) VALUES ",
+    );
+
+    let mut first = true;
+    for e in evaluations {
+        if first {
+            first = false;
+        } else {
+            query_builder.push(", ");
+        }
+
+        query_builder
+            .push("(")
+            .push_bind(e.genotype_id)
+            .push(", ")
+            .push_bind(e.fitness)
+            .push(", ")
+            .push_bind(e.started_at)
+            .push(", ")
+            .push_bind(e.completed_at)
+            .push(", ")
+            .push_bind(e.evaluated_by)
+            .push(", ")
+            .push_bind(e.copied_from)
+            .push(")");
+    }
+
+    query_builder.push(
+        " RETURNING genotype_id, fitness, started_at, completed_at, evaluated_by, copied_from",
+    );
+    let rows = query_builder.build().fetch_all(tx).await?;
+    let evaluations = rows
+        .into_iter()
+        .map(|row| Evaluation {
+            genotype_id: row.get::<Uuid, _>("genotype_id"),
+            fitness: row.get::<f64, _>("fitness"),
+            started_at: row.get::<Option<DateTime<Utc>>, _>("started_at"),
+            completed_at: row.get::<Option<DateTime<Utc>>, _>("completed_at"),
+            evaluated_by: row.get::<Option<Uuid>, _>("evaluated_by"),
+            copied_from: row.get::<Option<Uuid>, _>("copied_from"),
+        })
+        .collect();
+
+    Ok(evaluations)
 }
 
 #[cfg(test)]
 mod record_fitness_tests {
-    use super::record_evaluation;
+    use super::{record_evaluation, record_evaluations};
     use crate::models::{Evaluation, FitnessGoal, Genotype, Request, Schedule, Selector};
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
@@ -454,6 +523,7 @@ mod record_fitness_tests {
             recorded.completed_at,
             fitness.completed_at.map(|ts| ts.trunc_subsecs(6))
         );
+        assert_eq!(recorded.copied_from, None);
         Ok(())
     }
 
@@ -477,6 +547,104 @@ mod record_fitness_tests {
 
         assert!(first.is_ok());
         assert!(second.is_err());
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_records_multiple_evaluations(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10),
+            Schedule::generational(100, 10),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
+            None::<()>,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let genotypes = vec![
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([1, 2, 3]),
+                request_id,
+                1,
+                None,
+                None,
+            ),
+            Genotype::new(
+                "test",
+                1,
+                serde_json::json!([4, 5, 6]),
+                request_id,
+                1,
+                None,
+                None,
+            ),
+        ];
+        let ids: Vec<Uuid> = genotypes.iter().map(|g| g.id()).collect();
+        new_genotypes(&pool, genotypes).await?;
+
+        let host_id = Uuid::now_v7();
+        let evaluations = vec![
+            Evaluation::new(
+                ids[0],
+                0.1,
+                Some(Utc::now()),
+                Some(Utc::now()),
+                Some(host_id),
+            ),
+            Evaluation::new(ids[1], 0.2, Some(Utc::now()), Some(Utc::now()), None),
+        ];
+
+        let recorded = record_evaluations(&pool, &evaluations).await?;
+        assert_eq!(recorded.len(), 2);
+        assert_eq!(recorded[0].fitness, evaluations[0].fitness);
+        assert_eq!(recorded[1].fitness, evaluations[1].fitness);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_errors_when_batch_contains_conflicts(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let request = Request::new(
+            "test",
+            1,
+            FitnessGoal::maximize(0.9)?,
+            Selector::tournament(10),
+            Schedule::generational(100, 10),
+            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
+            None::<()>,
+        )?;
+        let request_id = request.id;
+        new_request(&pool, request).await?;
+
+        let genotypes = vec![Genotype::new(
+            "test",
+            1,
+            serde_json::json!([1, 2, 3]),
+            request_id,
+            1,
+            None,
+            None,
+        )];
+        let genotype_id = genotypes[0].id();
+        new_genotypes(&pool, genotypes).await?;
+
+        let evaluations = vec![
+            Evaluation::new(genotype_id, 0.1, Some(Utc::now()), Some(Utc::now()), None),
+            Evaluation::new(genotype_id, 0.2, Some(Utc::now()), Some(Utc::now()), None),
+        ];
+
+        let result = record_evaluations(&pool, &evaluations).await;
+        assert!(result.is_err());
+
         Ok(())
     }
 }
@@ -1078,25 +1246,76 @@ mod search_genotypes_tests {
     }
 }
 
-/// Finds which genome hashes already exist for a given request.
-/// Used for deduplication during breeding to avoid creating duplicate genomes.
+/// Finds which genome hashes already exist for a given request, along with their earliest evaluations.
 #[instrument(level = "debug", skip(tx), fields(request_id=?request_id))]
 pub(crate) async fn get_intersection<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request_id: Uuid,
     hashes: &[i64],
-) -> Result<Vec<i64>, super::Error> {
-    let intersection = sqlx::query_scalar!(
+) -> Result<Vec<(Genotype, Evaluation)>, super::Error> {
+    if hashes.is_empty() {
+        return Ok(vec![]);
+    }
+
+    let rows = sqlx::query!(
         r#"
-            SELECT genome_hash
-            FROM fx_durable_ga.genotypes
-            WHERE request_id = $1 AND genome_hash = ANY($2);
+            SELECT DISTINCT ON (g.genome_hash)
+                g.id,
+                g.generated_at,
+                g.type_name,
+                g.type_hash,
+                g.genome,
+                g.genome_hash,
+                g.request_id,
+                g.generation_id,
+                g.parent_a,
+                g.parent_b,
+                e.genotype_id as "eval_genotype_id!",
+                e.fitness as "fitness!",
+                e.started_at as "started_at?",
+                e.completed_at as "completed_at?",
+                e.evaluated_by as "evaluated_by?",
+                e.copied_from as "copied_from?"
+            FROM fx_durable_ga.genotypes g
+            JOIN fx_durable_ga.evaluations e ON g.id = e.genotype_id
+            WHERE g.request_id = $1
+              AND g.genome_hash = ANY($2)
+            ORDER BY g.genome_hash, e.completed_at ASC NULLS LAST, g.id;
         "#,
         request_id,
         hashes,
     )
     .fetch_all(tx)
     .await?;
+
+    let intersection = rows
+        .into_iter()
+        .map(|row| {
+            let genotype = Genotype {
+                id: row.id,
+                generated_at: row.generated_at,
+                type_name: row.type_name,
+                type_hash: row.type_hash,
+                genome: row.genome,
+                genome_hash: row.genome_hash,
+                request_id: row.request_id,
+                generation_id: row.generation_id,
+                parent_a: row.parent_a,
+                parent_b: row.parent_b,
+            };
+
+            let evaluation = Evaluation {
+                genotype_id: row.eval_genotype_id,
+                fitness: row.fitness,
+                started_at: row.started_at,
+                completed_at: row.completed_at,
+                evaluated_by: row.evaluated_by,
+                copied_from: row.copied_from,
+            };
+
+            (genotype, evaluation)
+        })
+        .collect();
 
     Ok(intersection)
 }
@@ -1120,10 +1339,10 @@ mod tests {
 
         let intersection = super::get_intersection(&pool, rid_1, &candidate_hashes).await?;
 
-        // Should return the two hashes that exist for request_id_1
-        assert_eq!(intersection.len(), 2);
-        assert!(intersection.contains(&hash_1_2_3));
-        assert!(intersection.contains(&hash_4_5_6));
+        // Should return only hashes that already have evaluations, which for request_id_1 is just hash_1_2_3
+        assert_eq!(intersection.len(), 1);
+        assert_eq!(intersection[0].0.genome_hash(), hash_1_2_3);
+        assert!(intersection[0].1.fitness() > 0.0);
 
         Ok(())
     }
@@ -1167,9 +1386,15 @@ mod tests {
 
         // Query for request_2 should return both hashes
         let intersection = super::get_intersection(&pool, rid_2, &candidate_hashes).await?;
+
+        let intersecting_hashes = intersection
+            .iter()
+            .map(|(g, _)| g.genome_hash())
+            .collect::<Vec<i64>>();
+
         assert_eq!(intersection.len(), 2);
-        assert!(intersection.contains(&hash_7_8_9));
-        assert!(intersection.contains(&hash_10_11_12));
+        assert!(intersecting_hashes.contains(&hash_7_8_9));
+        assert!(intersecting_hashes.contains(&hash_10_11_12));
 
         Ok(())
     }
@@ -1231,6 +1456,7 @@ pub(crate) async fn get_ancestors<'tx, E: PgExecutor<'tx>>(
                 started_at: row.started_at,
                 completed_at: row.completed_at,
                 evaluated_by: row.evaluated_by,
+                copied_from: row.copied_from,
             };
 
             (genotype, evaluation)
@@ -1347,6 +1573,7 @@ pub(crate) async fn get_descendants<'tx, E: PgExecutor<'tx>>(
                 started_at: row.started_at,
                 completed_at: row.completed_at,
                 evaluated_by: row.evaluated_by,
+                copied_from: row.copied_from,
             };
 
             (genotype, evaluation)
@@ -1527,7 +1754,7 @@ pub(crate) async fn get_timings<'tx, E: PgExecutor<'tx>>(
             ) AS "percentile_durations"
         FROM
             (
-            SELECT
+            SELECT DISTINCT ON (g.genome_hash)
                 e.genotype_id,
                 (EXTRACT(EPOCH FROM e.completed_at - e.started_at) * 1e6)::bigint AS duration_micros
             FROM
@@ -1557,6 +1784,7 @@ pub(crate) async fn get_timings<'tx, E: PgExecutor<'tx>>(
               )
                 AND ($10::uuid IS NULL
                     OR e.evaluated_by = $10::uuid)
+            ORDER BY g.genome_hash, e.completed_at ASC NULLS LAST, g.id
         ) timed;
 		"#,
         filter.ids,
@@ -1793,6 +2021,8 @@ mod seeding {
 
         let host_id = Uuid::now_v7();
 
+        // FIXME:
+        // Use the new batch insert method record_evaluations instead!
         record_evaluation(
             pool,
             &Evaluation::new(

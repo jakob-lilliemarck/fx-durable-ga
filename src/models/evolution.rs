@@ -36,7 +36,6 @@ pub trait GenotypeManager: Send + Sync {
         &self,
         genotype: &mut Value,
         rng: &mut dyn RngCore,
-        progress: f64,
         user_defined: &Value,
     ) -> Result<()>;
 

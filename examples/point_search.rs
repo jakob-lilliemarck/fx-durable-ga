@@ -69,7 +69,6 @@ impl GenotypeManager for PointManager {
         &self,
         genotype: &mut Value,
         rng: &mut dyn RngCore,
-        progress: f64,
         user_defined: &Value,
     ) -> anyhow::Result<()> {
         let (mutation_rate, temperature) = user_defined
@@ -88,7 +87,6 @@ impl GenotypeManager for PointManager {
             })
             .unwrap_or((0.3, 0.7));
         let mutation_rate = mutation_rate; // progress could be used to scale if desired
-        let temperature = temperature * (1.0 - progress).max(0.0);
         let maybe_mutate =
             |v: &mut Value, lo: f64, hi: f64, rng: &mut dyn RngCore, rate: f64, temp: f64| {
                 if rng.random_range(0.0..1.0) < rate {

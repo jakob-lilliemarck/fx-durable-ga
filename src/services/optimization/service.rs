@@ -14,7 +14,7 @@ use crate::services::lock;
 use crate::services::optimization::termination_listener::TerminationListener;
 use chrono::Utc;
 use fx_event_bus::Publisher;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::instrument;
 use uuid::Uuid;
@@ -222,14 +222,20 @@ impl Service {
         num_offspring: usize,
         next_generation_id: i32,
     ) -> Result<(), Error> {
+        // Only breed if there is no current generation with this ID
         if self
             .genotypes
             .check_if_generation_exists(request.id, next_generation_id)
             .await?
         {
+            tracing::warn!(
+                "breed_genotypes was called for a generation that already exists. Generation ID: {}",
+                next_generation_id
+            );
             return Ok(());
         }
 
+        // Get the GenotypeManager from the service
         let manager =
             self.genotype_managers
                 .get(&request.type_hash)
@@ -238,19 +244,23 @@ impl Service {
                     type_name: request.type_name.clone(),
                 })?;
 
+        // Start building up the filters for retrieving a sample of genotypes to select parents from
         let mut selection_filter = genotypes::SearchFilter::default()
             .with_request_id(request.id)
             .with_evaluation(true);
 
         if request.schedule.is_generational() {
+            // If we're using a generational schedule, then make sure to only query the last generation of this request
             selection_filter = selection_filter
                 .with_generation_id(next_generation_id - 1)
                 .with_order_random();
         } else {
+            // Otherwise just get a window of N last evaluations
             selection_filter = selection_filter.with_order_completed_at_desc();
         }
 
-        // Get candidates with fitness. Error out if any candidate is missing fitness
+        // Get candidates with fitness using the filter.
+        // Error out if any candidate is missing fitness
         let candidates_with_fitness = self
             .genotypes
             .search_genotypes(&selection_filter, request.schedule.population_size() as i64)
@@ -264,90 +274,129 @@ impl Service {
             })
             .collect::<Result<Vec<(Genotype, f64)>, Error>>()?;
 
-        let population = self.genotypes.get_population(&request.id).await?;
-        let best_fitness = *request
-            .goal
-            .best_fitness(&population.min_fitness, &population.max_fitness);
+        // Pass candidates with fitness to the selector to get pairs of selected parents
+        let mut pairs = request.selector.select_parents(
+            num_offspring,
+            &candidates_with_fitness,
+            &request.goal,
+        )?;
 
-        // FIXME: this does not return anything useful!!
-        let progress = request.goal.calculate_progress(best_fitness);
+        // Existing evaluated genotypes indexed by genome_hash
+        let mut duplicates: Vec<(Genotype, Evaluation)> = Vec::new();
+        // New unique genotypes
+        let mut uniques: Vec<Genotype> = Vec::with_capacity(num_offspring);
+        // New genotype events
+        let mut evt: Vec<GenotypeGenerated> = Vec::with_capacity(num_offspring);
+        // Re-breeding attempts
+        let mut attempt = 0;
+        // Loop until deduplication attempts are exhausted
+        while !pairs.is_empty() && attempt < self.max_deduplication_attempts {
+            if attempt > 1 {
+                tracing::warn!(
+                    message = "Duplicates encountered",
+                    attempt = attempt,
+                    re_breeding_count = pairs.len()
+                );
+            }
 
-        let mut final_genotypes = Vec::with_capacity(num_offspring);
-        let mut generated_hashes = HashSet::new();
-        let mut deduplication_attempts = 0;
-
-        while final_genotypes.len() < num_offspring
-            && deduplication_attempts < self.max_deduplication_attempts
-        {
-            let needed = num_offspring - final_genotypes.len();
-
-            let parent_pairs =
-                request
-                    .selector
-                    .select_parents(needed, &candidates_with_fitness, &request.goal)?;
-
-            let batch_genotypes = {
-                let mut rng = rand::rng();
+            attempt += 1;
+            let results = {
+                let mut rng = rand::rng(); // can't hold rng across an await
                 Breeder::breed_batch(
                     &request,
                     manager.as_ref(),
-                    &parent_pairs,
+                    &pairs,
                     next_generation_id,
-                    progress,
                     &mut rng,
                 )?
             };
 
-            let batch_hashes: Vec<i64> = batch_genotypes.iter().map(|g| g.genome_hash()).collect();
-            let intersecting_hashes = self
+            let hashes = results
+                .iter()
+                .map(|r| r.child.genome_hash())
+                .collect::<Vec<i64>>();
+
+            let mut intersection = self
                 .genotypes
-                .get_intersection(request.id, &batch_hashes)
+                .get_intersection(request.id, &hashes)
                 .await?
                 .into_iter()
-                .collect::<HashSet<i64>>();
+                .fold(HashMap::new(), |mut acc, (g, e)| {
+                    acc.insert(g.genome_hash(), (g, e));
+                    acc
+                });
 
-            let mut unique_count = 0;
-            for genotype in batch_genotypes {
-                if !intersecting_hashes.contains(&genotype.genome_hash())
-                    && !generated_hashes.contains(&genotype.genome_hash())
-                {
-                    generated_hashes.insert(genotype.genome_hash());
-                    final_genotypes.push(genotype);
-                    unique_count += 1;
+            // pairs that should be re-bred
+            let mut next_pairs = Vec::new();
+            let mut next_duplicates = Vec::new();
+            for c in results {
+                // FIXME:
+                // In addition to intersecting with previously evaluated genotypes in the database
+                // we must ALSO ensure that we're not creating any duplicates within the new set!
+                //
+                // We must also fix the get_intersection query so it returns Vec<(Genotype, Evaluation)>
+                // That query should only query for genotypes that have evaluations
+                //
+                match intersection.remove(&c.child.genome_hash()) {
+                    Some((g, e)) => {
+                        next_duplicates.push((
+                            c.child,
+                            Evaluation::new_with_copied_from(
+                                g.id(),
+                                e.fitness,
+                                Utc::now(),
+                                Utc::now(),
+                                self.host_id,
+                                *e.genotype_id(),
+                            ),
+                        ));
+                        next_pairs.push((c.parent_a, c.parent_b));
+                    }
+                    None => {
+                        uniques.push(c.child.clone());
+                        evt.push(GenotypeGenerated::new(request.id, c.child.id()));
+                    }
                 }
             }
-
-            if unique_count == 0 {
-                deduplication_attempts += 1;
-            } else {
-                deduplication_attempts = 0;
-            }
+            // Overwrite pairs with the remaining pairs
+            pairs = next_pairs;
+            // Overwrite ext with the remaining duplicates and the cached evaluations
+            duplicates = next_duplicates
         }
 
-        if !final_genotypes.is_empty() {
-            let events: Vec<GenotypeGenerated> = final_genotypes
-                .iter()
-                .map(|genotype| GenotypeGenerated::new(request.id, genotype.id()))
-                .collect();
+        if !pairs.is_empty() {
+            tracing::warn!(
+                message = "De-duplication could not resolve all duplicates. Will use cached evaluated fitness.",
+                count = duplicates.len()
+            )
+        };
 
-            self.genotypes
-                .chain(|mut tx_genotypes| {
-                    Box::pin(async move {
-                        let inserted_genotypes =
-                            tx_genotypes.new_genotypes(final_genotypes).await?;
+        // Iterate over the remaining genotypes and evaluations in ext
+        let mut evaluations = Vec::with_capacity(duplicates.len());
+        for (g, e) in duplicates {
+            evaluations.push(e);
+            uniques.push(g);
+        }
 
-                        if !inserted_genotypes.is_empty() {
-                            let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
-                            publisher.publish_many(&events).await?;
-                            Ok((publisher, ()))
-                        } else {
-                            let publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
-                            Ok((publisher, ()))
-                        }
-                    })
+        self.genotypes
+            .chain(|mut tx| {
+                Box::pin(async move {
+                    // actually we should insert new AND ext Genotypes
+                    let inserted = tx.new_genotypes(uniques).await?;
+
+                    if !evaluations.is_empty() {
+                        tx.record_evaluations(&evaluations).await?;
+                    }
+
+                    let mut publisher = fx_event_bus::Publisher::from_tx(tx);
+                    if !evt.is_empty() && !inserted.is_empty() {
+                        publisher.publish_many(&evt).await?;
+                    }
+
+                    Ok((publisher, ()))
                 })
-                .await?;
-        }
+            })
+            .await?;
 
         Ok(())
     }

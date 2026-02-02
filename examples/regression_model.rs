@@ -172,7 +172,6 @@ impl GenotypeManager for ArchitectureManager {
         &self,
         genome: &mut Value,
         rng: &mut dyn RngCore,
-        progress: f64,
         user_defined: &Value,
     ) -> anyhow::Result<()> {
         let mut arch = Self::from_json(genome);
@@ -188,7 +187,7 @@ impl GenotypeManager for ArchitectureManager {
                     .get("temperature")
                     .and_then(Value::as_f64)
                     .unwrap_or(0.8);
-                (mr * (1.0 - progress).max(0.0), temp)
+                (mr, temp)
             })
             .unwrap_or((0.4, 0.8));
 

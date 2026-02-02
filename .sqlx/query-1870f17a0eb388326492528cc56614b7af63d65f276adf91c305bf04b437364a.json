@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            WITH RECURSIVE ancestor_tree AS (\n                SELECT g.*, 0 AS degree\n                FROM fx_durable_ga.genotypes g\n                WHERE g.id = $1\n                UNION\n                SELECT parent.*, child.degree + 1\n                FROM ancestor_tree child\n                JOIN fx_durable_ga.genotypes parent\n                ON parent.id = child.parent_a\n                OR parent.id = child.parent_b\n                WHERE child.degree + 1 <= $2::INTEGER\n            )\n            select *\n            FROM ancestor_tree a\n            JOIN evaluations e ON e.genotype_id = a.id\n            ORDER BY a.degree, a.id ASC;\n        ",
+  "query": "\n            SELECT DISTINCT ON (g.genome_hash)\n                g.id,\n                g.generated_at,\n                g.type_name,\n                g.type_hash,\n                g.genome,\n                g.genome_hash,\n                g.request_id,\n                g.generation_id,\n                g.parent_a,\n                g.parent_b,\n                e.genotype_id as \"eval_genotype_id?\",\n                e.fitness as \"fitness?\",\n                e.started_at as \"started_at?\",\n                e.completed_at as \"completed_at?\",\n                e.evaluated_by as \"evaluated_by?\",\n                e.copied_from as \"copied_from?\"\n            FROM fx_durable_ga.genotypes g\n            LEFT JOIN fx_durable_ga.evaluations e ON g.id = e.genotype_id\n            WHERE g.request_id = $1\n              AND g.genome_hash = ANY($2)\n            ORDER BY g.genome_hash, e.completed_at ASC NULLS LAST, g.id;\n        ",
   "describe": {
     "columns": [
       {
@@ -55,58 +55,52 @@
       },
       {
         "ordinal": 10,
-        "name": "degree",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 11,
-        "name": "genotype_id",
+        "name": "eval_genotype_id?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 12,
-        "name": "fitness",
+        "ordinal": 11,
+        "name": "fitness?",
         "type_info": "Float8"
       },
       {
+        "ordinal": 12,
+        "name": "started_at?",
+        "type_info": "Timestamptz"
+      },
+      {
         "ordinal": 13,
-        "name": "started_at",
+        "name": "completed_at?",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 14,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 15,
-        "name": "evaluated_by",
+        "name": "evaluated_by?",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 16,
-        "name": "copied_from",
+        "ordinal": 15,
+        "name": "copied_from?",
         "type_info": "Uuid"
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Int4"
+        "Int8Array"
       ]
     },
     "nullable": [
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
       false,
       false,
       true,
@@ -115,5 +109,5 @@
       true
     ]
   },
-  "hash": "19eed2e3ab2a614fb39a4c5419b584193a04be967dbcba8a7cf47f143503616c"
+  "hash": "1870f17a0eb388326492528cc56614b7af63d65f276adf91c305bf04b437364a"
 }

@@ -328,18 +328,16 @@ impl GenotypeManager for GPPointManager {
         &self,
         genotype: &mut Value,
         rng: &mut dyn RngCore,
-        progress: f64,
         user_defined: &Value,
     ) -> anyhow::Result<()> {
         let mut program = self.parse_program(genotype)?;
         let config = serde_json::from_value::<UserConfig>(user_defined.clone()).unwrap_or_default();
         let mutation_rate = config.mutate.mutation_rate;
-        let cooled_rate = mutation_rate * (1.0 - progress).clamp(0.05, 1.0);
 
-        if rng.random_range(0.0..1.0) < cooled_rate {
+        if rng.random_range(0.0..1.0) < mutation_rate {
             program.mutate_structure(rng);
         }
-        if rng.random_range(0.0..1.0) < cooled_rate {
+        if rng.random_range(0.0..1.0) < mutation_rate {
             program.mutate_parameter(rng);
         }
 

@@ -161,6 +161,7 @@ pub struct Evaluation {
     pub(crate) started_at: Option<DateTime<Utc>>,
     pub(crate) completed_at: Option<DateTime<Utc>>,
     pub(crate) evaluated_by: Option<Uuid>,
+    pub(crate) copied_from: Option<Uuid>,
 }
 
 impl Evaluation {
@@ -185,6 +186,25 @@ impl Evaluation {
             started_at,
             completed_at,
             evaluated_by,
+            copied_from: None,
+        }
+    }
+
+    pub(crate) fn new_with_copied_from(
+        genotype_id: Uuid,
+        fitness: f64,
+        started_at: DateTime<Utc>,
+        completed_at: DateTime<Utc>,
+        evaluated_by: Uuid,
+        copied_from: Uuid,
+    ) -> Self {
+        Self {
+            genotype_id,
+            fitness,
+            started_at: Some(started_at),
+            completed_at: Some(completed_at),
+            evaluated_by: Some(evaluated_by),
+            copied_from: Some(copied_from),
         }
     }
 
@@ -202,6 +222,14 @@ impl Evaluation {
 
     pub fn completed_at(&self) -> &Option<DateTime<Utc>> {
         &self.completed_at
+    }
+
+    pub fn evaluated_by(&self) -> &Option<Uuid> {
+        &self.evaluated_by
+    }
+
+    pub fn copied_from(&self) -> &Option<Uuid> {
+        &self.copied_from
     }
 }
 

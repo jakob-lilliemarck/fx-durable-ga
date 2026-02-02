@@ -25,6 +25,15 @@ impl<'tx> TxRepository<'tx> {
         super::queries::record_evaluation(&mut *self.tx, evaluation)
     }
 
+    /// Records multiple evaluation results within the current transaction.
+    #[instrument(level = "debug", skip(self), fields(evaluations = ?evaluations))]
+    pub(crate) fn record_evaluations(
+        &mut self,
+        evaluations: &[Evaluation],
+    ) -> impl Future<Output = Result<Vec<Evaluation>, Error>> {
+        super::queries::record_evaluations(&mut *self.tx, evaluations)
+    }
+
     /// Inserts multiple genotypes within the current transaction.
     #[instrument(level = "debug", skip(self), fields(genotypes_count = genotypes.len()))]
     pub(crate) fn new_genotypes(

@@ -5,23 +5,28 @@ use tracing::instrument;
 /// Handles the breeding process by combining crossover and mutation operations.
 pub(crate) struct Breeder;
 
+pub struct BreedResult<'a> {
+    pub(crate) child: Genotype,
+    pub(crate) parent_a: &'a Genotype,
+    pub(crate) parent_b: &'a Genotype,
+}
+
 impl Breeder {
     /// Creates a single child from two parents using crossover and mutation.
-    #[instrument(level = "debug", skip(request, manager, parent_a, parent_b, rng), fields(parent_a_id = %parent_a.id(), parent_b_id = %parent_b.id(), generation_id = next_generation_id, progress = progress, type_hash = request.type_hash))]
-    fn breed_child(
+    #[instrument(level = "debug", skip(request, manager, parent_a, parent_b, rng), fields(parent_a_id = %parent_a.id(), parent_b_id = %parent_b.id(), generation_id = next_generation_id, type_hash = request.type_hash))]
+    fn breed_child<'a>(
         request: &Request,
         manager: &dyn GenotypeManager,
-        parent_a: &Genotype,
-        parent_b: &Genotype,
+        parent_a: &'a Genotype,
+        parent_b: &'a Genotype,
         next_generation_id: i32,
-        progress: f64,
         rng: &mut dyn rand::RngCore,
-    ) -> anyhow::Result<Genotype> {
+    ) -> anyhow::Result<BreedResult<'a>> {
         let p1 = parent_a.genome().clone();
         let p2 = parent_b.genome().clone();
         let mut child_genome = manager.crossover(&p1, &p2, rng, &request.user_defined)?;
 
-        manager.mutate(&mut child_genome, rng, progress, &request.user_defined)?;
+        manager.mutate(&mut child_genome, rng, &request.user_defined)?;
 
         // FIXME:
         // Add parent1.id and parent2.id to the Genotype here!
@@ -35,19 +40,22 @@ impl Breeder {
             Some(&parent_a.id),
             Some(&parent_b.id),
         );
-        Ok(child)
+        Ok(BreedResult {
+            child,
+            parent_a,
+            parent_b,
+        })
     }
 
     /// Creates multiple children from parent pairs using crossover and mutation.
-    #[instrument(level = "debug", skip(request, manager, parent_pairs, rng), fields(num_pairs = parent_pairs.len(), generation_id = next_generation_id, progress = progress, type_hash = request.type_hash))]
-    pub(crate) fn breed_batch(
+    #[instrument(level = "debug", skip(request, manager, parent_pairs, rng), fields(num_pairs = parent_pairs.len(), generation_id = next_generation_id, type_hash = request.type_hash))]
+    pub(crate) fn breed_batch<'a>(
         request: &Request,
         manager: &dyn GenotypeManager,
-        parent_pairs: &[(&Genotype, &Genotype)],
+        parent_pairs: &[(&'a Genotype, &'a Genotype)],
         next_generation_id: i32,
-        progress: f64,
         rng: &mut dyn rand::RngCore,
-    ) -> anyhow::Result<Vec<Genotype>> {
+    ) -> anyhow::Result<Vec<BreedResult<'a>>> {
         let mut out = Vec::with_capacity(parent_pairs.len());
         for &(p1, p2) in parent_pairs {
             out.push(Self::breed_child(
@@ -56,7 +64,6 @@ impl Breeder {
                 p1,
                 p2,
                 next_generation_id,
-                progress,
                 rng,
             )?);
         }
@@ -83,12 +90,14 @@ mod tests {
         fn name(&self) -> &'static str {
             "test"
         }
+
         fn random(&self, rng: &mut dyn RngCore, _user: &Value) -> anyhow::Result<Value> {
             Ok(serde_json::json!([
                 rng.random_range(0..10),
                 rng.random_range(0..10)
             ]))
         }
+
         fn crossover(
             &self,
             parent1: &Value,
@@ -101,11 +110,11 @@ mod tests {
                 parent2[1].as_i64().unwrap_or(0)
             ]))
         }
+
         fn mutate(
             &self,
             genotype: &mut Value,
             _rng: &mut dyn RngCore,
-            _progress: f64,
             _user: &Value,
         ) -> Result<()> {
             if let Some(first) = genotype.as_array_mut().and_then(|a| a.get_mut(0)) {
@@ -113,6 +122,7 @@ mod tests {
             }
             Ok(())
         }
+
         fn evaluate<'a>(
             &'a self,
             _genotype: &'a Value,
@@ -168,7 +178,7 @@ mod tests {
 
         let parent_pairs = vec![(&parent1, &parent2), (&parent2, &parent3)];
         let children =
-            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, 0.5, &mut rng).unwrap();
+            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, &mut rng).unwrap();
 
         assert_eq!(children.len(), 2);
     }
@@ -196,12 +206,11 @@ mod tests {
             &manager,
             &parent_pairs,
             next_generation_id,
-            0.0,
             &mut rng,
         )
         .unwrap();
 
-        let child = &children[0];
+        let BreedResult { child, .. } = &children[0];
         assert_eq!(child.type_name(), "TestType");
         assert_eq!(child.type_hash(), 123);
         assert_eq!(child.request_id(), request.id);
@@ -216,7 +225,7 @@ mod tests {
 
         let parent_pairs: Vec<(&Genotype, &Genotype)> = vec![];
         let children =
-            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, 0.5, &mut rng).unwrap();
+            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, &mut rng).unwrap();
 
         assert_eq!(children.len(), 0);
     }
@@ -238,11 +247,20 @@ mod tests {
 
         let parent_pairs = vec![(&parent1, &parent2), (&parent1, &parent2)];
         let children =
-            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, 0.5, &mut rng).unwrap();
+            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, &mut rng).unwrap();
 
         assert_eq!(children.len(), 2);
-        assert_ne!(children[0].id(), children[1].id());
-        assert!(!children[0].id().is_nil());
-        assert!(!children[1].id().is_nil());
+
+        let BreedResult {
+            child: ref child_1, ..
+        } = children[0];
+
+        let BreedResult {
+            child: ref child_2, ..
+        } = children[1];
+
+        assert_ne!(child_1.id(), child_2.id());
+        assert!(!child_1.id().is_nil());
+        assert!(!child_2.id().is_nil());
     }
 }

@@ -48,7 +48,7 @@ impl Repository {
         &self,
         request_id: Uuid,
         hashes: &[i64],
-    ) -> impl Future<Output = Result<Vec<i64>, Error>> {
+    ) -> impl Future<Output = Result<Vec<(Genotype, Evaluation)>, Error>> {
         super::queries::get_intersection(&self.pool, request_id, hashes)
     }
 
