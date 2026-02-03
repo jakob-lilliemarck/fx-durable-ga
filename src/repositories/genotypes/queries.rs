@@ -1,7 +1,7 @@
 use crate::models::{Evaluation, Genotype, Population, TimingsSummary};
 use chrono::{DateTime, Utc};
 use sqlx::{PgExecutor, Row};
-use std::{fmt::Display, time::Duration};
+use std::{collections::HashMap, fmt::Display, time::Duration};
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -1252,9 +1252,9 @@ pub(crate) async fn get_intersection<'tx, E: PgExecutor<'tx>>(
     tx: E,
     request_id: Uuid,
     hashes: &[i64],
-) -> Result<Vec<(Genotype, Evaluation)>, super::Error> {
+) -> Result<HashMap<i64, (Genotype, Evaluation)>, super::Error> {
     if hashes.is_empty() {
-        return Ok(vec![]);
+        return Ok(HashMap::new());
     }
 
     let rows = sqlx::query!(
@@ -1288,34 +1288,32 @@ pub(crate) async fn get_intersection<'tx, E: PgExecutor<'tx>>(
     .fetch_all(tx)
     .await?;
 
-    let intersection = rows
-        .into_iter()
-        .map(|row| {
-            let genotype = Genotype {
-                id: row.id,
-                generated_at: row.generated_at,
-                type_name: row.type_name,
-                type_hash: row.type_hash,
-                genome: row.genome,
-                genome_hash: row.genome_hash,
-                request_id: row.request_id,
-                generation_id: row.generation_id,
-                parent_a: row.parent_a,
-                parent_b: row.parent_b,
-            };
+    let map = HashMap::with_capacity(rows.len());
+    let intersection = rows.into_iter().fold(map, |mut acc, row| {
+        let genotype = Genotype {
+            id: row.id,
+            generated_at: row.generated_at,
+            type_name: row.type_name,
+            type_hash: row.type_hash,
+            genome: row.genome,
+            genome_hash: row.genome_hash,
+            request_id: row.request_id,
+            generation_id: row.generation_id,
+            parent_a: row.parent_a,
+            parent_b: row.parent_b,
+        };
 
-            let evaluation = Evaluation {
-                genotype_id: row.eval_genotype_id,
-                fitness: row.fitness,
-                started_at: row.started_at,
-                completed_at: row.completed_at,
-                evaluated_by: row.evaluated_by,
-                copied_from: row.copied_from,
-            };
-
-            (genotype, evaluation)
-        })
-        .collect();
+        let evaluation = Evaluation {
+            genotype_id: row.eval_genotype_id,
+            fitness: row.fitness,
+            started_at: row.started_at,
+            completed_at: row.completed_at,
+            evaluated_by: row.evaluated_by,
+            copied_from: row.copied_from,
+        };
+        acc.insert(genotype.genome_hash, (genotype, evaluation));
+        acc
+    });
 
     Ok(intersection)
 }
@@ -1341,8 +1339,9 @@ mod tests {
 
         // Should return only hashes that already have evaluations, which for request_id_1 is just hash_1_2_3
         assert_eq!(intersection.len(), 1);
-        assert_eq!(intersection[0].0.genome_hash(), hash_1_2_3);
-        assert!(intersection[0].1.fitness() > 0.0);
+        let (genotype, evaluation) = intersection.get(&hash_1_2_3).expect("expected first hash");
+        assert_eq!(genotype.genome_hash(), hash_1_2_3);
+        assert!(evaluation.fitness() > 0.0);
 
         Ok(())
     }
@@ -1387,14 +1386,9 @@ mod tests {
         // Query for request_2 should return both hashes
         let intersection = super::get_intersection(&pool, rid_2, &candidate_hashes).await?;
 
-        let intersecting_hashes = intersection
-            .iter()
-            .map(|(g, _)| g.genome_hash())
-            .collect::<Vec<i64>>();
-
         assert_eq!(intersection.len(), 2);
-        assert!(intersecting_hashes.contains(&hash_7_8_9));
-        assert!(intersecting_hashes.contains(&hash_10_11_12));
+        assert!(intersection.contains_key(&hash_7_8_9));
+        assert!(intersection.contains_key(&hash_10_11_12));
 
         Ok(())
     }

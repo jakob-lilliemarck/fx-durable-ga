@@ -1,136 +1,174 @@
 use crate::models::evolution::GenotypeManager;
 use crate::models::{Genotype, Request};
+use std::collections::HashSet;
 use tracing::instrument;
 
 /// Handles the breeding process by combining crossover and mutation operations.
 pub(crate) struct Breeder;
 
-pub struct BreedResult<'a> {
-    pub(crate) child: Genotype,
-    pub(crate) parent_a: &'a Genotype,
-    pub(crate) parent_b: &'a Genotype,
+#[derive(Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+pub struct Deduplicated {
+    pub(crate) genotype: Genotype,
+    pub(crate) existing: bool,
+    pub(crate) _idx: usize,
+}
+
+impl Deduplicated {
+    fn new(genotype: Genotype, existing: bool, idx: usize) -> Deduplicated {
+        Deduplicated {
+            genotype,
+            _idx: idx,
+            existing,
+        }
+    }
 }
 
 impl Breeder {
     /// Creates a single child from two parents using crossover and mutation.
     #[instrument(level = "debug", skip(request, manager, parent_a, parent_b, rng), fields(parent_a_id = %parent_a.id(), parent_b_id = %parent_b.id(), generation_id = next_generation_id, type_hash = request.type_hash))]
-    fn breed_child<'a>(
+    fn breed_child(
         request: &Request,
         manager: &dyn GenotypeManager,
-        parent_a: &'a Genotype,
-        parent_b: &'a Genotype,
+        parent_a: &Genotype,
+        parent_b: &Genotype,
         next_generation_id: i32,
         rng: &mut dyn rand::RngCore,
-    ) -> anyhow::Result<BreedResult<'a>> {
-        let p1 = parent_a.genome().clone();
-        let p2 = parent_b.genome().clone();
-        let mut child_genome = manager.crossover(&p1, &p2, rng, &request.user_defined)?;
+    ) -> anyhow::Result<Genotype> {
+        let genome_a = parent_a.genome().clone();
+        let genome_b = parent_b.genome().clone();
 
-        manager.mutate(&mut child_genome, rng, &request.user_defined)?;
+        // Crossover
+        let mut genome = manager.crossover(&genome_a, &genome_b, rng, &request.user_defined)?;
 
-        // FIXME:
-        // Add parent1.id and parent2.id to the Genotype here!
-        //
+        // Mutation
+        manager.mutate(&mut genome, rng, &request.user_defined)?;
+
         let child = Genotype::new(
             &request.type_name,
             request.type_hash,
-            child_genome,
+            genome,
             request.id,
             next_generation_id,
             Some(&parent_a.id),
             Some(&parent_b.id),
         );
-        Ok(BreedResult {
-            child,
-            parent_a,
-            parent_b,
-        })
+
+        Ok(child)
     }
 
-    /// Creates multiple children from parent pairs using crossover and mutation.
-    #[instrument(level = "debug", skip(request, manager, parent_pairs, rng), fields(num_pairs = parent_pairs.len(), generation_id = next_generation_id, type_hash = request.type_hash))]
+    /// Creates N children for each parent pair
+    #[instrument(level = "debug", skip(request, manager, pairs), fields(num_pairs = pairs.len(), generation_id = next_generation_id, type_hash = request.type_hash))]
     pub(crate) fn breed_batch<'a>(
         request: &Request,
         manager: &dyn GenotypeManager,
-        parent_pairs: &[(&'a Genotype, &'a Genotype)],
+        pairs: &[(&'a Genotype, &'a Genotype)],
         next_generation_id: i32,
-        rng: &mut dyn rand::RngCore,
-    ) -> anyhow::Result<Vec<BreedResult<'a>>> {
-        let mut out = Vec::with_capacity(parent_pairs.len());
-        for &(p1, p2) in parent_pairs {
-            out.push(Self::breed_child(
-                request,
-                manager,
-                p1,
-                p2,
-                next_generation_id,
-                rng,
-            )?);
+        num_siblings: usize,
+    ) -> anyhow::Result<(Vec<Vec<Genotype>>, Vec<i64>)> {
+        let mut rng = rand::rng();
+        let mut batch: Vec<Vec<Genotype>> = Vec::with_capacity(pairs.len() * num_siblings);
+        let mut hashes: HashSet<i64> = HashSet::new();
+
+        for (parent_a, parent_b) in pairs.iter() {
+            let mut children: Vec<Genotype> = Vec::with_capacity(pairs.len() * num_siblings);
+            for _ in 0..num_siblings {
+                let child = Self::breed_child(
+                    request,
+                    manager,
+                    parent_a,
+                    parent_b,
+                    next_generation_id,
+                    &mut rng,
+                )?;
+
+                hashes.insert(child.genome_hash());
+                children.push(child);
+            }
+
+            batch.push(children)
         }
-        Ok(out)
+
+        Ok((batch, hashes.drain().collect()))
+    }
+
+    /// Creates N children for each parent pair
+    #[instrument(level = "debug")]
+    pub(crate) fn deduplicate_batch(
+        mut existing: HashSet<i64>,
+        candidates: Vec<Vec<Genotype>>,
+    ) -> Vec<Deduplicated> {
+        let mut results = Vec::with_capacity(candidates.len());
+        let mut taken: HashSet<i64> = HashSet::new();
+
+        for (idx, siblings) in candidates.into_iter().enumerate() {
+            let mut unique: Option<Genotype> = None;
+            let mut unique_in_batch: Option<Genotype> = None;
+            let mut fallback: Option<Genotype> = None;
+
+            for (i, child) in siblings.into_iter().enumerate() {
+                let in_batch = taken.contains(&child.genome_hash);
+                let in_existing = existing.contains(&child.genome_hash);
+
+                if !in_batch && !in_existing {
+                    unique = Some(child);
+                    break;
+                }
+
+                if in_batch || in_existing {
+                    tracing::debug!(
+                        message = "Encountered genome hash collision",
+                        hash = child.genome_hash,
+                        attempt = i
+                    );
+                }
+
+                if !in_batch && unique_in_batch.is_none() {
+                    unique_in_batch = Some(child);
+                    continue;
+                }
+
+                if unique.is_none() && fallback.is_none() {
+                    fallback = Some(child);
+                }
+            }
+
+            let chosen = if let Some(g) = unique {
+                existing.insert(g.genome_hash);
+                taken.insert(g.genome_hash);
+                Deduplicated::new(g, false, idx)
+            } else if let Some(g) = unique_in_batch {
+                tracing::warn!(
+                    message = "Deduplication attempts exhausted. Emitting existing duplicate",
+                    hash = g.genome_hash
+                );
+                taken.insert(g.genome_hash);
+                Deduplicated::new(g, true, idx)
+            } else if let Some(g) = fallback {
+                tracing::warn!(
+                    message = "Deduplication attempts exhausted. Emitting in-batch duplicate",
+                    hash = g.genome_hash
+                );
+                let collided = existing.contains(&g.genome_hash);
+                taken.insert(g.genome_hash);
+                Deduplicated::new(g, collided, idx)
+            } else {
+                // No candidates available; this indicates upstream logic provided an empty slot.
+                panic!("deduplicate received an empty candidate list");
+            };
+
+            results.push(chosen);
+        }
+
+        results
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::evolution::GenotypeManager;
-    use crate::models::{FitnessGoal, Schedule, Selector};
-    use anyhow::Result;
-    use futures::future::BoxFuture;
-    use rand::Rng;
-    use rand::RngCore;
-    use rand::SeedableRng;
-    use rand::rngs::StdRng;
     use serde_json::Value;
     use uuid::Uuid;
-
-    struct TestManager;
-    impl GenotypeManager for TestManager {
-        fn name(&self) -> &'static str {
-            "test"
-        }
-
-        fn random(&self, rng: &mut dyn RngCore, _user: &Value) -> anyhow::Result<Value> {
-            Ok(serde_json::json!([
-                rng.random_range(0..10),
-                rng.random_range(0..10)
-            ]))
-        }
-
-        fn crossover(
-            &self,
-            parent1: &Value,
-            parent2: &Value,
-            _rng: &mut dyn RngCore,
-            _user: &Value,
-        ) -> Result<Value> {
-            Ok(serde_json::json!([
-                parent1[0].as_i64().unwrap_or(0),
-                parent2[1].as_i64().unwrap_or(0)
-            ]))
-        }
-
-        fn mutate(
-            &self,
-            genotype: &mut Value,
-            _rng: &mut dyn RngCore,
-            _user: &Value,
-        ) -> Result<()> {
-            if let Some(first) = genotype.as_array_mut().and_then(|a| a.get_mut(0)) {
-                *first = serde_json::json!(first.as_i64().unwrap_or(0) + 1);
-            }
-            Ok(())
-        }
-
-        fn evaluate<'a>(
-            &'a self,
-            _genotype: &'a Value,
-            _user: &'a Value,
-        ) -> BoxFuture<'a, Result<f64>> {
-            Box::pin(async { Ok(1.0) })
-        }
-    }
 
     fn create_test_genotype(id: &str, genome: Value) -> Genotype {
         Genotype::new(
@@ -144,123 +182,163 @@ mod tests {
         )
     }
 
-    fn create_test_request() -> Request {
-        Request::new(
-            "TestType",
-            123,
-            FitnessGoal::maximize(0.9).unwrap(),
-            Selector::tournament(5),
-            Schedule::generational(100, 10),
-            serde_json::json!({"probability":0.5}),
-            None::<()>,
-        )
-        .unwrap()
-    }
-
+    /// Prefers new hashes over ones already in `existing`.
     #[test]
-    fn test_breed_batch_produces_correct_number_of_children() {
-        let request = create_test_request();
-        let manager = TestManager;
-        let mut rng = StdRng::seed_from_u64(42);
-
-        let parent1 = create_test_genotype(
+    fn deduplicate_prefers_new_hashes() {
+        let g1 = create_test_genotype(
             "00000000-0000-0000-0000-000000000001",
-            serde_json::json!([1, 2]),
+            serde_json::json!([1, 2, 3]),
         );
-        let parent2 = create_test_genotype(
+
+        let g2 = create_test_genotype(
             "00000000-0000-0000-0000-000000000002",
-            serde_json::json!([4, 5]),
+            serde_json::json!([2, 3, 4]),
         );
-        let parent3 = create_test_genotype(
+
+        let g3 = create_test_genotype(
             "00000000-0000-0000-0000-000000000003",
-            serde_json::json!([7, 8]),
+            serde_json::json!([3, 4, 5]),
         );
 
-        let parent_pairs = vec![(&parent1, &parent2), (&parent2, &parent3)];
-        let children =
-            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, &mut rng).unwrap();
+        let g4 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000004",
+            serde_json::json!([4, 5, 6]),
+        );
 
-        assert_eq!(children.len(), 2);
+        let mut existing = HashSet::<i64>::new();
+        existing.insert(g1.genome_hash);
+        existing.insert(g3.genome_hash);
+        existing.insert(g4.genome_hash);
+
+        let candidates = vec![vec![g1.clone(), g2.clone()], vec![g3.clone(), g4.clone()]];
+        let results = Breeder::deduplicate_batch(existing, candidates);
+
+        assert_eq!(results[0].existing, false);
+        assert_eq!(results[0]._idx, 0);
+        assert_eq!(results[0].genotype, g2);
+
+        assert_eq!(results[1].existing, true);
+        assert_eq!(results[1]._idx, 1);
+        assert_eq!(results[1].genotype, g3);
+
+        assert_eq!(results.len(), 2);
     }
 
+    /// Falls back to picking duplicates within the batch when every option collides.
+    /// Ensures such picks are marked as coming from `existing`.
     #[test]
-    fn test_breed_batch_children_have_correct_metadata() {
-        let request = create_test_request();
-        let manager = TestManager;
-        let mut rng = StdRng::seed_from_u64(42);
-
-        let parent1 = create_test_genotype(
+    fn deduplicate_handles_batch_dupes() {
+        let g1 = create_test_genotype(
             "00000000-0000-0000-0000-000000000001",
-            serde_json::json!([1, 2]),
+            serde_json::json!([1, 2, 3]),
         );
-        let parent2 = create_test_genotype(
+
+        let g2 = create_test_genotype(
             "00000000-0000-0000-0000-000000000002",
-            serde_json::json!([4, 5]),
+            serde_json::json!([1, 2, 3]),
         );
 
-        let parent_pairs = vec![(&parent1, &parent2)];
-        let next_generation_id = 5;
+        let g3 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000002",
+            serde_json::json!([1, 2, 3]),
+        );
 
-        let children = Breeder::breed_batch(
-            &request,
-            &manager,
-            &parent_pairs,
-            next_generation_id,
-            &mut rng,
-        )
-        .unwrap();
+        let g4 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000002",
+            serde_json::json!([1, 2, 3]),
+        );
 
-        let BreedResult { child, .. } = &children[0];
-        assert_eq!(child.type_name(), "TestType");
-        assert_eq!(child.type_hash(), 123);
-        assert_eq!(child.request_id(), request.id);
-        assert_eq!(child.generation_id(), next_generation_id);
+        let mut existing = HashSet::<i64>::new();
+        existing.insert(g1.genome_hash);
+
+        let candidates = vec![vec![g1.clone(), g2.clone()], vec![g3.clone(), g4.clone()]];
+        let results = Breeder::deduplicate_batch(existing, candidates);
+
+        assert_eq!(results[0].existing, true);
+        assert_eq!(results[0]._idx, 0);
+        assert_eq!(results[0].genotype, g1);
+
+        assert_eq!(results[1].existing, true);
+        assert_eq!(results[1]._idx, 1);
+        assert_eq!(results[1].genotype, g3);
+
+        assert_eq!(results.len(), 2);
     }
 
+    /// Keeps the earliest candidate when it collides less than later siblings.
+    /// Confirms ordering preference matches the selection rules.
     #[test]
-    fn test_breed_batch_with_empty_parent_pairs() {
-        let request = create_test_request();
-        let manager = TestManager;
-        let mut rng = StdRng::seed_from_u64(42);
-
-        let parent_pairs: Vec<(&Genotype, &Genotype)> = vec![];
-        let children =
-            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, &mut rng).unwrap();
-
-        assert_eq!(children.len(), 0);
-    }
-
-    #[test]
-    fn test_breed_batch_children_are_unique() {
-        let request = create_test_request();
-        let manager = TestManager;
-        let mut rng = StdRng::seed_from_u64(42);
-
-        let parent1 = create_test_genotype(
+    fn deduplicate_keeps_earlier_winner() {
+        let g1 = create_test_genotype(
             "00000000-0000-0000-0000-000000000001",
-            serde_json::json!([1, 2]),
+            serde_json::json!([1, 2, 3]),
         );
-        let parent2 = create_test_genotype(
+
+        let g2 = create_test_genotype(
             "00000000-0000-0000-0000-000000000002",
-            serde_json::json!([4, 5]),
+            serde_json::json!([2, 3, 4]),
         );
 
-        let parent_pairs = vec![(&parent1, &parent2), (&parent1, &parent2)];
-        let children =
-            Breeder::breed_batch(&request, &manager, &parent_pairs, 2, &mut rng).unwrap();
+        let g3 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000002",
+            serde_json::json!([1, 2, 3]),
+        );
 
-        assert_eq!(children.len(), 2);
+        let g4 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000002",
+            serde_json::json!([1, 2, 3]),
+        );
 
-        let BreedResult {
-            child: ref child_1, ..
-        } = children[0];
+        let mut existing = HashSet::<i64>::new();
+        existing.insert(g2.genome_hash);
 
-        let BreedResult {
-            child: ref child_2, ..
-        } = children[1];
+        let candidates = vec![vec![g1.clone(), g2.clone()], vec![g3.clone(), g4.clone()]];
+        let results = Breeder::deduplicate_batch(existing, candidates);
 
-        assert_ne!(child_1.id(), child_2.id());
-        assert!(!child_1.id().is_nil());
-        assert!(!child_2.id().is_nil());
+        assert_eq!(results[0].existing, false);
+        assert_eq!(results[0]._idx, 0);
+        assert_eq!(results[0].genotype, g1);
+
+        assert_eq!(results[1].existing, true);
+        assert_eq!(results[1]._idx, 1);
+        assert_eq!(results[1].genotype, g3);
+
+        assert_eq!(results.len(), 2);
+    }
+
+    /// Returns the first batch-unique child even if it still collides in `existing`.
+    /// Ensures the result is marked as coming from the DB.
+    #[test]
+    fn deduplicate_marks_batch_unique_existing() {
+        let g1 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000010",
+            serde_json::json!([1, 2, 3]),
+        );
+
+        let g2 = create_test_genotype(
+            "00000000-0000-0000-0000-000000000011",
+            serde_json::json!([4, 5, 6]),
+        );
+
+        let mut existing = HashSet::<i64>::new();
+        existing.insert(g1.genome_hash);
+        existing.insert(g2.genome_hash);
+
+        let candidates = vec![vec![g1.clone(), g2.clone()]];
+        let results = Breeder::deduplicate_batch(existing, candidates);
+
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0]._idx, 0);
+        assert_eq!(results[0].genotype, g1);
+        assert!(results[0].existing);
+    }
+
+    /// Panics when a slot arrives empty, surfacing upstream contract violations.
+    #[test]
+    #[should_panic(expected = "deduplicate received an empty candidate list")]
+    fn deduplicate_panics_on_empty_slot() {
+        let existing = HashSet::<i64>::new();
+        let candidates: Vec<Vec<Genotype>> = vec![vec![]];
+        Breeder::deduplicate_batch(existing, candidates);
     }
 }

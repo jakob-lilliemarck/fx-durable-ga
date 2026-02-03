@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use super::{Error, TxRepository};
 use crate::models::{Evaluation, Genotype, Population, TimingsSummary};
 use crate::repositories::chainable::{Chain, ToTx, TxType};
@@ -48,7 +50,7 @@ impl Repository {
         &self,
         request_id: Uuid,
         hashes: &[i64],
-    ) -> impl Future<Output = Result<Vec<(Genotype, Evaluation)>, Error>> {
+    ) -> impl Future<Output = Result<HashMap<i64, (Genotype, Evaluation)>, Error>> {
         super::queries::get_intersection(&self.pool, request_id, hashes)
     }
 

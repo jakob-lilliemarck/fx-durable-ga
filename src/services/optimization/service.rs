@@ -14,7 +14,7 @@ use crate::services::lock;
 use crate::services::optimization::termination_listener::TerminationListener;
 use chrono::Utc;
 use fx_event_bus::Publisher;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use tracing::instrument;
 use uuid::Uuid;
@@ -275,122 +275,70 @@ impl Service {
             .collect::<Result<Vec<(Genotype, f64)>, Error>>()?;
 
         // Pass candidates with fitness to the selector to get pairs of selected parents
-        let mut pairs = request.selector.select_parents(
+        let pairs = request.selector.select_parents(
             num_offspring,
             &candidates_with_fitness,
             &request.goal,
         )?;
 
-        // Existing evaluated genotypes indexed by genome_hash
-        let mut duplicates: Vec<(Genotype, Evaluation)> = Vec::new();
-        // New unique genotypes
-        let mut uniques: Vec<Genotype> = Vec::with_capacity(num_offspring);
-        // New genotype events
-        let mut evt: Vec<GenotypeGenerated> = Vec::with_capacity(num_offspring);
-        // Re-breeding attempts
-        let mut attempt = 0;
-        // Loop until deduplication attempts are exhausted
-        while !pairs.is_empty() && attempt < self.max_deduplication_attempts {
-            if attempt > 1 {
-                tracing::warn!(
-                    message = "Duplicates encountered",
-                    attempt = attempt,
-                    re_breeding_count = pairs.len()
-                );
+        // Get a set of children enumerated by their parent pair index
+        let (batch, child_hashes) = Breeder::breed_batch(
+            request,
+            manager.as_ref(),
+            &pairs,
+            next_generation_id,
+            self.max_deduplication_attempts as usize,
+        )?;
+
+        // Intersect the hashes with the database
+        let intersection = self
+            .genotypes
+            .get_intersection(request.id, &child_hashes)
+            .await?;
+
+        let existing: HashSet<i64> = intersection.keys().copied().collect();
+        let deduplicated = Breeder::deduplicate_batch(existing, batch);
+
+        // Evaluations that could be written from cached fitness
+        let mut evaluations: Vec<Evaluation> = Vec::new();
+        // Genotypes
+        let mut genotypes: Vec<Genotype> = Vec::with_capacity(num_offspring);
+        // GenotypeGenerated events for each genotype not present in the database
+        let mut events: Vec<GenotypeGenerated> = Vec::with_capacity(num_offspring);
+
+        for d in deduplicated {
+            if d.existing {
+                // The hash must be in intersection
+                let (_, e) = intersection.get(&d.genotype.genome_hash).unwrap();
+                // Write evaluations for already evaluated genomes using their fitness
+                evaluations.push(Evaluation::new_with_copied_from(
+                    d.genotype.id(),
+                    e.fitness,
+                    Utc::now(),
+                    Utc::now(),
+                    self.host_id,
+                    *e.genotype_id(),
+                ))
+            } else {
+                events.push(GenotypeGenerated::new(request.id, d.genotype.id()))
             }
-
-            attempt += 1;
-            let results = {
-                let mut rng = rand::rng(); // can't hold rng across an await
-                Breeder::breed_batch(
-                    &request,
-                    manager.as_ref(),
-                    &pairs,
-                    next_generation_id,
-                    &mut rng,
-                )?
-            };
-
-            let hashes = results
-                .iter()
-                .map(|r| r.child.genome_hash())
-                .collect::<Vec<i64>>();
-
-            let mut intersection = self
-                .genotypes
-                .get_intersection(request.id, &hashes)
-                .await?
-                .into_iter()
-                .fold(HashMap::new(), |mut acc, (g, e)| {
-                    acc.insert(g.genome_hash(), (g, e));
-                    acc
-                });
-
-            // pairs that should be re-bred
-            let mut next_pairs = Vec::new();
-            let mut next_duplicates = Vec::new();
-            for c in results {
-                // FIXME:
-                // In addition to intersecting with previously evaluated genotypes in the database
-                // we must ALSO ensure that we're not creating any duplicates within the new set!
-                //
-                // We must also fix the get_intersection query so it returns Vec<(Genotype, Evaluation)>
-                // That query should only query for genotypes that have evaluations
-                //
-                match intersection.remove(&c.child.genome_hash()) {
-                    Some((g, e)) => {
-                        next_duplicates.push((
-                            c.child,
-                            Evaluation::new_with_copied_from(
-                                g.id(),
-                                e.fitness,
-                                Utc::now(),
-                                Utc::now(),
-                                self.host_id,
-                                *e.genotype_id(),
-                            ),
-                        ));
-                        next_pairs.push((c.parent_a, c.parent_b));
-                    }
-                    None => {
-                        uniques.push(c.child.clone());
-                        evt.push(GenotypeGenerated::new(request.id, c.child.id()));
-                    }
-                }
-            }
-            // Overwrite pairs with the remaining pairs
-            pairs = next_pairs;
-            // Overwrite ext with the remaining duplicates and the cached evaluations
-            duplicates = next_duplicates
-        }
-
-        if !pairs.is_empty() {
-            tracing::warn!(
-                message = "De-duplication could not resolve all duplicates. Will use cached evaluated fitness.",
-                count = duplicates.len()
-            )
-        };
-
-        // Iterate over the remaining genotypes and evaluations in ext
-        let mut evaluations = Vec::with_capacity(duplicates.len());
-        for (g, e) in duplicates {
-            evaluations.push(e);
-            uniques.push(g);
+            // Always push all genotypes
+            genotypes.push(d.genotype);
         }
 
         self.genotypes
             .chain(|mut tx| {
                 Box::pin(async move {
                     // actually we should insert new AND ext Genotypes
-                    let inserted = tx.new_genotypes(uniques).await?;
+                    let inserted = tx.new_genotypes(genotypes).await?;
 
                     if !evaluations.is_empty() {
                         tx.record_evaluations(&evaluations).await?;
                     }
 
                     let mut publisher = fx_event_bus::Publisher::from_tx(tx);
-                    if !evt.is_empty() && !inserted.is_empty() {
-                        publisher.publish_many(&evt).await?;
+                    if !events.is_empty() && !inserted.is_empty() {
+                        publisher.publish_many(&events).await?;
                     }
 
                     Ok((publisher, ()))
