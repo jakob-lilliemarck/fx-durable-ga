@@ -1,6 +1,6 @@
 use crate::infrastructure::typesafe_builder::{Set, Unset};
-use crate::repositories::{genotypes, requests};
-use crate::services::{self, genotype_explorer, lock, optimization};
+use crate::repositories::{embeddings, encoders, genotypes, requests};
+use crate::services::{self, genotype_explorer, indexing, lock, optimization};
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -29,6 +29,8 @@ pub struct ServiceBuilder<T1> {
     genotypes: Option<Arc<genotypes::Repository>>,
     requests: Option<Arc<requests::Repository>>,
     lock: Option<Arc<lock::Service>>,
+    embeddings: Option<Arc<embeddings::Repository>>,
+    encoders: Option<Arc<encoders::Repository>>,
 }
 
 impl Default for ServiceBuilder<Unset<PgPool>> {
@@ -38,6 +40,8 @@ impl Default for ServiceBuilder<Unset<PgPool>> {
             genotypes: None,
             requests: None,
             lock: None,
+            embeddings: None,
+            encoders: None,
         }
     }
 }
@@ -48,12 +52,16 @@ impl ServiceBuilder<Unset<PgPool>> {
         let genotypes = Arc::new(genotypes::Repository::new(pool.clone()));
         let requests = Arc::new(requests::Repository::new(pool.clone()));
         let lock = Arc::new(lock::Service::new(pool.clone()));
+        let embeddings = Arc::new(embeddings::Repository::new(pool.clone()));
+        let encoders = Arc::new(encoders::Repository::new(pool.clone()));
 
         ServiceBuilder {
             _pool: Set::new(pool),
             genotypes: Some(genotypes),
             requests: Some(requests),
             lock: Some(lock),
+            embeddings: Some(embeddings),
+            encoders: Some(encoders),
         }
     }
 }
@@ -79,6 +87,17 @@ impl ServiceBuilder<Set<PgPool>> {
             } => optimization::Service::builder(host_id.clone(), &lock, &requests, &genotypes)
                 .build(),
             _ => panic!("Missing dependency while constructing optimization service"),
+        }
+    }
+
+    pub fn build_indexing_svc(&self) -> services::indexing::Service {
+        match self {
+            ServiceBuilder {
+                embeddings: Some(embeddings),
+                encoders: Some(encoders),
+                ..
+            } => indexing::Service::new(embeddings.clone(), encoders.clone()),
+            _ => panic!("Missing dependency while constructing indexing service"),
         }
     }
 }

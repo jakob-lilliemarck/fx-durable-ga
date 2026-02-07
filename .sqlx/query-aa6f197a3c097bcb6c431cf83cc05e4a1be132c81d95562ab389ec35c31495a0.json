@@ -1,0 +1,70 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id,\n                model_type,\n                model_config,\n                model_weights,\n                model_format,\n                shape_in,\n                shape_out,\n                trained_at,\n                trained_on_checksum\n            FROM fx_durable_ga.encoders\n            WHERE id = $1;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "model_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "model_config",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "model_weights",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "model_format",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "shape_in",
+        "type_info": "Int4Array"
+      },
+      {
+        "ordinal": 6,
+        "name": "shape_out",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "trained_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "trained_on_checksum",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "aa6f197a3c097bcb6c431cf83cc05e4a1be132c81d95562ab389ec35c31495a0"
+}

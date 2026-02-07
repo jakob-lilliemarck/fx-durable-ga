@@ -4,7 +4,7 @@ pub mod models;
 mod infrastructure;
 
 #[cfg(not(feature = "migration"))]
-mod repositories;
+pub mod repositories;
 
 #[cfg(not(feature = "migration"))]
 pub mod bootstrap;

@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO fx_durable_ga.embeddings (\n                id,\n                encoded_at,\n                encoded_with,\n                value\n            )\n            VALUES ($1, $2, $3, $4)\n            RETURNING\n                id,\n                encoded_at,\n                encoded_with,\n                value as \"value: Vector\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "encoded_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "encoded_with",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "value: Vector",
+        "type_info": {
+          "Custom": {
+            "name": "vector",
+            "kind": "Simple"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Uuid",
+        {
+          "Custom": {
+            "name": "vector",
+            "kind": "Simple"
+          }
+        }
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "786e854846dbfbf98d8994881f9a720abb8f721e9069f69b95f75ed0f18046a3"
+}

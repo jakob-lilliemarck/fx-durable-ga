@@ -10,8 +10,9 @@ keywords = ["genetic-algoritms", "parameter-search", "optimization"]
 categories = ["algorithms", "science"]
 
 [features]
-default = []
 migration = []
+default = ["burn", "burn-wgpu"]
+
 
 [dependencies]
 uuid = { version = "1.14.0", features = ["serde", "v7"] }
@@ -26,6 +27,7 @@ sqlx = { version = "0.8", default-features = false, features = [
     "chrono",
     "uuid",
 ] }
+pgvector = { version = "0.4", features = ["sqlx"] }
 tracing = "0.1.41"
 axum = "0.8.8"
 askama = "0.15.4"
@@ -45,6 +47,12 @@ tokio = { version = "1.42.0", features = [
 ] }
 dotenv = "0.15.0"
 tracing-subscriber = { version = "0.3.19", features = ["json"] }
+burn = { version = "0.20.0-pre.1", default-features = false, features = ["autodiff"], optional = true }
+burn-wgpu = { version = "0.20.0-pre.1", optional = true }
+burn-ndarray = { version = "0.20.0-pre.1" }
+
+[dev-dependencies]
+burn-ndarray = { version = "0.20.0-pre.1" }
 
 [[example]]
 name = "point_search"
@@ -61,6 +69,14 @@ path = "examples/feature_engineering.rs"
 [[example]]
 name = "gp_point_search"
 path = "examples/gp_point_search.rs"
+
+[[example]]
+name = "gp_function_indexing"
+path = "examples/gp_function_indexing.rs"
+
+[[example]]
+name = "gp_feature_engineering"
+path = "examples/gp_feature_engineering.rs"
 
 [[bin]]
 name = "migrate"
