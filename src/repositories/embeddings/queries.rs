@@ -116,6 +116,133 @@ mod tests_get_similar {
 
         Ok(())
     }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_excludes_query_embedding_itself(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let repository = Repository::new(pool);
+
+        let now = Utc::now().trunc_subsecs(6);
+
+        let query_embedding = Embedding {
+            id: Uuid::parse_str("00000000-0000-0000-0000-00000000000a").unwrap(),
+            encoded_with: Uuid::nil(),
+            encoded_at: now,
+            value: [0.5_f32; EMBEDDING_SIZE],
+        };
+
+        let others = &[Embedding {
+            id: Uuid::parse_str("00000000-0000-0000-0000-00000000000b").unwrap(),
+            encoded_with: Uuid::nil(),
+            encoded_at: now,
+            value: [0.51_f32; EMBEDDING_SIZE],
+        }];
+
+        let tag_name = "self_exclusion".to_string();
+
+        let mut embeddings = vec![query_embedding.clone()];
+        embeddings.extend_from_slice(others);
+
+        let tags: Vec<Tag> = embeddings
+            .iter()
+            .map(|e| Tag::new(tag_name.clone(), e.id, now))
+            .collect();
+
+        repository
+            .chain(|mut tx| {
+                let embeddings = embeddings.clone();
+                let tags = tags.clone();
+                Box::pin(async move {
+                    tx.store_embeddings(&embeddings).await?;
+                    tx.store_tags(&tags).await?;
+                    Ok((tx, ()))
+                })
+            })
+            .await?;
+
+        let similar = repository
+            .find_similar(&query_embedding.id, &tag_name, 5)
+            .await?;
+
+        assert!(!similar.iter().any(|s| s.embedding_id == query_embedding.id));
+        assert_eq!(similar.len(), 1);
+        assert_eq!(similar[0].embedding_id, others[0].id);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_limits_results_and_respects_tag(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let repository = Repository::new(pool);
+
+        let now = Utc::now().trunc_subsecs(6);
+
+        let same_tag = vec![
+            Embedding {
+                id: Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap(),
+                encoded_with: Uuid::nil(),
+                encoded_at: now,
+                value: [0.1_f32; EMBEDDING_SIZE],
+            },
+            Embedding {
+                id: Uuid::parse_str("00000000-0000-0000-0000-000000000011").unwrap(),
+                encoded_with: Uuid::nil(),
+                encoded_at: now,
+                value: [0.11_f32; EMBEDDING_SIZE],
+            },
+            Embedding {
+                id: Uuid::parse_str("00000000-0000-0000-0000-000000000012").unwrap(),
+                encoded_with: Uuid::nil(),
+                encoded_at: now,
+                value: [0.12_f32; EMBEDDING_SIZE],
+            },
+        ];
+
+        let other_tag = Embedding {
+            id: Uuid::parse_str("00000000-0000-0000-0000-000000000013").unwrap(),
+            encoded_with: Uuid::nil(),
+            encoded_at: now,
+            value: [0.13_f32; EMBEDDING_SIZE],
+        };
+
+        let mut embeddings = same_tag.clone();
+        embeddings.push(other_tag.clone());
+
+        let primary_tag = "limit_tag".to_string();
+        let other_tag_name = "other".to_string();
+
+        let mut tags: Vec<Tag> = same_tag
+            .iter()
+            .map(|e| Tag::new(primary_tag.clone(), e.id, now))
+            .collect();
+        tags.push(Tag::new(other_tag_name.clone(), other_tag.id, now));
+
+        repository
+            .chain(|mut tx| {
+                let embeddings = embeddings.clone();
+                let tags = tags.clone();
+                Box::pin(async move {
+                    tx.store_embeddings(&embeddings).await?;
+                    tx.store_tags(&tags).await?;
+                    Ok((tx, ()))
+                })
+            })
+            .await?;
+
+        let similar = repository
+            .find_similar(&same_tag[0].id, &primary_tag, 2)
+            .await?;
+
+        assert_eq!(similar.len(), 2);
+        assert!(similar
+            .iter()
+            .all(|s| s.embedding_id != other_tag.id));
+
+        Ok(())
+    }
 }
 
 pub(crate) async fn store_embeddings<'tx, 'a, I, E>(
@@ -223,6 +350,69 @@ mod tests_store_embeddings {
             assert_eq!(e.encoded_at, s.encoded_at);
             assert_eq!(e.encoded_with, s.encoded_with);
             assert_eq!(e.value, s.value);
+        }
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_empty_vec_for_empty_input(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let repository = Repository::new(pool);
+
+        let stored = repository
+            .chain(|mut tx| {
+                Box::pin(async move {
+                    let stored = tx.store_embeddings(&[]).await?;
+                    Ok((tx, stored))
+                })
+            })
+            .await?;
+
+        assert!(stored.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_inserts_multiple_embeddings(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let repository = Repository::new(pool);
+
+        let now = Utc::now().trunc_subsecs(6);
+
+        let embeddings = &[
+            Embedding {
+                id: Uuid::parse_str("00000000-0000-0000-0000-000000000020").unwrap(),
+                encoded_with: Uuid::nil(),
+                encoded_at: now,
+                value: [2_f32; EMBEDDING_SIZE],
+            },
+            Embedding {
+                id: Uuid::parse_str("00000000-0000-0000-0000-000000000021").unwrap(),
+                encoded_with: Uuid::nil(),
+                encoded_at: now,
+                value: [3_f32; EMBEDDING_SIZE],
+            },
+        ];
+
+        let stored = repository
+            .chain(|mut tx| {
+                let embeddings = embeddings.clone();
+                Box::pin(async move {
+                    let stored = tx.store_embeddings(&embeddings).await?;
+                    Ok((tx, stored))
+                })
+            })
+            .await?;
+
+        assert_eq!(stored.len(), embeddings.len());
+        for (expected, actual) in embeddings.iter().zip(stored.iter()) {
+            assert_eq!(expected.id, actual.id);
+            assert_eq!(expected.encoded_at, actual.encoded_at);
+            assert_eq!(expected.value, actual.value);
         }
 
         Ok(())
@@ -348,6 +538,26 @@ mod tests_store_tags {
             assert_eq!(t.embedding_id, s.embedding_id);
             assert_eq!(t.tagged_at, s.tagged_at);
         }
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_empty_vec_for_empty_input(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let repository = Repository::new(pool);
+
+        let stored = repository
+            .chain(|mut tx| {
+                Box::pin(async move {
+                    let stored = tx.store_tags(&[]).await?;
+                    Ok((tx, stored))
+                })
+            })
+            .await?;
+
+        assert!(stored.is_empty());
 
         Ok(())
     }
