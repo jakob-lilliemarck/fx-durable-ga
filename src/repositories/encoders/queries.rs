@@ -32,7 +32,7 @@ pub(crate) async fn get_encoder<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod tests_get {
-    use super::{get_encoder, store_encoder, Encoder};
+    use super::{Encoder, get_encoder, store_encoder};
     use chrono::{TimeZone, Utc};
     use serde_json::json;
     use uuid::Uuid;
@@ -130,7 +130,7 @@ pub(crate) async fn store_encoder<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod tests_store {
-    use super::{store_encoder, Encoder};
+    use super::{Encoder, store_encoder};
     use chrono::{TimeZone, Utc};
     use serde_json::json;
     use uuid::Uuid;

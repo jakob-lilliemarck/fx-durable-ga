@@ -1,3 +1,18 @@
+//! # GP Function Indexing
+//!
+//! This example trains an LSTM autoencoder on the *outputs* of several GP
+//! programs. Every program runs against the same known input sequences so we
+//! can compare their behaviours in a shared latent space.
+//!
+//! Different programs may emit different numbers of values per timestep. To
+//! keep the autoencoder's input width constant, we transpose each
+//! `[time_steps][output_dim]` matrix into `[output_dim][time_steps]` before
+//! training or encoding. The transposed data lets the trainer treat
+//! `time_steps` (which is fixed) as the per-timestep width, while the varying
+//! dimension becomes the sequence length and is handled via the existing mask.
+//! Anyone reading this example only needs to remember: always transpose before
+//! flattening so the encoder sees consistent widths.
+
 use anyhow::Result;
 use fx_durable_ga::bootstrap;
 use fx_durable_ga::services::indexing::encoder::dataset::{
@@ -13,9 +28,9 @@ const HIDDEN_SIZE: usize = 32; //  HIDDEN_SIZE <= LATENT_SIZE
 const BATCH_SIZE: usize = 2;
 const EPOCHS: usize = 5;
 const LEARNING_RATE: f64 = 1e-3;
-const SAMPLES: usize = 8;
-const INPUT_SIZE: usize = 1_00;
-const FEATURES: usize = 5;
+const INPUT_SEQUENCES: usize = 1;
+const TIME_STEPS: usize = 100;
+const INPUT_FEATURES: usize = 5;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -31,58 +46,37 @@ async fn main() -> Result<()> {
         .with_pool(pool)
         .build_indexing_svc();
 
-    let dataset = ExampleDataset::new(SAMPLES, INPUT_SIZE, FEATURES);
-
-    let encoder_id = Uuid::nil();
-
-    // Train an encoder if it doesn't exist
-    if service.get_encoder(encoder_id).await?.is_none() {
-        let train_config = AutoencoderTrainConfig {
-            input_size: INPUT_SIZE,
-            hidden_size: HIDDEN_SIZE,
-            latent_size: LATENT_SIZE,
-            batch_size: BATCH_SIZE,
-            epochs: EPOCHS,
-            learning_rate: LEARNING_RATE,
-        };
-
-        service
-            .train_encoder(
-                encoder_id,
-                TrainModelConfig::Lstm(train_config.clone()),
-                dataset.clone(),
-            )
-            .await?;
-    }
-
-    let sample = dataset
-        .raw_sample(0)
-        .expect("dataset to contain at least one sample");
-
     let programs = build_programs();
+    let function_inputs = ProgramInputsDataset::new(INPUT_SEQUENCES, TIME_STEPS, INPUT_FEATURES);
+    let outputs_dataset = ProgramOutputsDataset::new(&programs, &function_inputs);
 
-    let encode_inputs: Vec<EncodeInput> = programs
-        .iter()
-        .map(|p| {
-            let outputs: Vec<Vec<f32>> = sample.iter().map(|row| p.eval(row)).collect();
-            let transposed = transpose(&outputs);
-            let flattened = flatten(&transposed);
-            EncodeInput {
-                values: flattened,
-                dimensions: vec![
-                    transposed.len(),
-                    transposed.first().map(|r| r.len()).unwrap_or(0),
-                ],
-            }
-        })
-        .collect();
+    let train_config = AutoencoderTrainConfig {
+        input_size: outputs_dataset.input_width(),
+        hidden_size: HIDDEN_SIZE,
+        latent_size: LATENT_SIZE,
+        batch_size: BATCH_SIZE,
+        epochs: EPOCHS,
+        learning_rate: LEARNING_RATE,
+    };
 
-    service.load(&encoder_id).await?;
+    let encoder = service
+        .train_encoder(
+            Uuid::now_v7(),
+            TrainModelConfig::Lstm(train_config.clone()),
+            outputs_dataset.clone(),
+        )
+        .await?;
 
-    let embedding_ids = service.index(&encode_inputs, &["indexing_example"]).await?;
+    let encode_inputs = build_encode_inputs(&programs, &function_inputs);
+
+    service.load(&encoder.id()).await?;
+
+    let tag_name = format!("indexing_example-{}", encoder.id().to_string());
+
+    let embedding_ids = service.index(&encode_inputs, &[&tag_name]).await?;
 
     let similar = service
-        .find_similar(&embedding_ids[0], "indexing_example", 10)
+        .find_similar(&embedding_ids[0], &tag_name, 10)
         .await?;
 
     for s in similar {
@@ -98,45 +92,73 @@ async fn main() -> Result<()> {
 }
 
 #[derive(Clone)]
-struct ExampleDataset {
-    dataset: SequenceDataset,
-    raw_samples: Vec<Vec<Vec<f32>>>,
+struct ProgramInputsDataset {
+    sequences: Vec<Vec<Vec<f32>>>,
+    time_steps: usize,
 }
 
-impl ExampleDataset {
-    fn new(num_samples: usize, time_steps: usize, feature_count: usize) -> Self {
-        let mut samples = Vec::with_capacity(num_samples);
-        let mut raw_samples = Vec::with_capacity(num_samples);
+impl ProgramInputsDataset {
+    fn new(num_sequences: usize, time_steps: usize, feature_count: usize) -> Self {
+        let mut sequences = Vec::with_capacity(num_sequences);
 
-        for sample_idx in 0..num_samples {
-            let mut raw = Vec::with_capacity(time_steps);
+        for sample_idx in 0..num_sequences {
+            let mut sequence = Vec::with_capacity(time_steps);
             for t in 0..time_steps {
                 let mut row = Vec::with_capacity(feature_count);
                 for feature in 0..feature_count {
                     row.push(sample_idx as f32 + t as f32 + feature as f32);
                 }
-                raw.push(row);
+                sequence.push(row);
             }
-
-            let transposed = transpose(&raw);
-            raw_samples.push(raw);
-            samples.push(SequenceSample { steps: transposed });
+            sequences.push(sequence);
         }
 
-        let dataset = SequenceDataset::new(samples, time_steps);
-
         Self {
-            dataset,
-            raw_samples,
+            sequences,
+            time_steps,
         }
     }
 
-    fn raw_sample(&self, index: usize) -> Option<&[Vec<f32>]> {
-        self.raw_samples.get(index).map(|sample| sample.as_slice())
+    fn time_steps(&self) -> usize {
+        self.time_steps
+    }
+
+    fn raw_sequences(&self) -> impl Iterator<Item = &[Vec<f32>]> {
+        self.sequences.iter().map(|seq| seq.as_slice())
     }
 }
 
-impl SequenceDataSource for ExampleDataset {
+#[derive(Clone)]
+struct ProgramOutputsDataset {
+    dataset: SequenceDataset,
+}
+
+impl ProgramOutputsDataset {
+    fn new(programs: &[Program], inputs: &ProgramInputsDataset) -> Self {
+        let mut samples = Vec::new();
+
+        for program in programs {
+            for sequence in inputs.raw_sequences() {
+                let outputs: Vec<Vec<f32>> = sequence.iter().map(|row| program.eval(row)).collect();
+                if outputs.is_empty() {
+                    continue;
+                }
+                let transposed = transpose(&outputs);
+                samples.push(SequenceSample { steps: transposed });
+            }
+        }
+
+        let dataset = SequenceDataset::new(samples, inputs.time_steps());
+
+        Self { dataset }
+    }
+
+    fn input_width(&self) -> usize {
+        self.dataset.input_size()
+    }
+}
+
+impl SequenceDataSource for ProgramOutputsDataset {
     fn checksum(&self) -> Vec<u8> {
         self.dataset.checksum()
     }
@@ -148,6 +170,27 @@ impl SequenceDataSource for ExampleDataset {
     fn len(&self) -> usize {
         self.dataset.len()
     }
+}
+
+fn build_encode_inputs(programs: &[Program], inputs: &ProgramInputsDataset) -> Vec<EncodeInput> {
+    let mut encode_inputs = Vec::new();
+
+    for program in programs {
+        for sequence in inputs.raw_sequences() {
+            let outputs: Vec<Vec<f32>> = sequence.iter().map(|row| program.eval(row)).collect();
+            let transposed = transpose(&outputs);
+            let flattened = flatten(&transposed);
+            encode_inputs.push(EncodeInput {
+                values: flattened,
+                dimensions: vec![
+                    transposed.len(),
+                    transposed.first().map(|r| r.len()).unwrap_or(0),
+                ],
+            });
+        }
+    }
+
+    encode_inputs
 }
 
 fn flatten(matrix: &[Vec<f32>]) -> Vec<f32> {
@@ -180,6 +223,7 @@ fn build_programs() -> Vec<Program> {
                 Box::new(Expr::Select(4)),
             )],
         },
+        // Identical to first for input like [N, N+1, N+2, N+3, N+4]
         Program {
             trees: vec![Expr::Sub(
                 Box::new(Expr::Add(
@@ -198,6 +242,14 @@ fn build_programs() -> Vec<Program> {
                 )),
             )],
         },
+        // Slightly different constant: (t+3) - (t+4) = -1
+        Program {
+            trees: vec![Expr::Sub(
+                Box::new(Expr::Select(3)),
+                Box::new(Expr::Select(4)),
+            )],
+        },
+        // Very dissimilar for input like [N, N+1, N+2, N+3, N+4]
         Program {
             trees: vec![Expr::Add(
                 Box::new(Expr::Pow(Box::new(Expr::Select(3)))),

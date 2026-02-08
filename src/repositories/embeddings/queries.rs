@@ -237,9 +237,7 @@ mod tests_get_similar {
             .await?;
 
         assert_eq!(similar.len(), 2);
-        assert!(similar
-            .iter()
-            .all(|s| s.embedding_id != other_tag.id));
+        assert!(similar.iter().all(|s| s.embedding_id != other_tag.id));
 
         Ok(())
     }
