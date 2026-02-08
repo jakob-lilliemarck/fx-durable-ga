@@ -80,7 +80,7 @@ impl Service {
         Ok(())
     }
 
-    // Encodes input to an embedding using the specified encoder and stores it.
+    // Encodes inputs to an embeddings using the specified encoder and store it with tags.
     // Returns ids of stored embeddings
     pub async fn index(
         &self,
@@ -206,10 +206,17 @@ impl Service {
             .embeddings
             .find_similar(embedding_id, tag_name, limit)
             .await?;
+
         Ok(similar)
     }
 
-    pub async fn get_encoder<D>(
+    pub async fn get_encoder(&self, encoder_id: Uuid) -> Result<Option<Encoder>, super::Error> {
+        let encoder = self.encoders.get_encoder(&encoder_id).await?;
+        Ok(encoder)
+    }
+
+    // Get or train an encoder
+    pub async fn train_encoder<D>(
         &self,
         encoder_id: Uuid,
         train_config: TrainModelConfig,

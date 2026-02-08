@@ -32,23 +32,28 @@ async fn main() -> Result<()> {
         .build_indexing_svc();
 
     let dataset = ExampleDataset::new(SAMPLES, INPUT_SIZE, FEATURES);
-    let train_config = AutoencoderTrainConfig {
-        input_size: INPUT_SIZE,
-        hidden_size: HIDDEN_SIZE,
-        latent_size: LATENT_SIZE,
-        batch_size: BATCH_SIZE,
-        epochs: EPOCHS,
-        learning_rate: LEARNING_RATE,
-    };
 
     let encoder_id = Uuid::nil();
-    let encoder = service
-        .get_encoder(
-            encoder_id,
-            TrainModelConfig::Lstm(train_config.clone()),
-            dataset.clone(),
-        )
-        .await?;
+
+    // Train an encoder if it doesn't exist
+    if service.get_encoder(encoder_id).await?.is_none() {
+        let train_config = AutoencoderTrainConfig {
+            input_size: INPUT_SIZE,
+            hidden_size: HIDDEN_SIZE,
+            latent_size: LATENT_SIZE,
+            batch_size: BATCH_SIZE,
+            epochs: EPOCHS,
+            learning_rate: LEARNING_RATE,
+        };
+
+        service
+            .train_encoder(
+                encoder_id,
+                TrainModelConfig::Lstm(train_config.clone()),
+                dataset.clone(),
+            )
+            .await?;
+    }
 
     let sample = dataset
         .raw_sample(0)
@@ -72,7 +77,7 @@ async fn main() -> Result<()> {
         })
         .collect();
 
-    service.load(&encoder.id()).await?;
+    service.load(&encoder_id).await?;
 
     let embedding_ids = service.index(&encode_inputs, &["indexing_example"]).await?;
 
