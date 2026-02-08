@@ -32,7 +32,7 @@ async fn main() -> anyhow::Result<()> {
         .connect(&database_url)
         .await?;
 
-    let svc_builder = bootstrap::ServiceBuilder::default().with_pool(pool);
+    let svc_builder = bootstrap::ApplicationBuilder::default().with_pool(pool);
     let svc_explorer = Arc::new(svc_builder.build_explorer_svc());
 
     let router = Router::new()

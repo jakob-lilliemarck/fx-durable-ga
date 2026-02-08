@@ -24,16 +24,16 @@ pub async fn bootstrap(
     Ok(builder)
 }
 
-pub struct ServiceBuilder<T1> {
+pub struct ApplicationBuilder<T1> {
     _pool: T1,
+    lock: Option<Arc<lock::Service>>,
     genotypes: Option<Arc<genotypes::Repository>>,
     requests: Option<Arc<requests::Repository>>,
-    lock: Option<Arc<lock::Service>>,
     embeddings: Option<Arc<embeddings::Repository>>,
     encoders: Option<Arc<encoders::Repository>>,
 }
 
-impl Default for ServiceBuilder<Unset<PgPool>> {
+impl Default for ApplicationBuilder<Unset<PgPool>> {
     fn default() -> Self {
         Self {
             _pool: Unset::new(),
@@ -46,8 +46,8 @@ impl Default for ServiceBuilder<Unset<PgPool>> {
     }
 }
 
-impl ServiceBuilder<Unset<PgPool>> {
-    pub fn with_pool(self, pool: PgPool) -> ServiceBuilder<Set<PgPool>> {
+impl ApplicationBuilder<Unset<PgPool>> {
+    pub fn with_pool(self, pool: PgPool) -> ApplicationBuilder<Set<PgPool>> {
         // Construct everything that depends on pool
         let genotypes = Arc::new(genotypes::Repository::new(pool.clone()));
         let requests = Arc::new(requests::Repository::new(pool.clone()));
@@ -55,7 +55,7 @@ impl ServiceBuilder<Unset<PgPool>> {
         let embeddings = Arc::new(embeddings::Repository::new(pool.clone()));
         let encoders = Arc::new(encoders::Repository::new(pool.clone()));
 
-        ServiceBuilder {
+        ApplicationBuilder {
             _pool: Set::new(pool),
             genotypes: Some(genotypes),
             requests: Some(requests),
@@ -66,10 +66,10 @@ impl ServiceBuilder<Unset<PgPool>> {
     }
 }
 
-impl ServiceBuilder<Set<PgPool>> {
+impl ApplicationBuilder<Set<PgPool>> {
     pub fn build_explorer_svc(&self) -> services::genotype_explorer::Service {
         match self {
-            ServiceBuilder {
+            ApplicationBuilder {
                 genotypes: Some(genotypes),
                 ..
             } => genotype_explorer::Service::new(&genotypes),
@@ -79,7 +79,7 @@ impl ServiceBuilder<Set<PgPool>> {
 
     pub fn build_optimization_svc(&self, host_id: &Uuid) -> services::optimization::Service {
         match self {
-            ServiceBuilder {
+            ApplicationBuilder {
                 genotypes: Some(genotypes),
                 requests: Some(requests),
                 lock: Some(lock),
@@ -90,13 +90,16 @@ impl ServiceBuilder<Set<PgPool>> {
         }
     }
 
-    pub fn build_indexing_svc(&self) -> services::indexing::Service {
+    pub fn indexing_service(&self) -> services::indexing::ServiceBuilder {
         match self {
-            ServiceBuilder {
+            ApplicationBuilder {
+                genotypes: Some(genotypes),
                 embeddings: Some(embeddings),
                 encoders: Some(encoders),
                 ..
-            } => indexing::Service::new(embeddings.clone(), encoders.clone()),
+            } => {
+                indexing::Service::builder(genotypes.clone(), embeddings.clone(), encoders.clone())
+            }
             _ => panic!("Missing dependency while constructing indexing service"),
         }
     }

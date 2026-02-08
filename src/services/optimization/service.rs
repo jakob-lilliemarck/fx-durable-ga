@@ -1,6 +1,6 @@
 use super::Error;
 use super::events::{
-    GenotypeEvaluatedEvent, GenotypeGenerated, OptimizationRequestedEvent, RequestCompletedEvent,
+    GenotypeEvaluatedEvent, GenotypeGeneratedEvent, OptimizationRequestedEvent, RequestCompletedEvent,
     RequestInterruptedEvent, RequestTerminatedEvent,
 };
 use crate::models::GenotypeManager;
@@ -124,7 +124,7 @@ impl Service {
                     None, // No parent_a
                     None, // No parent_b
                 );
-                events.push(GenotypeGenerated::new(request.id, genotype.id()));
+                events.push(GenotypeGeneratedEvent::new(request.id, genotype.id()));
                 genotypes.push(genotype);
             }
         }
@@ -304,7 +304,7 @@ impl Service {
         // Genotypes
         let mut genotypes: Vec<Genotype> = Vec::with_capacity(num_offspring);
         // GenotypeGenerated events for each genotype not present in the database
-        let mut events: Vec<GenotypeGenerated> = Vec::with_capacity(num_offspring);
+        let mut events: Vec<GenotypeGeneratedEvent> = Vec::with_capacity(num_offspring);
 
         for d in deduplicated {
             if d.existing {
@@ -320,7 +320,7 @@ impl Service {
                     *e.genotype_id(),
                 ))
             } else {
-                events.push(GenotypeGenerated::new(request.id, d.genotype.id()))
+                events.push(GenotypeGeneratedEvent::new(request.id, d.genotype.id()))
             }
             // Always push all genotypes
             genotypes.push(d.genotype);

@@ -42,9 +42,10 @@ async fn main() -> Result<()> {
         .connect(&database_url)
         .await?;
 
-    let mut service = bootstrap::ServiceBuilder::default()
+    let mut service = bootstrap::ApplicationBuilder::default()
         .with_pool(pool)
-        .build_indexing_svc();
+        .indexing_service()
+        .build();
 
     let programs = build_programs();
     let function_inputs = ProgramInputsDataset::new(INPUT_SEQUENCES, TIME_STEPS, INPUT_FEATURES);

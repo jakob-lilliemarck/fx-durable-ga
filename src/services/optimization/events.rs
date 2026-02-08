@@ -80,16 +80,16 @@ impl Handler<OptimizationRequestedEvent> for OptimizationRequestedHandler {
 
 /// Event published when a new genotype is generated for evaluation.
 #[derive(Clone, Serialize, Deserialize)]
-pub struct GenotypeGenerated {
+pub struct GenotypeGeneratedEvent {
     request_id: Uuid,
     genotype_id: Uuid,
 }
 
-impl fx_event_bus::Event for GenotypeGenerated {
+impl fx_event_bus::Event for GenotypeGeneratedEvent {
     const NAME: &'static str = "GenotypeGenerated";
 }
 
-impl GenotypeGenerated {
+impl GenotypeGeneratedEvent {
     /// Creates a new genotype generated event.
     pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
         Self {
@@ -100,17 +100,17 @@ impl GenotypeGenerated {
 }
 
 /// Handler that responds to genotype generation by scheduling evaluation jobs.
-pub struct GenotypeGeneratedHandlerEvent {
+pub struct GenotypeGeneratedHandler {
     queries: Arc<Queries>,
 }
 
-impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
+impl Handler<GenotypeGeneratedEvent> for GenotypeGeneratedHandler {
     type Error = fx_mq_jobs::PublishError;
 
     #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
     fn handle<'a>(
         &'a self,
-        input: Arc<GenotypeGenerated>,
+        input: Arc<GenotypeGeneratedEvent>,
         _: chrono::DateTime<chrono::Utc>,
         tx: sqlx::PgTransaction<'a>,
     ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
@@ -384,7 +384,7 @@ pub fn register_event_handlers(
         queries: queries.clone(),
     });
 
-    registry.with_handler(GenotypeGeneratedHandlerEvent {
+    registry.with_handler(GenotypeGeneratedHandler {
         queries: queries.clone(),
     });
 
