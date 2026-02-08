@@ -1,3 +1,5 @@
+use sha2::{Digest, Sha256};
+
 /// A single variable-length sequence prepared for the autoencoder.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SequenceSample {
@@ -19,6 +21,7 @@ pub struct SequenceDataset {
 }
 
 pub trait SequenceDataSource {
+    fn checksum(&self) -> Vec<u8>;
     fn sample(&self, index: usize) -> Option<SequenceSample>;
     fn len(&self) -> usize;
 }
@@ -55,12 +58,35 @@ impl SequenceDataset {
 }
 
 impl SequenceDataSource for SequenceDataset {
+    fn checksum(&self) -> Vec<u8> {
+        let mut hasher = Sha256::new();
+        hasher.update((self.input_size as u64).to_le_bytes());
+        hasher.update((self.samples.len() as u64).to_le_bytes());
+
+        for sample in &self.samples {
+            hash_sample(&mut hasher, sample);
+        }
+
+        hasher.finalize().to_vec()
+    }
+
     fn sample(&self, index: usize) -> Option<SequenceSample> {
         self.samples.get(index).cloned()
     }
 
     fn len(&self) -> usize {
         self.samples.len()
+    }
+}
+
+fn hash_sample(hasher: &mut Sha256, sample: &SequenceSample) {
+    hasher.update((sample.steps.len() as u64).to_le_bytes());
+
+    for step in &sample.steps {
+        hasher.update((step.len() as u64).to_le_bytes());
+        for value in step {
+            hasher.update(value.to_le_bytes());
+        }
     }
 }
 
@@ -86,6 +112,37 @@ mod tests {
         assert_eq!(SequenceDataSource::len(&dataset), 1);
         let fetched = SequenceDataSource::sample(&dataset, 0).unwrap();
         assert_eq!(fetched, samples[0]);
+    }
+
+    #[test]
+    fn checksum_is_deterministic() {
+        let samples = vec![SequenceSample {
+            steps: vec![vec![0.0, 1.0], vec![2.0, 3.0]],
+        }];
+
+        let dataset_a = SequenceDataset::new(samples.clone(), 2);
+        let dataset_b = SequenceDataset::new(samples, 2);
+
+        assert_eq!(
+            SequenceDataSource::checksum(&dataset_a),
+            SequenceDataSource::checksum(&dataset_b)
+        );
+    }
+
+    #[test]
+    fn checksum_changes_when_data_changes() {
+        let mut sample = SequenceSample {
+            steps: vec![vec![0.0, 1.0], vec![2.0, 3.0]],
+        };
+        let baseline = SequenceDataset::new(vec![sample.clone()], 2);
+
+        sample.steps[0][0] = 42.0;
+        let modified = SequenceDataset::new(vec![sample], 2);
+
+        assert_ne!(
+            SequenceDataSource::checksum(&baseline),
+            SequenceDataSource::checksum(&modified)
+        );
     }
 
     #[test]

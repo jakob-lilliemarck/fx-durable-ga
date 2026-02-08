@@ -1,4 +1,7 @@
-use crate::chainable::{Chain, ToTx, TxType};
+use crate::{
+    chainable::{Chain, ToTx, TxType},
+    repositories::encoders::repository_tx::TxRepository,
+};
 use chrono::{DateTime, Utc};
 use futures::future::BoxFuture;
 use sqlx::{PgPool, PgTransaction};
@@ -28,30 +31,13 @@ pub struct Repository {
     pool: PgPool,
 }
 
-pub struct TxRepository<'tx> {
-    tx: PgTransaction<'tx>,
-}
-
 impl Repository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
 
-    pub async fn get(&self, id: &Uuid) -> Result<Encoder, super::Error> {
-        super::queries::get(&self.pool, id).await
-    }
-}
-
-impl<'tx> TxRepository<'tx> {
-    pub async fn store(&mut self, encoder: &Encoder) -> Result<Encoder, super::Error> {
-        super::queries::store(&mut *self.tx, encoder).await
-    }
-}
-
-impl<'tx> ToTx<'tx> for TxRepository<'tx> {
-    /// Extracts the underlying database transaction.
-    fn tx(self) -> PgTransaction<'tx> {
-        self.tx
+    pub async fn get_encoder(&self, id: &Uuid) -> Result<Option<Encoder>, super::Error> {
+        super::queries::get_encoder(&self.pool, id).await
     }
 }
 

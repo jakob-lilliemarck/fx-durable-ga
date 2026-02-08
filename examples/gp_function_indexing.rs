@@ -1,9 +1,12 @@
 use anyhow::Result;
 use fx_durable_ga::bootstrap;
-use fx_durable_ga::services::indexing::encoder::dataset::{SequenceDataSource, SequenceSample};
+use fx_durable_ga::services::indexing::encoder::dataset::{
+    SequenceDataSource, SequenceDataset, SequenceSample,
+};
 use fx_durable_ga::services::indexing::encoder::train::AutoencoderTrainConfig;
 use fx_durable_ga::services::indexing::{EncodeInput, TrainModelConfig};
 use sqlx::postgres::PgPoolOptions;
+use uuid::Uuid;
 
 const LATENT_SIZE: usize = 32;
 const HIDDEN_SIZE: usize = 32; //  HIDDEN_SIZE <= LATENT_SIZE
@@ -24,7 +27,7 @@ async fn main() -> Result<()> {
         .connect(&database_url)
         .await?;
 
-    let service = bootstrap::ServiceBuilder::default()
+    let mut service = bootstrap::ServiceBuilder::default()
         .with_pool(pool)
         .build_indexing_svc();
 
@@ -38,8 +41,10 @@ async fn main() -> Result<()> {
         learning_rate: LEARNING_RATE,
     };
 
+    let encoder_id = Uuid::nil();
     let encoder = service
-        .train_encoder(
+        .get_encoder(
+            encoder_id,
             TrainModelConfig::Lstm(train_config.clone()),
             dataset.clone(),
         )
@@ -50,29 +55,38 @@ async fn main() -> Result<()> {
         .expect("dataset to contain at least one sample");
 
     let programs = build_programs();
-    let mut embeddings = Vec::with_capacity(programs.len());
 
-    for program in programs.iter() {
-        let outputs: Vec<Vec<f32>> = sample.iter().map(|row| program.eval(row)).collect();
-        let transposed = transpose(&outputs);
-        let flattened = flatten(&transposed);
-        let encode_input = EncodeInput {
-            values: flattened,
-            dimensions: vec![
-                transposed.len(),
-                transposed.first().map(|r| r.len()).unwrap_or(0),
-            ],
-        };
+    let encode_inputs: Vec<EncodeInput> = programs
+        .iter()
+        .map(|p| {
+            let outputs: Vec<Vec<f32>> = sample.iter().map(|row| p.eval(row)).collect();
+            let transposed = transpose(&outputs);
+            let flattened = flatten(&transposed);
+            EncodeInput {
+                values: flattened,
+                dimensions: vec![
+                    transposed.len(),
+                    transposed.first().map(|r| r.len()).unwrap_or(0),
+                ],
+            }
+        })
+        .collect();
 
-        let embedding = service.encode(&encoder.id(), &encode_input).await?;
-        embeddings.push(embedding.into_iter().collect::<Vec<f32>>());
-    }
+    service.load(&encoder.id()).await?;
 
-    for i in 0..embeddings.len() {
-        for j in (i + 1)..embeddings.len() {
-            let cosine = cosine_similarity(&embeddings[i], &embeddings[j]);
-            println!("Program {} vs {} cosine: {:.4}", i, j, cosine);
-        }
+    let embedding_ids = service.index(&encode_inputs, &["indexing_example"]).await?;
+
+    let similar = service
+        .find_similar(&embedding_ids[0], "indexing_example", 10)
+        .await?;
+
+    for s in similar {
+        println!(
+            "Program\t{}\tProgam {} cos sim: {:.4}",
+            embedding_ids[0],
+            s.embedding_id(),
+            s.distance()
+        );
     }
 
     Ok(())
@@ -80,7 +94,7 @@ async fn main() -> Result<()> {
 
 #[derive(Clone)]
 struct ExampleDataset {
-    samples: Vec<SequenceSample>,
+    dataset: SequenceDataset,
     raw_samples: Vec<Vec<Vec<f32>>>,
 }
 
@@ -104,8 +118,10 @@ impl ExampleDataset {
             samples.push(SequenceSample { steps: transposed });
         }
 
+        let dataset = SequenceDataset::new(samples, time_steps);
+
         Self {
-            samples,
+            dataset,
             raw_samples,
         }
     }
@@ -116,12 +132,16 @@ impl ExampleDataset {
 }
 
 impl SequenceDataSource for ExampleDataset {
+    fn checksum(&self) -> Vec<u8> {
+        self.dataset.checksum()
+    }
+
     fn sample(&self, index: usize) -> Option<SequenceSample> {
-        self.samples.get(index).cloned()
+        self.dataset.sample(index)
     }
 
     fn len(&self) -> usize {
-        self.samples.len()
+        self.dataset.len()
     }
 }
 
@@ -145,22 +165,6 @@ fn transpose(matrix: &[Vec<f32>]) -> Vec<Vec<f32>> {
     }
 
     transposed
-}
-
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    if a.is_empty() || b.is_empty() || a.len() != b.len() {
-        return 0.0;
-    }
-
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let norm_a: f32 = a.iter().map(|v| v * v).sum::<f32>().sqrt();
-    let norm_b: f32 = b.iter().map(|v| v * v).sum::<f32>().sqrt();
-
-    if norm_a == 0.0 || norm_b == 0.0 {
-        return 0.0;
-    }
-
-    dot / (norm_a * norm_b)
 }
 
 fn build_programs() -> Vec<Program> {

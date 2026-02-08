@@ -2,10 +2,10 @@ use crate::repositories::encoders::Encoder;
 use sqlx::PgExecutor;
 use uuid::Uuid;
 
-pub(crate) async fn get<'tx, E: PgExecutor<'tx>>(
+pub(crate) async fn get_encoder<'tx, E: PgExecutor<'tx>>(
     tx: E,
     id: &Uuid,
-) -> Result<Encoder, super::Error> {
+) -> Result<Option<Encoder>, super::Error> {
     let encoder = sqlx::query_as!(
         Encoder,
         r#"
@@ -24,7 +24,7 @@ pub(crate) async fn get<'tx, E: PgExecutor<'tx>>(
         "#,
         id
     )
-    .fetch_one(tx)
+    .fetch_optional(tx)
     .await?;
 
     Ok(encoder)
@@ -40,7 +40,7 @@ mod tests_get {
     }
 }
 
-pub(crate) async fn store<'tx, E: PgExecutor<'tx>>(
+pub(crate) async fn store_encoder<'tx, E: PgExecutor<'tx>>(
     tx: E,
     encoder: &Encoder,
 ) -> Result<Encoder, super::Error> {

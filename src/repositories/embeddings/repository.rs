@@ -1,109 +1,96 @@
+use crate::{
+    chainable::{Chain, ToTx, TxType},
+    repositories::embeddings::repository_tx::TxRepository,
+};
 use chrono::{DateTime, Utc};
+use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::future::BoxFuture;
-use sqlx::{PgExecutor, PgPool, PgTransaction};
-use std::sync::Arc;
+use sqlx::{PgPool, PgTransaction};
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::{
-    chainable::{Chain, ToTx, TxType},
-    repositories::embeddings::queries::TagRow,
-};
-
-const SIZE: usize = 256;
-
+pub const EMBEDDING_SIZE: usize = 256;
 pub type Value = [f32; 256];
 
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Tag {
+    pub(crate) id: Uuid,
     pub(crate) tag_hash: i64,
     pub(crate) tag_name: String,
     pub(crate) embedding_id: Uuid,
     pub(crate) tagged_at: DateTime<Utc>,
 }
 
+impl Tag {
+    pub fn new(tag_name: String, embedding_id: Uuid, tagged_at: DateTime<Utc>) -> Self {
+        let tag_hash = fnv1a_hash_str_32(&tag_name) as i64;
+
+        Self {
+            id: Uuid::now_v7(),
+            tag_name,
+            tag_hash,
+            embedding_id,
+            tagged_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[cfg_attr(test, derive(PartialEq))]
 pub struct Embedding {
-    pub(crate) id: Uuid,
-    pub(crate) encoded_with: Uuid,
-    pub(crate) encoded_at: DateTime<Utc>,
-    pub(crate) value: Value,
+    pub(super) id: Uuid,
+    pub(super) encoded_with: Uuid,
+    pub(super) encoded_at: DateTime<Utc>,
+    pub(super) value: Value,
+}
+
+impl Embedding {
+    pub fn new(encoded_with: Uuid, encoded_at: DateTime<Utc>, value: super::Value) -> Self {
+        Self {
+            id: Uuid::now_v7(),
+            encoded_with,
+            encoded_at,
+            value,
+        }
+    }
+
+    pub fn id(&self) -> &Uuid {
+        &self.id
+    }
 }
 
 pub struct Similar {
-    pub(crate) id: Uuid,
+    pub(crate) embedding_id: Uuid,
     pub(crate) distance: f64,
 }
 
-pub trait Executable<'tx> {
-    fn executor(&'tx mut self) -> impl PgExecutor<'tx>;
+impl Similar {
+    pub fn embedding_id(&self) -> &Uuid {
+        &self.embedding_id
+    }
+
+    pub fn distance(&self) -> f64 {
+        self.distance
+    }
 }
 
 pub struct Repository {
     pool: PgPool,
 }
 
-impl<'tx> Executable<'tx> for Repository {
-    fn executor(&'tx mut self) -> impl PgExecutor<'tx> {
-        &self.pool
-    }
-}
-
-impl<'tx> Executable<'tx> for Arc<Repository> {
-    fn executor(&'tx mut self) -> impl PgExecutor<'tx> {
-        &(**self).pool
-    }
-}
-
-pub struct TxRepository<'tx> {
-    tx: PgTransaction<'tx>,
-}
-
-impl<'tx> Executable<'tx> for TxRepository<'tx> {
-    fn executor(&'tx mut self) -> impl PgExecutor<'tx> {
-        &mut *self.tx
-    }
-}
-
-pub trait EmbeddingsRepository<'tx>: Executable<'tx> {
-    /// Similarity search at the database level
-    async fn get_similar(
-        &'tx mut self,
-        id: &Uuid,
-        tags: &[i64],
-        limit: i64,
-    ) -> Result<Vec<Similar>, super::Error> {
-        super::queries::get_similar(self.executor(), id, tags, limit).await
-    }
-
-    /// Inserts if the embedding does not exists, otherwise overwrites the current vale.
-    async fn store_embedding(
-        &'tx mut self,
-        embedding: &Embedding,
-    ) -> Result<Embedding, super::Error> {
-        super::queries::store_embedding(self.executor(), embedding).await
-    }
-
-    async fn store_tags<I>(&'tx mut self, tags: I) -> Result<Vec<Tag>, super::Error>
-    where
-        I: IntoIterator<Item = TagRow<'tx>>,
-    {
-        super::queries::store_tags(self.executor(), tags).await
-    }
-}
-
-impl<'tx> EmbeddingsRepository<'tx> for Repository {}
-impl<'tx> EmbeddingsRepository<'tx> for TxRepository<'tx> {}
-impl<'tx> EmbeddingsRepository<'tx> for Arc<Repository> {}
-
 impl Repository {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
     }
-}
 
-impl<'tx> ToTx<'tx> for TxRepository<'tx> {
-    /// Extracts the underlying database transaction.
-    fn tx(self) -> PgTransaction<'tx> {
-        self.tx
+    pub async fn find_similar(
+        &self,
+        embedding_id: &Uuid,
+        tag_name: &str,
+        limit: i64,
+    ) -> Result<Vec<Similar>, super::Error> {
+        super::queries::find_similar(&self.pool, embedding_id, tag_name, limit).await
     }
 }
 

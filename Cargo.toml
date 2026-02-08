@@ -50,6 +50,7 @@ tracing-subscriber = { version = "0.3.19", features = ["json"] }
 burn = { version = "0.20.0-pre.1", default-features = false, features = ["autodiff"], optional = true }
 burn-wgpu = { version = "0.20.0-pre.1", optional = true }
 burn-ndarray = { version = "0.20.0-pre.1" }
+sha2 = "0.10"
 
 [dev-dependencies]
 burn-ndarray = { version = "0.20.0-pre.1" }

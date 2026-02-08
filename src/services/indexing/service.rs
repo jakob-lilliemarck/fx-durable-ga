@@ -2,7 +2,7 @@ use super::encoder::dataset::SequenceDataSource;
 use super::encoder::lstm::{AutoencoderConfig, AutoencoderModel, LstmAutoencoder};
 use super::encoder::train::{AutoencoderTrainConfig, train_autoencoder};
 use crate::repositories::chainable::Chain;
-use crate::repositories::embeddings::{EmbeddingsRepository, Tag};
+use crate::repositories::embeddings::{Embedding, Similar, Tag};
 use crate::repositories::encoders::Encoder;
 use crate::repositories::{self, embeddings, encoders};
 use burn::backend::Autodiff;
@@ -13,7 +13,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json;
 use std::sync::Arc;
-use uuid::{NoContext, Timestamp, Uuid};
+use uuid::Uuid;
 
 type CpuBackend = NdArray<f32>;
 type TrainingBackend = Autodiff<CpuBackend>;
@@ -23,6 +23,7 @@ const MODEL_FORMAT: &str = "burn-bin-f32";
 pub struct Service {
     embeddings: Arc<embeddings::Repository>,
     encoders: Arc<encoders::Repository>,
+    loaded: Option<Encoder>,
 }
 
 pub struct EncodeInput {
@@ -48,49 +49,6 @@ impl ModelConfig {
     }
 }
 
-pub struct Filter {
-    encoder_id: Option<Uuid>,
-    tags: Option<Vec<String>>,
-    ids: Option<Vec<Uuid>>,
-}
-
-impl Default for Filter {
-    fn default() -> Self {
-        Self {
-            encoder_id: None,
-            tags: None,
-            ids: None,
-        }
-    }
-}
-
-impl Filter {
-    pub fn with_encoder_id(&mut self, encoder_id: Uuid) {
-        self.encoder_id = Some(encoder_id)
-    }
-
-    pub fn with_tag(&mut self, tag: String) {
-        if let Some(ref mut tags) = self.tags {
-            tags.push(tag);
-        } else {
-            self.tags = Some(vec![tag]);
-        }
-    }
-
-    pub fn with_id(&mut self, id: Uuid) {
-        if let Some(ref mut ids) = self.ids {
-            ids.push(id);
-        } else {
-            self.ids = Some(vec![id]);
-        }
-    }
-}
-
-pub struct SimilarityResult {
-    pub embedding_id: Uuid,
-    pub distance: f32,
-}
-
 impl Service {
     pub fn new(
         embeddings: Arc<embeddings::Repository>,
@@ -99,29 +57,76 @@ impl Service {
         Self {
             embeddings,
             encoders,
+            loaded: None,
         }
+    }
+
+    // Load a model into the service cache
+    // Models must be loaded prior to calling encode
+    pub async fn load(&mut self, encoder_id: &Uuid) -> Result<(), super::Error> {
+        if self
+            .loaded
+            .as_ref()
+            .map_or(true, |e| return &e.id != encoder_id)
+        {
+            self.loaded = match self.encoders.get_encoder(encoder_id).await? {
+                Some(encoder) => Some(encoder),
+                None => {
+                    return Err(super::Error::NotFoundEncoder(encoder_id.clone()));
+                }
+            };
+        }
+
+        Ok(())
     }
 
     // Encodes input to an embedding using the specified encoder and stores it.
     // Returns ids of stored embeddings
-    pub fn index(
+    pub async fn index(
         &self,
-        encoder_id: &Uuid,
-        input: &EncodeInput,
-        tags: &[&str],
+        inputs: &[EncodeInput],
+        tag_names: &[&str],
     ) -> Result<Vec<Uuid>, super::Error> {
-        // Outputs
-        unimplemented!()
+        let now = Utc::now();
+        let mut embeddings = Vec::with_capacity(inputs.len());
+        for i in inputs {
+            let (encoded_with, value) = self.encode(i)?;
+            embeddings.push(Embedding::new(encoded_with, now, value))
+        }
+
+        let mut tags = Vec::with_capacity(embeddings.len() * tag_names.len());
+
+        for ref t in tag_names {
+            for e in embeddings.iter() {
+                tags.push(Tag::new(t.to_string(), *e.id(), now));
+            }
+        }
+
+        let embedding_ids = self
+            .embeddings
+            .chain(|mut tx| {
+                Box::pin(async move {
+                    let embeddings = tx.store_embeddings(&embeddings).await?;
+                    tx.store_tags(&tags).await?;
+                    let ids = embeddings.iter().map(|e| *e.id()).collect();
+                    Ok((tx, ids))
+                })
+            })
+            .await?;
+
+        Ok(embedding_ids)
     }
 
     // Encodes input to an embedding using the specified encoder
     // Returns the raw embedding
-    pub async fn encode(
+    pub fn encode(
         &self,
-        encoder_id: &Uuid,
         input: &EncodeInput,
-    ) -> Result<repositories::embeddings::Value, super::Error> {
-        let encoder = self.encoders.get(encoder_id).await?;
+    ) -> Result<(Uuid, repositories::embeddings::Value), super::Error> {
+        let encoder = match self.loaded {
+            Some(ref encoder) => encoder,
+            None => return Err(super::Error::NoEncoder),
+        };
 
         if encoder.model_type != "lstm" {
             return Err(super::Error::UnsupportedModel(encoder.model_type.clone()));
@@ -147,7 +152,6 @@ impl Service {
 
         let device = <InferenceBackend as Backend>::Device::default();
         let recorder = BinBytesRecorder::<FullPrecisionSettings>::new();
-        let weights = encoder.model_weights.clone();
         let record =
             Recorder::<InferenceBackend>::load(&recorder, encoder.model_weights.clone(), &device)?;
         let model =
@@ -164,7 +168,7 @@ impl Service {
         let copy_len = latent.len().min(embedding.len());
         embedding[..copy_len].copy_from_slice(&latent[..copy_len]);
 
-        Ok(embedding)
+        Ok((encoder.id, embedding))
     }
 
     pub async fn add_tag<'a>(
@@ -172,37 +176,76 @@ impl Service {
         embedding_ids: &'a [Uuid],
         tag: &'a str,
     ) -> Result<Vec<Tag>, super::Error> {
-        let tag_hash: i64 = 1;
         let tagged_at = Utc::now();
-        let tagged = embedding_ids
+        let tags = embedding_ids
             .iter()
-            .map(|id| (tag_hash, tag, id, &tagged_at));
-        let tags = self.embeddings.clone().store_tags(tagged).await?;
+            .map(|id| Tag::new(tag.to_owned(), id.clone(), tagged_at))
+            .collect::<Vec<Tag>>();
+
+        let tags = self
+            .embeddings
+            .chain(|mut tx| {
+                Box::pin(async move {
+                    let res = tx.store_tags(&tags).await?;
+
+                    Ok((tx, res))
+                })
+            })
+            .await?;
+
         Ok(tags)
     }
 
-    pub fn find_similar(&self, filter: &Filter) -> Result<Vec<Uuid>, super::Error> {
-        let _ = filter;
-        unimplemented!()
+    pub async fn find_similar(
+        &self,
+        embedding_id: &Uuid,
+        tag_name: &str,
+        limit: i64,
+    ) -> Result<Vec<Similar>, super::Error> {
+        let similar = self
+            .embeddings
+            .find_similar(embedding_id, tag_name, limit)
+            .await?;
+        Ok(similar)
     }
 
-    pub async fn train_encoder<D>(
+    pub async fn get_encoder<D>(
         &self,
+        encoder_id: Uuid,
         train_config: TrainModelConfig,
         dataset: D,
     ) -> Result<Encoder, super::Error>
     where
         D: SequenceDataSource,
     {
+        if let Some(encoder) = self.encoders.get_encoder(&encoder_id).await? {
+            return Ok(encoder);
+        };
+
         let (weights, model_config) = self.train_model(&train_config, &dataset)?;
-        let encoder = self.build_encoder(&model_config, weights)?;
+
+        let (shape_in, shape_out) = match model_config {
+            ModelConfig::Lstm(cfg) => (vec![cfg.input_size as i32], cfg.latent_size as i32),
+        };
+
+        let encoder = encoders::Encoder {
+            id: encoder_id,
+            model_type: model_config.model_type().to_string(),
+            model_config: serde_json::to_value(model_config)?,
+            model_weights: weights,
+            model_format: MODEL_FORMAT.to_string(),
+            shape_in,
+            shape_out,
+            trained_at: Utc::now(),
+            trained_on_checksum: dataset.checksum(),
+        };
 
         let encoder = self
             .encoders
             .chain(|mut tx| {
                 let encoder = encoder;
                 Box::pin(async move {
-                    let encoder = tx.store(&encoder).await?;
+                    let encoder = tx.store_encoder(&encoder).await?;
                     Ok((tx, encoder))
                 })
             })
@@ -231,32 +274,5 @@ impl Service {
                 Ok((bytes, model_config))
             }
         }
-    }
-
-    fn build_encoder(
-        &self,
-        model_config: &ModelConfig,
-        model_weights: Vec<u8>,
-    ) -> Result<encoders::Encoder, super::Error> {
-        let (shape_in, shape_out) = match model_config {
-            ModelConfig::Lstm(cfg) => (vec![cfg.input_size as i32], cfg.latent_size as i32),
-        };
-
-        Ok(encoders::Encoder {
-            id: Self::next_encoder_id(),
-            model_type: model_config.model_type().to_string(),
-            model_config: serde_json::to_value(model_config)?,
-            model_weights,
-            model_format: MODEL_FORMAT.to_string(),
-            shape_in,
-            shape_out,
-            trained_at: Utc::now(),
-            trained_on_checksum: Vec::new(),
-        })
-    }
-
-    fn next_encoder_id() -> Uuid {
-        let ts = Timestamp::now(NoContext);
-        Uuid::new_v7(ts)
     }
 }

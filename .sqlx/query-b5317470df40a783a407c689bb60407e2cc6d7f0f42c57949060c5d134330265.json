@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH query_embedding AS (\n            SELECT value\n            FROM embeddings\n            WHERE id = $1\n        )\n        SELECT\n            te.id AS \"embedding_id!: Uuid\",\n            te.value <=> qe.value AS \"distance!: f64\"\n        FROM tagged_embeddings te\n        CROSS JOIN query_embedding qe\n        WHERE\n            te.id != $1\n            AND te.tag_hash = $2\n        ORDER BY \"distance!: f64\", te.id\n        LIMIT $3;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "embedding_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "distance!: f64",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "b5317470df40a783a407c689bb60407e2cc6d7f0f42c57949060c5d134330265"
+}

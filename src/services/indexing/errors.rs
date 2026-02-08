@@ -1,4 +1,5 @@
 use crate::repositories;
+use uuid::Uuid;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -7,6 +8,12 @@ pub enum Error {
 
     #[error("Embeddings repository error: {0}")]
     EmbeddingsRepositoryError(#[from] repositories::embeddings::Error),
+
+    #[error("The encoder could not be found: {0}")]
+    NotFoundEncoder(Uuid),
+
+    #[error("No encoder was loaded")]
+    NoEncoder,
 
     #[error("Model serialization error: {0}")]
     Serialization(#[from] serde_json::Error),
@@ -19,4 +26,7 @@ pub enum Error {
 
     #[error("Unsupported model type: {0}")]
     UnsupportedModel(String),
+
+    #[error("MisalignedInput")]
+    MisalignedInput,
 }
