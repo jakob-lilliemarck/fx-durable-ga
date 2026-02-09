@@ -5,7 +5,7 @@ mod repository_tx;
 
 pub use errors::Error;
 
-pub use queries::{GetTimingsFilter, SearchFilter};
+pub use queries::{GetTimingsFilter, GenotypesFilter};
 pub(crate) use repository::Repository;
 pub(crate) use repository_tx::TxRepository;
 

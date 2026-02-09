@@ -44,7 +44,7 @@ impl Repository {
     #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
     pub(crate) fn search_genotypes(
         &self,
-        filter: &super::queries::SearchFilter,
+        filter: &super::queries::GenotypesFilter,
         limit: i64,
     ) -> impl Future<Output = Result<Vec<(Genotype, Option<f64>)>, Error>> {
         super::queries::search(&self.pool, filter, limit)

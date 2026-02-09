@@ -13,7 +13,7 @@ pub mod bootstrap;
 pub use repositories::chainable;
 
 #[cfg(not(feature = "migration"))]
-pub use repositories::genotypes::SearchFilter as GenotypesFilter;
+pub use repositories::genotypes::GenotypesFilter;
 
 #[cfg(not(feature = "migration"))]
 pub mod services;

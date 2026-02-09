@@ -58,7 +58,7 @@ impl Service {
     #[instrument(level = "debug", skip(self), fields(type_name))]
     pub async fn search_genotypes(
         &self,
-        filter: &genotypes::SearchFilter,
+        filter: &genotypes::GenotypesFilter,
         limit: i64,
     ) -> Result<Vec<(Genotype, Option<f64>)>, Error> {
         let genotypes = self.genotypes.search_genotypes(filter, limit).await?;

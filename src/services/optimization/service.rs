@@ -188,9 +188,6 @@ impl Service {
             }
         };
 
-        // FIXME:
-        // write started_at and completed_at do the database!
-        //
         self.genotypes
             .chain(|mut tx_genotypes| {
                 Box::pin(async move {
@@ -205,7 +202,11 @@ impl Service {
                         .await?;
                     let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
                     publisher
-                        .publish(GenotypeEvaluatedEvent::new(request_id, genotype_id))
+                        .publish(GenotypeEvaluatedEvent::new(
+                            request_id,
+                            genotype.generation_id(),
+                            genotype_id,
+                        ))
                         .await?;
                     Ok((publisher, ()))
                 })
@@ -245,7 +246,7 @@ impl Service {
                 })?;
 
         // Start building up the filters for retrieving a sample of genotypes to select parents from
-        let mut selection_filter = genotypes::SearchFilter::default()
+        let mut selection_filter = genotypes::GenotypesFilter::default()
             .with_request_id(request.id)
             .with_evaluation(true);
 
@@ -473,11 +474,11 @@ impl Service {
         let request = self.requests.get_request(request_id).await?;
 
         let filter = match request.goal {
-            FitnessGoal::Minimize { .. } => genotypes::SearchFilter::default()
+            FitnessGoal::Minimize { .. } => genotypes::GenotypesFilter::default()
                 .with_request_id(request_id)
                 .with_evaluation(true)
                 .with_order_fitness_asc(),
-            FitnessGoal::Maximize { .. } => genotypes::SearchFilter::default()
+            FitnessGoal::Maximize { .. } => genotypes::GenotypesFilter::default()
                 .with_request_id(request_id)
                 .with_evaluation(true)
                 .with_order_fitness_desc(),
@@ -495,7 +496,7 @@ impl Service {
     #[instrument(level = "debug", skip(self), fields(type_name))]
     pub async fn search_genotypes(
         &self,
-        filter: &genotypes::SearchFilter,
+        filter: &genotypes::GenotypesFilter,
         limit: i64,
     ) -> Result<Vec<(Genotype, Option<f64>)>, Error> {
         let genotypes = self.genotypes.search_genotypes(filter, limit).await?;

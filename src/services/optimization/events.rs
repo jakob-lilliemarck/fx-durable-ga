@@ -148,6 +148,7 @@ impl Handler<GenotypeGeneratedEvent> for GenotypeGeneratedHandler {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GenotypeEvaluatedEvent {
     pub request_id: Uuid,
+    pub generation_id: i32,
     pub genotype_id: Uuid,
 }
 
@@ -157,9 +158,10 @@ impl fx_event_bus::Event for GenotypeEvaluatedEvent {
 
 impl GenotypeEvaluatedEvent {
     /// Creates a new genotype evaluated event.
-    pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
+    pub fn new(request_id: Uuid, generation_id: i32, genotype_id: Uuid) -> Self {
         Self {
             request_id,
+            generation_id,
             genotype_id,
         }
     }

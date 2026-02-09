@@ -74,11 +74,11 @@ pub(crate) async fn new_genotypes<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod search_filter_ordering_tests {
-    use super::{SearchFilter, SearchResultsOrder, SortOrder};
+    use super::{GenotypesFilter, SearchResultsOrder, SortOrder};
 
     #[test]
     fn it_sets_completed_at_desc_order() {
-        let filter = SearchFilter::default().with_order_completed_at_desc();
+        let filter = GenotypesFilter::default().with_order_completed_at_desc();
         assert!(matches!(
             filter.order,
             Some(SearchResultsOrder::CompletedAt(SortOrder::Desc))
@@ -87,7 +87,7 @@ mod search_filter_ordering_tests {
 
     #[test]
     fn it_sets_completed_at_asc_order() {
-        let filter = SearchFilter::default().with_order_completed_at_asc();
+        let filter = GenotypesFilter::default().with_order_completed_at_asc();
         assert!(matches!(
             filter.order,
             Some(SearchResultsOrder::CompletedAt(SortOrder::Asc))
@@ -910,34 +910,48 @@ impl Display for SearchResultsOrder {
 
 /// Filter criteria for searching genotypes with various conditions.
 #[derive(Debug)]
-pub struct SearchFilter {
-    request_id: Option<Uuid>,
-    generation_id: Option<i32>,
+pub struct GenotypesFilter {
+    request_ids: Option<Vec<Uuid>>,
+    generation_ids: Option<Vec<i32>>,
+    genotype_ids: Option<Vec<Uuid>>,
     has_evaluation: Option<bool>,
     order: Option<SearchResultsOrder>,
 }
 
-impl Default for SearchFilter {
+impl Default for GenotypesFilter {
     fn default() -> Self {
-        SearchFilter {
-            request_id: None,
-            generation_id: None,
+        GenotypesFilter {
+            request_ids: None,
+            generation_ids: None,
+            genotype_ids: None,
             has_evaluation: None,
             order: None,
         }
     }
 }
 
-impl SearchFilter {
+impl GenotypesFilter {
     /// Filters genotypes by request ID.
     pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = Some(request_id);
+        self.request_ids
+            .get_or_insert_with(Vec::new)
+            .push(request_id);
         self
     }
 
     #[allow(dead_code)]
     pub fn with_generation_id(mut self, generation_id: i32) -> Self {
-        self.generation_id = Some(generation_id);
+        self.generation_ids
+            .get_or_insert_with(Vec::new)
+            .push(generation_id);
+        self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_genotype_id(mut self, genotype_id: Uuid) -> Self {
+        self.genotype_ids
+            .get_or_insert_with(Vec::new)
+            .push(genotype_id);
         self
     }
 
@@ -982,7 +996,7 @@ impl SearchFilter {
 #[instrument(level = "debug", skip(tx), fields(filter = ?filter))]
 pub(crate) async fn search<'tx, E: PgExecutor<'tx>>(
     tx: E,
-    filter: &SearchFilter,
+    filter: &GenotypesFilter,
     limit: i64,
 ) -> Result<Vec<(Genotype, Option<f64>)>, super::Error> {
     let rows = sqlx::query!(
@@ -1002,44 +1016,48 @@ pub(crate) async fn search<'tx, E: PgExecutor<'tx>>(
             FROM fx_durable_ga.genotypes g
             LEFT JOIN fx_durable_ga.evaluations e ON g.id = e.genotype_id
             WHERE (
-                $1::uuid IS NULL OR g.request_id = $1
+                $1::UUID[] IS NULL OR g.request_id = ANY($1)
             )
             AND (
-                $2::int IS NULL OR g.generation_id = $2
+                $2::INTEGER[] IS NULL OR g.generation_id = ANY($2)
             )
             AND (
-                $3::bool IS NULL OR
+                $3::UUID[] IS NULL OR g.id = ANY($3)
+            )
+            AND (
+                $4::BOOL IS NULL OR
                 CASE
-                    WHEN $3 = true THEN e.fitness IS NOT NULL
+                    WHEN $4 = true THEN e.fitness IS NOT NULL
                     ELSE e.fitness IS NULL
                 END
             )
             ORDER BY
                 CASE
-                    WHEN $4 = 'fitness_desc' THEN e.fitness
+                    WHEN $5 = 'fitness_desc' THEN e.fitness
                     ELSE NULL
                 END DESC NULLS LAST,
                 CASE
-                    WHEN $4 = 'fitness_asc' THEN e.fitness
+                    WHEN $5 = 'fitness_asc' THEN e.fitness
                     ELSE NULL
                 END ASC NULLS LAST,
                 CASE
-                    WHEN $4 = 'random' THEN RANDOM()
+                    WHEN $5 = 'random' THEN RANDOM()
                     ELSE NULL
                 END NULLS LAST,
                 CASE
-                    WHEN $4 = 'completed_at_desc' THEN e.completed_at
+                    WHEN $5 = 'completed_at_desc' THEN e.completed_at
                     ELSE NULL
                 END DESC NULLS LAST,
                 CASE
-                    WHEN $4 = 'completed_at_asc' THEN e.completed_at
+                    WHEN $5 = 'completed_at_asc' THEN e.completed_at
                     ELSE NULL
                 END ASC NULLS LAST,
                 g.id ASC
-            LIMIT $5;
+            LIMIT $6;
         "#,
-        filter.request_id,
-        filter.generation_id,
+        filter.request_ids.as_deref(),
+        filter.generation_ids.as_deref(),
+        filter.genotype_ids.as_deref(),
         filter.has_evaluation,
         filter.order.as_ref().map(|o| o.to_string()),
         limit
@@ -1071,7 +1089,7 @@ pub(crate) async fn search<'tx, E: PgExecutor<'tx>>(
 
 #[cfg(test)]
 mod search_genotypes_tests {
-    use super::{SearchFilter, search};
+    use super::{GenotypesFilter, search};
     use uuid::Uuid;
 
     #[sqlx::test(migrations = false)]
@@ -1080,7 +1098,7 @@ mod search_genotypes_tests {
 
         let (rid_1, _, gids) = super::seeding::seed(&pool).await;
 
-        let found = search(&pool, &SearchFilter::default().with_request_id(rid_1), 5).await?;
+        let found = search(&pool, &GenotypesFilter::default().with_request_id(rid_1), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -1098,7 +1116,7 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search(&pool, &SearchFilter::default().with_generation_id(2), 5).await?;
+        let found = search(&pool, &GenotypesFilter::default().with_generation_id(2), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -1116,7 +1134,7 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search(&pool, &SearchFilter::default().with_evaluation(true), 5).await?;
+        let found = search(&pool, &GenotypesFilter::default().with_evaluation(true), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -1143,7 +1161,7 @@ mod search_genotypes_tests {
 
         let found = search(
             &pool,
-            &SearchFilter::default()
+            &GenotypesFilter::default()
                 .with_evaluation(true)
                 .with_order_fitness_desc(),
             5,
@@ -1175,7 +1193,7 @@ mod search_genotypes_tests {
 
         let found = search(
             &pool,
-            &SearchFilter::default()
+            &GenotypesFilter::default()
                 .with_evaluation(true)
                 .with_order_fitness_asc(),
             5,
@@ -1205,7 +1223,7 @@ mod search_genotypes_tests {
 
         let (.., gids) = super::seeding::seed(&pool).await;
 
-        let found = search(&pool, &SearchFilter::default().with_evaluation(false), 5).await?;
+        let found = search(&pool, &GenotypesFilter::default().with_evaluation(false), 5).await?;
 
         let actual: Vec<(Uuid, Option<f64>)> = found
             .iter()
@@ -1227,7 +1245,7 @@ mod search_genotypes_tests {
 
         let found = search(
             &pool,
-            &SearchFilter::default()
+            &GenotypesFilter::default()
                 .with_request_id(rid_1)
                 .with_evaluation(true)
                 .with_order_random(),
