@@ -15,7 +15,7 @@
 use anyhow::Result;
 use fx_durable_ga::{
     bootstrap::bootstrap,
-    models::{FitnessGoal, GenotypeManager, Schedule, Selector},
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector, TypeName},
     services::optimization::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -40,11 +40,13 @@ struct Point {
     z: f64,
 }
 
-impl GenotypeManager for PointManager {
-    fn name(&self) -> &'static str {
+impl TypeName for PointManager {
+    fn type_name(&self) -> &'static str {
         "point"
     }
+}
 
+impl GenotypeManager for PointManager {
     fn random(&self, rng: &mut dyn RngCore, _user_defined: &Value) -> anyhow::Result<Value> {
         let x = rng.random_range(0.5..1.75);
         let y = rng.random_range(0.75..2.0);

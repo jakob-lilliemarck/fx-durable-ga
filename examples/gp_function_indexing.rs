@@ -26,7 +26,7 @@ use uuid::Uuid;
 const LATENT_SIZE: usize = 32;
 const HIDDEN_SIZE: usize = 32; //  HIDDEN_SIZE <= LATENT_SIZE
 const BATCH_SIZE: usize = 2;
-const EPOCHS: usize = 5;
+const EPOCHS: usize = 10;
 const LEARNING_RATE: f64 = 1e-3;
 const INPUT_SEQUENCES: usize = 1;
 const TIME_STEPS: usize = 100;
@@ -72,17 +72,17 @@ async fn main() -> Result<()> {
 
     service.load(&encoder.id()).await?;
 
-    let tag_name = format!("indexing_example-{}", encoder.id().to_string());
+    let tag_name = &[format!("indexing_example-{}", encoder.id().to_string())];
 
-    let embedding_ids = service.index(&encode_inputs, &[&tag_name]).await?;
+    let embedding_ids = service.index(&encode_inputs, tag_name).await?;
 
     let similar = service
-        .find_similar(&embedding_ids[0], &tag_name, 10)
+        .find_similar(&embedding_ids[0], &tag_name[0], 10)
         .await?;
 
     for s in similar {
         println!(
-            "Program\t{}\tProgam {} cos sim: {:.4}",
+            "Program\t{}\tProgam {} cosine similarity: {:.4}",
             embedding_ids[0],
             s.embedding_id(),
             s.distance()
@@ -177,18 +177,29 @@ fn build_encode_inputs(programs: &[Program], inputs: &ProgramInputsDataset) -> V
     let mut encode_inputs = Vec::new();
 
     for program in programs {
+        let mut stacked_outputs: Vec<Vec<f32>> = Vec::new();
+
         for sequence in inputs.raw_sequences() {
             let outputs: Vec<Vec<f32>> = sequence.iter().map(|row| program.eval(row)).collect();
+            if outputs.is_empty() {
+                continue;
+            }
             let transposed = transpose(&outputs);
-            let flattened = flatten(&transposed);
-            encode_inputs.push(EncodeInput {
-                values: flattened,
-                dimensions: vec![
-                    transposed.len(),
-                    transposed.first().map(|r| r.len()).unwrap_or(0),
-                ],
-            });
+            stacked_outputs.extend(transposed);
         }
+
+        if stacked_outputs.is_empty() {
+            continue;
+        }
+
+        let flattened = flatten(&stacked_outputs);
+        encode_inputs.push(EncodeInput {
+            values: flattened,
+            dimensions: vec![
+                stacked_outputs.len(),
+                stacked_outputs.first().map(|r| r.len()).unwrap_or(0),
+            ],
+        });
     }
 
     encode_inputs

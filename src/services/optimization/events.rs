@@ -147,8 +147,8 @@ impl Handler<GenotypeGeneratedEvent> for GenotypeGeneratedHandler {
 /// Event published when a genotype has been evaluated.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct GenotypeEvaluatedEvent {
-    request_id: Uuid,
-    genotype_id: Uuid,
+    pub request_id: Uuid,
+    pub genotype_id: Uuid,
 }
 
 impl fx_event_bus::Event for GenotypeEvaluatedEvent {

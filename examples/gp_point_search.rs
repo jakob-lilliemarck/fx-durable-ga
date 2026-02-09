@@ -9,7 +9,7 @@ use anyhow::Result;
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use fx_durable_ga::{
     bootstrap::bootstrap,
-    models::{FitnessGoal, GenotypeManager, Schedule, Selector},
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector, TypeName},
     services::optimization::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_jobs::{FX_MQ_JOBS_SCHEMA_NAME, Queries};
@@ -288,11 +288,13 @@ impl GPPointManager {
     }
 }
 
-impl GenotypeManager for GPPointManager {
-    fn name(&self) -> &'static str {
+impl TypeName for GPPointManager {
+    fn type_name(&self) -> &'static str {
         "gp_point"
     }
+}
 
+impl GenotypeManager for GPPointManager {
     fn random(&self, rng: &mut dyn RngCore, _user_defined: &Value) -> anyhow::Result<Value> {
         Ok(serde_json::to_value(Program::random(rng))?)
     }

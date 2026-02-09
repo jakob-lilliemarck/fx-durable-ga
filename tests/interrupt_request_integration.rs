@@ -1,7 +1,7 @@
 use fx_durable_ga::{
     bootstrap::bootstrap,
     migrations,
-    models::{FitnessGoal, GenotypeManager, Schedule, Selector},
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector, TypeName},
     services::optimization::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_jobs::Queries;
@@ -14,15 +14,17 @@ const FX_MQ_JOBS_SCHEMA_NAME: &str = "fx_mq_jobs";
 
 struct TestManager;
 
-impl GenotypeManager for TestManager {
-    fn name(&self) -> &'static str {
+impl TypeName for TestManager {
+    fn type_name(&self) -> &'static str {
         "TestType"
     }
 
-    fn hash(&self) -> i32 {
+    fn type_hash(&self) -> i32 {
         123
     }
+}
 
+impl GenotypeManager for TestManager {
     fn random(
         &self,
         _rng: &mut dyn rand::RngCore,

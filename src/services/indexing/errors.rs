@@ -9,6 +9,9 @@ pub enum Error {
     #[error("Embeddings repository error: {0}")]
     EmbeddingsRepositoryError(#[from] repositories::embeddings::Error),
 
+    #[error("Genotypes repository error: {0}")]
+    GenotypesRepository(#[from] crate::repositories::genotypes::Error),
+
     #[error("The encoder could not be found: {0}")]
     NotFoundEncoder(Uuid),
 

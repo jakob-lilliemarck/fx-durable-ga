@@ -1,7 +1,7 @@
 use super::Error;
 use super::events::{
-    GenotypeEvaluatedEvent, GenotypeGeneratedEvent, OptimizationRequestedEvent, RequestCompletedEvent,
-    RequestInterruptedEvent, RequestTerminatedEvent,
+    GenotypeEvaluatedEvent, GenotypeGeneratedEvent, OptimizationRequestedEvent,
+    RequestCompletedEvent, RequestInterruptedEvent, RequestTerminatedEvent,
 };
 use crate::models::GenotypeManager;
 use crate::models::{

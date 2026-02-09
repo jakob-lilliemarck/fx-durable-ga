@@ -1,6 +1,6 @@
 use crate::infrastructure::typesafe_builder::{Set, Unset};
 use crate::repositories::{embeddings, encoders, genotypes, requests};
-use crate::services::{self, genotype_explorer, indexing, lock, optimization};
+use crate::services::{self, genotype_explorer, genotype_indexing, indexing, lock, optimization};
 use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
@@ -93,13 +93,23 @@ impl ApplicationBuilder<Set<PgPool>> {
     pub fn indexing_service(&self) -> services::indexing::ServiceBuilder {
         match self {
             ApplicationBuilder {
-                genotypes: Some(genotypes),
                 embeddings: Some(embeddings),
                 encoders: Some(encoders),
                 ..
-            } => {
-                indexing::Service::builder(genotypes.clone(), embeddings.clone(), encoders.clone())
-            }
+            } => indexing::Service::builder(embeddings.clone(), encoders.clone()),
+            _ => panic!("Missing dependency while constructing indexing service"),
+        }
+    }
+
+    pub fn genotype_indexing_service(
+        &self,
+        indexing: Arc<services::indexing::Service>,
+    ) -> services::genotype_indexing::ServiceBuilder {
+        match self {
+            ApplicationBuilder {
+                genotypes: Some(genotypes),
+                ..
+            } => genotype_indexing::Service::builder(genotypes.clone(), indexing.clone()),
             _ => panic!("Missing dependency while constructing indexing service"),
         }
     }

@@ -1,13 +1,14 @@
-use crate::services::indexing::EncodeInput;
-use const_fnv1a_hash::fnv1a_hash_str_32;
+use crate::{
+    models::{Genotype, TypeName},
+    services::indexing::EncodeInput,
+};
 
 /// Something that can be indexed by the indexing service
-pub trait Indexable: Send + Sync {
-    fn name(&self) -> &str;
+pub trait GenotypeIndexer: TypeName + Send + Sync {
+    fn input(&self, genotype: &Genotype) -> EncodeInput;
 
-    fn hash(&self) -> i32 {
-        fnv1a_hash_str_32(self.name()) as i32
-    }
-
-    fn encode_inputs(&self) -> Vec<EncodeInput>;
+    /// hash() is intended to capture a hash value of the indexing context.
+    /// For example, a hash of the dataset or configuration options used to produce `EncodeInput`.
+    /// The hash can be used to determine if two embeddings can be meaningfully compared or not.
+    fn context_hash(&self) -> String;
 }

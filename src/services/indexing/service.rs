@@ -1,11 +1,10 @@
 use super::encoder::dataset::SequenceDataSource;
 use super::encoder::lstm::{AutoencoderConfig, AutoencoderModel, LstmAutoencoder};
 use super::encoder::train::{AutoencoderTrainConfig, train_autoencoder};
-use crate::models::Indexable;
 use crate::repositories::chainable::Chain;
 use crate::repositories::embeddings::{Embedding, Similar, Tag};
 use crate::repositories::encoders::Encoder;
-use crate::repositories::{self, embeddings, encoders, genotypes};
+use crate::repositories::{self, embeddings, encoders};
 use burn::backend::Autodiff;
 use burn::prelude::*;
 use burn::record::{BinBytesRecorder, FullPrecisionSettings, Recorder};
@@ -13,7 +12,6 @@ use burn_ndarray::NdArray;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::collections::HashMap;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -23,10 +21,8 @@ type InferenceBackend = CpuBackend;
 const MODEL_FORMAT: &str = "burn-bin-f32";
 
 pub struct Service {
-    pub(super) genotypes: Arc<genotypes::Repository>,
     pub(super) embeddings: Arc<embeddings::Repository>,
     pub(super) encoders: Arc<encoders::Repository>,
-    pub(super) indexable: HashMap<i32, Box<dyn Indexable + 'static>>,
     pub(super) loaded: Option<Encoder>,
 }
 
@@ -55,15 +51,12 @@ impl ModelConfig {
 
 impl Service {
     pub(crate) fn builder(
-        genotypes: Arc<genotypes::Repository>,
         embeddings: Arc<embeddings::Repository>,
         encoders: Arc<encoders::Repository>,
     ) -> super::ServiceBuilder {
         super::ServiceBuilder {
-            genotypes,
             embeddings,
             encoders,
-            indexable: HashMap::new(),
         }
     }
 
@@ -91,7 +84,7 @@ impl Service {
     pub async fn index(
         &self,
         inputs: &[EncodeInput],
-        tag_names: &[&str],
+        tag_names: &[String],
     ) -> Result<Vec<Uuid>, super::Error> {
         let now = Utc::now();
         let mut embeddings = Vec::with_capacity(inputs.len());

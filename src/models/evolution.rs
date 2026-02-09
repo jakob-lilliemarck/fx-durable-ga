@@ -4,21 +4,23 @@ use futures::future::BoxFuture;
 use rand::RngCore;
 use serde_json::Value;
 
+pub trait TypeName {
+    /// Unique name identifier for the type
+    fn type_name(&self) -> &'static str;
+
+    /// Hash derived from the name for efficient type identification.
+    /// Default implementation provided using FNV-1a.
+    fn type_hash(&self) -> i32 {
+        fnv1a_hash_str_32(self.type_name()) as i32
+    }
+}
+
 /// A type-erased manager for a specific genotype.
 ///
 /// This is the trait the framework interacts with via a registry. Implementors of this
 /// trait provide the bridge between the framework's generic `serde_json::Value` representation
 /// and the user's concrete genotype type.
-pub trait GenotypeManager: Send + Sync {
-    /// Unique name identifier for the type being managed.
-    fn name(&self) -> &'static str;
-
-    /// Hash derived from the name for efficient type identification.
-    /// Default implementation provided using FNV-1a.
-    fn hash(&self) -> i32 {
-        fnv1a_hash_str_32(self.name()) as i32
-    }
-
+pub trait GenotypeManager: TypeName + Send + Sync {
     /// Generate a new, random genome as a JSON Value.
     fn random(&self, rng: &mut dyn RngCore, user_defined: &Value) -> Result<Value>;
 

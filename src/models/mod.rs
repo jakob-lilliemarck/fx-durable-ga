@@ -9,11 +9,12 @@ mod schedule;
 mod selector;
 
 pub use evolution::GenotypeManager;
+pub use evolution::TypeName;
 pub use genotype::Evaluation;
 pub use genotype::Genotype;
 pub use genotype::TimingsSummary;
 pub use goal::FitnessGoal;
-pub use indexable::Indexable;
+pub use indexable::GenotypeIndexer;
 pub use request::Request;
 pub use schedule::Schedule;
 pub use selector::{SelectionError, Selector};

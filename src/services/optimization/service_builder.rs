@@ -19,13 +19,13 @@ pub struct ServiceBuilder {
 }
 
 impl ServiceBuilder {
-    #[instrument(level = "debug", skip(self, manager), fields(type_name = manager.name(), type_hash = manager.hash()))]
+    #[instrument(level = "debug", skip(self, manager), fields(type_name = manager.type_name(), type_hash = manager.type_hash()))]
     pub fn with_genotype_manager<M>(mut self, manager: M) -> Self
     where
         M: GenotypeManager + 'static,
     {
         self.genotype_managers
-            .insert(manager.hash(), Box::new(manager));
+            .insert(manager.type_hash(), Box::new(manager));
         self
     }
 

@@ -20,7 +20,7 @@ use anyhow::Result;
 use const_fnv1a_hash::fnv1a_hash_str_32;
 use fx_durable_ga::{
     bootstrap::bootstrap,
-    models::{FitnessGoal, GenotypeManager, Schedule, Selector},
+    models::{FitnessGoal, GenotypeManager, Schedule, Selector, TypeName},
     services::optimization::{register_event_handlers, register_job_handlers},
 };
 use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
@@ -245,10 +245,13 @@ struct ResultOutput {
     validation_loss: f64,
 }
 
-impl GenotypeManager for FeatureManager {
-    fn name(&self) -> &'static str {
+impl TypeName for FeatureManager {
+    fn type_name(&self) -> &'static str {
         TYPE_NAME
     }
+}
+
+impl GenotypeManager for FeatureManager {
     fn random(&self, rng: &mut dyn RngCore, _user_defined: &Value) -> anyhow::Result<Value> {
         Ok(FeatureConfig::random(rng).to_json())
     }
