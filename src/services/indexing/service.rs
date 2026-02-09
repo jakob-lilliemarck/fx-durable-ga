@@ -1,6 +1,7 @@
 use super::encoder::dataset::SequenceDataSource;
 use super::encoder::lstm::{AutoencoderConfig, AutoencoderModel, LstmAutoencoder};
 use super::encoder::train::{AutoencoderTrainConfig, train_autoencoder};
+use crate::models::EncodeInput;
 use crate::repositories::chainable::Chain;
 use crate::repositories::embeddings::{Embedding, Similar, Tag};
 use crate::repositories::encoders::Encoder;
@@ -24,11 +25,6 @@ pub struct Service {
     pub(super) embeddings: Arc<embeddings::Repository>,
     pub(super) encoders: Arc<encoders::Repository>,
     pub(super) loaded: Option<Encoder>,
-}
-
-pub struct EncodeInput {
-    pub values: Vec<f32>,
-    pub dimensions: Vec<usize>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -116,7 +112,6 @@ impl Service {
         Ok(embedding_ids)
     }
 
-    // Encodes input to an embedding using the specified encoder
     // Returns the raw embedding
     pub fn encode(
         &self,

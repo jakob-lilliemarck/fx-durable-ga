@@ -97,26 +97,34 @@ impl Service {
 
     pub async fn index_genotypes(
         &self,
-        key: &GroupingKey,
-        ids: &[Uuid],
+        grouping_key: &GroupingKey,
+        genotype_ids: &[Uuid],
     ) -> Result<Option<()>, super::Error> {
-        let genotypes = self.genotypes.get_genotypes(ids).await?;
+        let mut filter = GenotypesFilter::default();
+        for id in genotype_ids {
+            filter = filter.with_genotype_id(*id);
+        }
 
-        let indexer = match self.indexers.get(&key.type_hash) {
+        let genotypes = self
+            .genotypes
+            .search_genotypes(&filter, genotype_ids.len() as i64)
+            .await?;
+
+        let indexer = match self.indexers.get(&grouping_key.type_hash) {
             Some(indexer) => indexer,
             None => return Ok(None),
         };
 
-        let mut inputs = Vec::with_capacity(ids.len());
-        for genotype in genotypes {
+        let mut inputs = Vec::with_capacity(genotype_ids.len());
+        for (genotype, _) in genotypes {
             inputs.push(indexer.input(&genotype));
         }
 
         let tags = &[
-            format!("type_hash:{}", key.type_hash),
-            format!("request_id:{}", key.request_id),
-            format!("generation_id:{}", key.generation_id),
-            format!("context_hash:{}", key.context_hash),
+            format!("type_hash:{}", grouping_key.type_hash),
+            format!("request_id:{}", grouping_key.request_id),
+            format!("generation_id:{}", grouping_key.generation_id),
+            format!("context_hash:{}", grouping_key.context_hash),
         ];
 
         self.indexing.index(&inputs, tags).await?;

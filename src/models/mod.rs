@@ -14,7 +14,7 @@ pub use genotype::Evaluation;
 pub use genotype::Genotype;
 pub use genotype::TimingsSummary;
 pub use goal::FitnessGoal;
-pub use indexable::GenotypeIndexer;
+pub use indexable::{EncodeInput, GenotypeIndexer};
 pub use request::Request;
 pub use schedule::Schedule;
 pub use selector::{SelectionError, Selector};

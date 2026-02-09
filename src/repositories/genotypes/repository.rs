@@ -26,12 +26,6 @@ impl Repository {
         super::queries::get_genotype(&self.pool, id).await
     }
 
-    /// Retrieves a collection of genotypes by IDs.
-    #[instrument(level = "debug", skip(self), fields(genotype_ids = ?ids))]
-    pub(crate) async fn get_genotypes(&self, ids: &[Uuid]) -> Result<Vec<Genotype>, Error> {
-        unimplemented!()
-    }
-
     /// Gets population statistics for an optimization request.
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
     pub(crate) fn get_population(

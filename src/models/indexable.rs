@@ -1,7 +1,9 @@
-use crate::{
-    models::{Genotype, TypeName},
-    services::indexing::EncodeInput,
-};
+use crate::models::{Genotype, TypeName};
+
+pub struct EncodeInput {
+    pub values: Vec<f32>,
+    pub dimensions: Vec<usize>,
+}
 
 /// Something that can be indexed by the indexing service
 pub trait GenotypeIndexer: TypeName + Send + Sync {
