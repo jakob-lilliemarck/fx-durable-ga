@@ -11,7 +11,7 @@ impl<'tx> TxRepository<'tx> {
         super::queries::store_encoder(&mut *self.tx, encoder).await
     }
 
-    pub async fn toggle_encoder_pairing(
+    pub(crate) async fn toggle_encoder_pairing(
         &mut self,
         type_hash: i32,
         encoder_id: &Uuid,

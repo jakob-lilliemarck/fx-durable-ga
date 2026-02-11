@@ -26,6 +26,7 @@ pub struct Service {
 }
 
 const GENOTYPES_PAGE_LIMIT: i64 = 1_000;
+const GENOTYPES_INDEXING_BATCH_SIZE: usize = 200;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct GroupingKey {
@@ -114,9 +115,14 @@ impl Service {
 
         let jobs = groups
             .drain()
-            .map(|(grouping_key, genotype_ids)| IndexGenotypesMessage {
-                grouping_key,
-                genotype_ids,
+            .flat_map(|(grouping_key, genotype_ids)| {
+                genotype_ids
+                    .chunks(GENOTYPES_INDEXING_BATCH_SIZE)
+                    .map(|chunk| IndexGenotypesMessage {
+                        grouping_key: grouping_key.clone(),
+                        genotype_ids: chunk.to_vec(),
+                    })
+                    .collect::<Vec<_>>()
             })
             .collect::<Vec<_>>();
 
@@ -201,5 +207,28 @@ impl Service {
             format!("type_hash:{}", grouping_key.type_hash),
             format!("context_hash:{}", context_hash),
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests_index_genotypes {
+    #[sqlx::test(migrations = false)]
+    async fn it_creates_indexing_jobs(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // tests index_genotypes
+        // assert that indexing jobs gets created
+        // assert that each created job has the expected type_hash and encoder_id
+        // assert that the message payload "genotype_ids" does not exceed GENOTYPES_INDEXING_BATCH_SIZE
+        unimplemented!()
+    }
+}
+
+#[cfg(test)]
+mod tests_index_genotype_group {
+    #[sqlx::test(migrations = false)]
+    async fn it_indexes_a_genotype_group(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        // tests index_genotype_group
+        // assert that expected embeddings were created
+        // assert that the embedding was tagged with the expected tags
+        unimplemented!()
     }
 }
