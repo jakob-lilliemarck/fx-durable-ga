@@ -9,3 +9,6 @@ pub use repository::Repository;
 pub use repository::Similar;
 pub use repository::Tag;
 pub use repository::Value;
+
+#[cfg(test)]
+pub(crate) use queries::*;

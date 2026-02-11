@@ -59,7 +59,10 @@ async fn genotype_indexing_end_to_end(
 
     let indexing_service = app_builder.indexing_service().build();
 
-    seed_encoder(&pool).await?;
+    let encoder_id = seed_encoder(&pool).await?;
+    indexing_service
+        .enable_encoder_pairing(&encoder_id, TestIndexer::TYPE_HASH)
+        .await?;
 
     let indexing_service = Arc::new(indexing_service);
 

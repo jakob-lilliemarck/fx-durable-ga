@@ -346,79 +346,453 @@ impl Service {
 }
 
 #[cfg(test)]
+mod test_support {
+    use super::super::encoder::dataset::{SequenceDataset, SequenceSample};
+    use super::super::encoder::lstm::AutoencoderConfig;
+    use super::*;
+    use crate::bootstrap::ApplicationBuilder;
+    use crate::services::indexing::TrainModelConfig;
+    use anyhow::Context;
+    use burn::record::{BinBytesRecorder, FullPrecisionSettings, Recorder};
+    use burn_ndarray::NdArray;
+    use fx_event_bus::test_tools::get_unacknowledged_events;
+    use sqlx::{PgPool, Row};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    pub(crate) struct TestContext {
+        pub(crate) service: Arc<Service>,
+        pub(crate) embeddings: Arc<embeddings::Repository>,
+        pub(crate) encoders: Arc<encoders::Repository>,
+    }
+
+    pub(crate) async fn build_context(pool: &PgPool) -> anyhow::Result<TestContext> {
+        let app_builder = ApplicationBuilder::default().with_pool(pool.clone());
+        let service = Arc::new(app_builder.indexing_service().build());
+
+        let embeddings_repo = Arc::new(embeddings::Repository::new(pool.clone()));
+        let ttl = Duration::from_secs(60 * 10);
+        let capacity = 20;
+        let encoders_repo = Arc::new(encoders::Repository::new(pool.clone(), ttl, capacity));
+
+        Ok(TestContext {
+            service,
+            embeddings: embeddings_repo,
+            encoders: encoders_repo,
+        })
+    }
+
+    pub(crate) async fn seed_encoder(pool: &PgPool) -> anyhow::Result<Uuid> {
+        type TestBackend = NdArray<f32>;
+
+        let config = AutoencoderConfig {
+            input_size: 2,
+            hidden_size: 4,
+            latent_size: 2,
+        };
+
+        let device = <TestBackend as Backend>::Device::default();
+        let model = lstm::LstmAutoencoder::<TestBackend>::new(&device, config);
+        let recorder = BinBytesRecorder::<FullPrecisionSettings>::new();
+        let model_bytes = Recorder::<TestBackend>::record(&recorder, model.into_record(), ())?;
+
+        let encoder = encoders::Encoder {
+            id: Uuid::now_v7(),
+            model_type: "lstm".to_string(),
+            model_config: serde_json::to_value(ModelConfig::Lstm(config))?,
+            model_weights: model_bytes,
+            model_format: MODEL_FORMAT.to_string(),
+            shape_in: vec![2],
+            shape_out: 2,
+            trained_at: Utc::now(),
+            trained_on_checksum: vec![1, 2, 3, 4],
+        };
+
+        let stored = encoders::store_encoder(pool, &encoder)
+            .await
+            .context("store encoder")?;
+
+        Ok(stored.id())
+    }
+
+    pub(crate) fn encode_input(values: (f32, f32)) -> EncodeInput {
+        EncodeInput {
+            values: vec![values.0, values.1],
+            dimensions: vec![1, 2],
+        }
+    }
+
+    pub(crate) fn dataset_for_training() -> SequenceDataset {
+        SequenceDataset::new(
+            vec![
+                SequenceSample {
+                    steps: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
+                },
+                SequenceSample {
+                    steps: vec![vec![0.5, 0.6]],
+                },
+            ],
+            2,
+        )
+    }
+
+    pub(crate) fn training_config() -> TrainModelConfig {
+        TrainModelConfig::Lstm(AutoencoderTrainConfig {
+            input_size: 2,
+            hidden_size: 4,
+            latent_size: 2,
+            batch_size: 2,
+            epochs: 1,
+            learning_rate: 1e-3,
+        })
+    }
+
+    pub(crate) async fn event_count(pool: &PgPool) -> anyhow::Result<i64> {
+        let count = get_unacknowledged_events(pool).await?;
+        Ok(count)
+    }
+
+    pub(crate) async fn latest_pairing_state(
+        pool: &PgPool,
+        encoder_id: &Uuid,
+        type_hash: i32,
+    ) -> anyhow::Result<Option<bool>> {
+        let row = sqlx::query(
+            r#"
+            SELECT is_enabled
+            FROM fx_durable_ga.encoder_toggles
+            WHERE encoder_id = $1 AND type_hash = $2
+            ORDER BY timestamp DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(encoder_id)
+        .bind(type_hash)
+        .fetch_optional(pool)
+        .await?;
+
+        let state = match row {
+            Some(row) => Some(row.try_get("is_enabled")?),
+            None => None,
+        };
+
+        Ok(state)
+    }
+}
+
+#[cfg(test)]
 mod tests_index_many {
+    use super::test_support;
+    use super::*;
+    use crate::migrations;
+    use sqlx::Row;
+
     #[sqlx::test(migrations = false)]
     async fn it_indexes_many(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // index many
-        // assert embeddings were created
-        // assert tags were created
-        // assert events were dispatched
-        todo!("it_indexes_many")
+        migrations::run_default_migrations(&pool).await?;
+
+        let ctx = test_support::build_context(&pool).await?;
+        let encoder_id = test_support::seed_encoder(&pool).await?;
+
+        let inputs = vec![
+            test_support::encode_input((1.0, 2.0)),
+            test_support::encode_input((3.0, 4.0)),
+        ];
+        let tags = vec!["type:Genotype".to_string(), "context:test".to_string()];
+
+        let before_events = test_support::event_count(&pool).await?;
+
+        let embedding_ids = ctx.service.index_many(&encoder_id, &inputs, &tags).await?;
+
+        assert_eq!(embedding_ids.len(), inputs.len());
+
+        let rows = sqlx::query(
+            r#"
+            SELECT id, encoded_with
+            FROM fx_durable_ga.embeddings
+            WHERE id = ANY($1)
+            ORDER BY encoded_at
+            "#,
+        )
+        .bind(&embedding_ids)
+        .fetch_all(&pool)
+        .await?;
+
+        assert_eq!(rows.len(), inputs.len());
+        for row in rows {
+            let encoded_with: Uuid = row.try_get("encoded_with")?;
+            assert_eq!(encoded_with, encoder_id);
+        }
+
+        let tag_rows = sqlx::query(
+            r#"
+            SELECT embedding_id, tag_name
+            FROM fx_durable_ga.embedding_tags
+            WHERE embedding_id = ANY($1)
+            ORDER BY embedding_id, tag_name
+            "#,
+        )
+        .bind(&embedding_ids)
+        .fetch_all(&pool)
+        .await?;
+
+        assert_eq!(tag_rows.len(), embedding_ids.len() * tags.len());
+
+        let after_events = test_support::event_count(&pool).await?;
+        assert_eq!(after_events - before_events, embedding_ids.len() as i64);
+
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]
     async fn it_errors_on_missing_encoder(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // assert that it errors on missing encoder
-        todo!("it_errors_on_missing_encoder")
+        migrations::run_default_migrations(&pool).await?;
+
+        let ctx = test_support::build_context(&pool).await?;
+        let missing_encoder = Uuid::now_v7();
+        let inputs = vec![test_support::encode_input((5.0, 6.0))];
+
+        let err = ctx
+            .service
+            .index_many(&missing_encoder, &inputs, &[])
+            .await
+            .expect_err("expected missing encoder error");
+
+        match err {
+            super::super::Error::EncodersRepository(encoders::Error::NotFound(id)) => {
+                assert_eq!(id, missing_encoder)
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests_add_tag {
+    use super::test_support;
+    use super::*;
+    use crate::migrations;
+    use sqlx::Row;
+
     #[sqlx::test(migrations = false)]
     async fn it_adds_tag(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // Add a tag to an embedding
-        // Then just assert the returned value is as expected
-        todo!("it_adds_tag")
+        migrations::run_default_migrations(&pool).await?;
+
+        let ctx = test_support::build_context(&pool).await?;
+        let embedding = Embedding::new(Uuid::now_v7(), Utc::now(), [0.0; 256]);
+        let embedding_id = *embedding.id();
+
+        ctx.embeddings
+            .chain(|mut tx| {
+                let embedding = embedding.clone();
+                Box::pin(async move {
+                    tx.store_embeddings(&[embedding]).await?;
+                    Ok((tx, ()))
+                })
+            })
+            .await?;
+
+        let tags = ctx.service.add_tag(&[embedding_id], "favorite").await?;
+
+        assert_eq!(tags.len(), 1);
+        assert_eq!(tags[0].tag_name, "favorite");
+        assert_eq!(tags[0].embedding_id, embedding_id);
+
+        let stored = sqlx::query(
+            r#"
+            SELECT tag_name
+            FROM fx_durable_ga.embedding_tags
+            WHERE embedding_id = $1
+            "#,
+        )
+        .bind(embedding_id)
+        .fetch_all(&pool)
+        .await?;
+
+        assert_eq!(stored.len(), 1);
+        assert_eq!(stored[0].try_get::<String, _>("tag_name")?, "favorite");
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests_find_similar {
+    use super::test_support;
+    use super::*;
+    use crate::migrations;
+
     #[sqlx::test(migrations = false)]
     async fn it_finds_similar(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // store three embeddings with values that are easily human readable and assessable
-        // call find_similar for one of the embeddings
-        // assert the results are in the expected order
-        // maybe assert approx similarity
-        todo!("it_finds_similar")
+        migrations::run_default_migrations(&pool).await?;
+
+        let ctx = test_support::build_context(&pool).await?;
+        let encoder_id = Uuid::now_v7();
+        let now = Utc::now();
+        let tag = "cluster".to_string();
+
+        let build_embedding = |value: f32| {
+            let mut vec = [0.0f32; 256];
+            vec[0] = value;
+            Embedding::new(encoder_id, now, vec)
+        };
+
+        let anchor = build_embedding(0.5);
+        let close = build_embedding(0.55);
+        let far = build_embedding(0.9);
+
+        let embeddings = vec![anchor.clone(), close.clone(), far.clone()];
+        let tags: Vec<Tag> = embeddings
+            .iter()
+            .map(|embedding| Tag::new(tag.clone(), *embedding.id(), now))
+            .collect();
+
+        ctx.embeddings
+            .chain(|mut tx| {
+                let embeddings = embeddings.clone();
+                let tags = tags.clone();
+                Box::pin(async move {
+                    tx.store_embeddings(&embeddings).await?;
+                    tx.store_tags(&tags).await?;
+                    Ok((tx, ()))
+                })
+            })
+            .await?;
+
+        let similar = ctx.service.find_similar(anchor.id(), &tag, 2).await?;
+
+        assert_eq!(similar.len(), 2);
+        assert_eq!(similar[0].embedding_id(), close.id());
+        assert_eq!(similar[1].embedding_id(), far.id());
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests_train_encoder {
+    use super::test_support;
+    use super::*;
+    use crate::migrations;
+
     #[sqlx::test(migrations = false)]
     async fn it_trains_an_encoder(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // train an encoder
-        // We're not asserting the quality of the encoded values here
-        // This is just a smoke-test to make sure training works
-        todo!("it_trains_an_encoder")
+        migrations::run_default_migrations(&pool).await?;
+
+        let ctx = test_support::build_context(&pool).await?;
+        let dataset = test_support::dataset_for_training();
+        let config = test_support::training_config();
+        let encoder_id = Uuid::now_v7();
+
+        let checksum = dataset.checksum();
+        let encoder = ctx
+            .service
+            .train_encoder(encoder_id, config.clone(), dataset)
+            .await?;
+
+        assert_eq!(encoder.id(), encoder_id);
+        assert_eq!(encoder.model_type, "lstm");
+        assert_eq!(encoder.shape_in, vec![2]);
+        assert_eq!(encoder.shape_out, 2);
+        assert_eq!(encoder.trained_on_checksum, checksum);
+
+        let fetched = ctx.encoders.get_encoder(&encoder_id).await?;
+        assert_eq!(fetched.id(), encoder_id);
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests_toggling_encoder_pairings {
+    use super::test_support;
+    use crate::migrations;
+
     #[sqlx::test(migrations = false)]
     async fn it_enables_encoder_pairing(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // enable an encoder pairing
-        // assert the returned value
-        // assert an event was created with the expected values
-        todo!("it_enables_encoder_pairing")
+        migrations::run_default_migrations(&pool).await?;
+
+        let ctx = test_support::build_context(&pool).await?;
+        let encoder_id = test_support::seed_encoder(&pool).await?;
+        let type_hash = 10_001;
+        let before_events = test_support::event_count(&pool).await?;
+
+        let enabled = ctx
+            .service
+            .enable_encoder_pairing(&encoder_id, type_hash)
+            .await?;
+
+        assert!(enabled);
+
+        let state = test_support::latest_pairing_state(&pool, &encoder_id, type_hash).await?;
+        assert_eq!(state, Some(true));
+
+        let after_events = test_support::event_count(&pool).await?;
+        assert_eq!(after_events, before_events + 1);
+
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]
     async fn it_disabled_encoder_pairing(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // disable an encoder pairing
-        // assert the returned value
-        // assert an event was created with the expected values
-        todo!("it_disabled_encoder_pairing")
+        migrations::run_default_migrations(&pool).await?;
+
+        let ctx = test_support::build_context(&pool).await?;
+        let encoder_id = test_support::seed_encoder(&pool).await?;
+        let type_hash = 10_002;
+
+        ctx.service
+            .enable_encoder_pairing(&encoder_id, type_hash)
+            .await?;
+
+        let before_disable_events = test_support::event_count(&pool).await?;
+
+        let disabled = ctx
+            .service
+            .disable_encoder_pairing(&encoder_id, type_hash)
+            .await?;
+
+        assert!(!disabled);
+
+        let state = test_support::latest_pairing_state(&pool, &encoder_id, type_hash).await?;
+        assert_eq!(state, Some(false));
+
+        let active_pairings = ctx.encoders.get_encoder_pairings(&[type_hash]).await?;
+        assert!(active_pairings.is_empty());
+
+        let after_disable_events = test_support::event_count(&pool).await?;
+        assert_eq!(after_disable_events, before_disable_events + 1);
+
+        Ok(())
     }
 
     #[sqlx::test(migrations = false)]
     async fn it_only_fires_events_on_state_changed(pool: sqlx::PgPool) -> anyhow::Result<()> {
-        // disable an encoder pairing twice
-        // assert the returned values
-        // assert that only one events were created
-        todo!("it_only_fires_events_on_state_changed")
+        migrations::run_default_migrations(&pool).await?;
+
+        let ctx = test_support::build_context(&pool).await?;
+        let encoder_id = test_support::seed_encoder(&pool).await?;
+        let type_hash = 10_003;
+
+        let before = test_support::event_count(&pool).await?;
+        let first = ctx
+            .service
+            .disable_encoder_pairing(&encoder_id, type_hash)
+            .await?;
+        assert!(!first);
+        let after_first = test_support::event_count(&pool).await?;
+        assert_eq!(after_first, before + 1);
+
+        let second = ctx
+            .service
+            .disable_encoder_pairing(&encoder_id, type_hash)
+            .await?;
+        assert!(!second);
+        let after_second = test_support::event_count(&pool).await?;
+        assert_eq!(after_second, after_first);
+
+        Ok(())
     }
 }
