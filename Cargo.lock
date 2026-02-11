@@ -1904,7 +1904,9 @@ dependencies = [
 
 [[package]]
 name = "fx-event-bus"
-version = "0.1.10"
+version = "0.1.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b4414de591db123bb3673d0541ad71360717eb92f1e7f20b8288aff1d53c10c"
 dependencies = [
  "anyhow",
  "chrono",

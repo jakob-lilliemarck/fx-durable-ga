@@ -35,7 +35,7 @@ rand = "0.9.2"
 const-fnv1a-hash = "1.1"
 futures = "0.3.31"
 fx-mq-jobs = "~0.1.8"
-fx-event-bus = { version = "~0.1.10", path = "../fx-event-bus", features = ["test-tools"] }
+fx-event-bus = { version = "~0.1.13", features = ["test-tools"] }
 chrono = "0.4.39"
 anyhow = "1.0.95"
 tokio = { version = "1.42.0", features = [
