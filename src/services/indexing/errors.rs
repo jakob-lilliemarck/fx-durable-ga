@@ -15,8 +15,8 @@ pub enum Error {
     #[error("The encoder could not be found: {0}")]
     NotFoundEncoder(Uuid),
 
-    #[error("No encoder was loaded")]
-    NoEncoder,
+    #[error("The specified encoder could not be found: {0}")]
+    NoEncoder(Uuid),
 
     #[error("Model serialization error: {0}")]
     Serialization(#[from] serde_json::Error),

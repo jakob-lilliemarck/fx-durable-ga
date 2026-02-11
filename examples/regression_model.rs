@@ -267,12 +267,13 @@ impl GenotypeManager for ArchitectureManager {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenv::from_filename(".env.local").ok();
     tracing_subscriber::fmt()
         .pretty()
         .with_thread_ids(true)
         .with_max_level(Level::INFO)
         .init();
+
+    dotenv::from_filename(".env.local").ok();
 
     let host_id_str = env::var("HOST_ID").expect("HOST_ID must be set");
     let host_id = Uuid::from_str(&host_id_str).expect("HOST_ID could not be parsed to UUID");

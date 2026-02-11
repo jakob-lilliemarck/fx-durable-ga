@@ -38,7 +38,9 @@ impl Genotype {
         parent_a: Option<&Uuid>,
         parent_b: Option<&Uuid>,
     ) -> Self {
-        // FIXME: add a named error or a better logging here. We know its "serializable" because the compiler guarantees it, but there could still be an error during serialization.
+        // FIXME:
+        // add a named error or a better logging here.
+        // We know its "serializable" because the compiler guarantees it, but there could still be an error during serialization.
         let genome_value = serde_json::to_value(genome).expect("genome must be serializable");
         let genome_hash = Self::compute_genome_hash(&genome_value);
 
@@ -58,7 +60,9 @@ impl Genotype {
 
     /// Computes a deterministic hash of the genome for deduplication and comparison.
     pub(crate) fn compute_genome_hash<G: serde::Serialize>(genome: &G) -> i64 {
-        // FIXME: add a named error or a better logging here. We know its "serializable" because the compiler guarantees it, but there could still be an error during serialization.
+        // FIXME:
+        // add a named error or a better logging here.
+        // We know its "serializable" because the compiler guarantees it, but there could still be an error during serialization.
         let genome_value = serde_json::to_value(genome).expect("genome must be serializable");
         let canonical = canonicalize_json(&genome_value);
         let mut hasher = DefaultHasher::new();

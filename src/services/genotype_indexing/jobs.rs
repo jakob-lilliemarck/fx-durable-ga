@@ -1,4 +1,4 @@
-use crate::{GenotypesFilter, services::genotype_indexing::service::GroupingKey};
+use crate::services::genotype_indexing::service::GroupingKey;
 use fx_mq_jobs::Queries;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Duration};
@@ -8,31 +8,27 @@ use uuid::Uuid;
 // ============================================================
 // IndexGenotypes
 //
-// Indexes any number or selection of genotypes by dispatching
-// jobs scoped at more specific tagging groups
+// Indexes a group of genotypes that share the same GroupingKey
 // ============================================================
 
 /// Message to trigger indexing batch job
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GroupGenotypesMessage {
-    pub request_ids: Option<Vec<Uuid>>,
-    pub generation_ids: Option<Vec<i32>>,
-    pub genotype_ids: Option<Vec<Uuid>>,
+pub struct IndexGenotypesMessage {
+    pub grouping_key: GroupingKey,
+    pub genotype_ids: Vec<Uuid>,
 }
 
-impl fx_mq_jobs::Message for GroupGenotypesMessage {
-    const NAME: &str = "GroupGenotypes";
+impl fx_mq_jobs::Message for IndexGenotypesMessage {
+    const NAME: &str = "IndexGenotypes";
 }
 
-/// Handler that processes requests for indexation of any number
-/// or selection of genotypes, chunking the request to standard
-/// tag groups.
-pub struct GroupGenotypesHandler {
+/// Handler that processes indexing batch-jobs
+pub struct IndexGenotypesHandler {
     service: Arc<super::Service>,
 }
 
-impl fx_mq_jobs::Handler for GroupGenotypesHandler {
-    type Message = GroupGenotypesMessage;
+impl fx_mq_jobs::Handler for IndexGenotypesHandler {
+    type Message = IndexGenotypesMessage;
     type Error = super::Error;
 
     #[instrument(level = "debug", skip(self, message))]
@@ -41,28 +37,18 @@ impl fx_mq_jobs::Handler for GroupGenotypesHandler {
         message: Self::Message,
         lease_renewer: fx_mq_jobs::LeaseRenewer,
     ) -> futures::future::BoxFuture<'a, Result<(), Self::Error>> {
-        let mut filter = GenotypesFilter::default();
-
-        if let Some(request_ids) = message.request_ids {
-            for id in request_ids {
-                filter = filter.with_request_id(id);
-            }
-        }
-
-        if let Some(generation_ids) = message.generation_ids {
-            for id in generation_ids {
-                filter = filter.with_generation_id(id);
-            }
-        }
-
-        if let Some(genotype_ids) = message.genotype_ids {
-            for id in genotype_ids {
-                filter = filter.with_genotype_id(id);
-            }
-        }
-
         Box::pin(async move {
-            self.service.group_genotypes(&filter).await?;
+            if let Err(error) = self
+                .service
+                .index_genotype_group(&message.grouping_key, &message.genotype_ids)
+                .await
+            {
+                tracing::error!(
+                    message = "Error encountered processing IndexGenotypeGroup",
+                    error = error.to_string()
+                );
+                return Err(error);
+            }
             Ok(())
         })
     }
@@ -81,27 +67,26 @@ impl fx_mq_jobs::Handler for GroupGenotypesHandler {
 }
 
 // ============================================================
-// IndexGenotypeGroup - index a group of genotypes
+// IndexGenotype
+//
+// Indexes a single Genotype
 // ============================================================
 
-/// Message to trigger indexing batch job
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct IndexGroupMessage {
-    pub grouping_key: GroupingKey,
-    pub genotype_ids: Vec<Uuid>,
+pub struct IndexGenotypeMessage {
+    pub genotype_id: Uuid,
 }
 
-impl fx_mq_jobs::Message for IndexGroupMessage {
-    const NAME: &str = "IndexGroup";
+impl fx_mq_jobs::Message for IndexGenotypeMessage {
+    const NAME: &str = "IndexGenotype";
 }
 
-/// Handler that processes indexing batch-jobs
-pub struct IndexGroupHandler {
+pub struct IndexGenotypeHandler {
     service: Arc<super::Service>,
 }
 
-impl fx_mq_jobs::Handler for IndexGroupHandler {
-    type Message = IndexGroupMessage;
+impl fx_mq_jobs::Handler for IndexGenotypeHandler {
+    type Message = IndexGenotypeMessage;
     type Error = super::Error;
 
     #[instrument(level = "debug", skip(self, message))]
@@ -111,20 +96,14 @@ impl fx_mq_jobs::Handler for IndexGroupHandler {
         lease_renewer: fx_mq_jobs::LeaseRenewer,
     ) -> futures::future::BoxFuture<'a, Result<(), Self::Error>> {
         Box::pin(async move {
-            match self
-                .service
-                .index_genotypes(&message.grouping_key, &message.genotype_ids)
-                .await
-            {
-                Err(err) => {
-                    tracing::error!(
-                        message = "Failed to process IndexGenotypes",
-                        error = err.to_string()
-                    );
-                    Err(err)
-                }
-                Ok(_) => Ok(()),
+            if let Err(error) = self.service.index_genotype(&message.genotype_id).await {
+                tracing::error!(
+                    message = "Error encountered processing IndexGenotype",
+                    error = error.to_string()
+                );
+                return Err(error);
             }
+            Ok(())
         })
     }
 
@@ -153,10 +132,10 @@ pub fn register_job_handlers(
     _: Arc<Queries>,
 ) -> fx_mq_jobs::RegistryBuilder {
     builder
-        .with_handler(GroupGenotypesHandler {
+        .with_handler(IndexGenotypesHandler {
             service: service.clone(),
         })
-        .with_handler(IndexGroupHandler {
+        .with_handler(IndexGenotypeHandler {
             service: service.clone(),
         })
 }

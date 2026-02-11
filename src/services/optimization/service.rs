@@ -202,11 +202,7 @@ impl Service {
                         .await?;
                     let mut publisher = fx_event_bus::Publisher::from_tx(tx_genotypes);
                     publisher
-                        .publish(GenotypeEvaluatedEvent::new(
-                            request_id,
-                            genotype.generation_id(),
-                            genotype_id,
-                        ))
+                        .publish(GenotypeEvaluatedEvent::new(request_id, genotype_id))
                         .await?;
                     Ok((publisher, ()))
                 })

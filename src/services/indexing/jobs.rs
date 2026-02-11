@@ -24,11 +24,11 @@ impl fx_mq_jobs::Handler for TrainEncoderHandler {
     type Message = TrainEncoderMessage;
     type Error = super::Error;
 
-    #[instrument(level = "debug", skip(self, message))]
+    #[instrument(level = "debug", skip(self))]
     fn handle<'a>(
         &'a self,
-        message: Self::Message,
-        lease_renewer: fx_mq_jobs::LeaseRenewer,
+        _: Self::Message,
+        _: fx_mq_jobs::LeaseRenewer,
     ) -> futures::future::BoxFuture<'a, Result<(), Self::Error>> {
         // Train a new model
         // Needs some way to figure out on what data

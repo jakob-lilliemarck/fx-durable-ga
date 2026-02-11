@@ -15,12 +15,14 @@
 
 use anyhow::Result;
 use fx_durable_ga::bootstrap;
+use fx_durable_ga::models::EncodeInput;
+use fx_durable_ga::services::indexing::TrainModelConfig;
 use fx_durable_ga::services::indexing::encoder::dataset::{
     SequenceDataSource, SequenceDataset, SequenceSample,
 };
 use fx_durable_ga::services::indexing::encoder::train::AutoencoderTrainConfig;
-use fx_durable_ga::services::indexing::{EncodeInput, TrainModelConfig};
 use sqlx::postgres::PgPoolOptions;
+use tracing::Level;
 use uuid::Uuid;
 
 const LATENT_SIZE: usize = 32;
@@ -34,6 +36,12 @@ const INPUT_FEATURES: usize = 5;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_thread_ids(true)
+        .with_max_level(Level::INFO)
+        .init();
+
     let database_url = std::env::var("DATABASE_URL")
         .expect("DATABASE_URL must be set for the GP indexing example");
 
@@ -42,7 +50,7 @@ async fn main() -> Result<()> {
         .connect(&database_url)
         .await?;
 
-    let mut service = bootstrap::ApplicationBuilder::default()
+    let service = bootstrap::ApplicationBuilder::default()
         .with_pool(pool)
         .indexing_service()
         .build();
@@ -70,11 +78,11 @@ async fn main() -> Result<()> {
 
     let encode_inputs = build_encode_inputs(&programs, &function_inputs);
 
-    service.load(&encoder.id()).await?;
-
     let tag_name = &[format!("indexing_example-{}", encoder.id().to_string())];
 
-    let embedding_ids = service.index(&encode_inputs, tag_name).await?;
+    let embedding_ids = service
+        .index_many(&encoder.id(), &encode_inputs, tag_name)
+        .await?;
 
     let similar = service
         .find_similar(&embedding_ids[0], &tag_name[0], 10)

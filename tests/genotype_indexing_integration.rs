@@ -1,14 +1,8 @@
-use std::{
-    collections::BTreeMap,
-    hash::{Hash, Hasher},
-    sync::Arc,
-    time::Duration,
-};
-
 use anyhow::Context;
 use burn::prelude::*;
 use burn::record::{BinBytesRecorder, FullPrecisionSettings, Recorder};
 use burn_ndarray::NdArray;
+use fx_durable_ga::services::indexing::EmbeddingCreatedEvent;
 use fx_durable_ga::services::indexing::encoder::lstm::{
     AutoencoderConfig, AutoencoderModel, LstmAutoencoder,
 };
@@ -21,19 +15,35 @@ use fx_durable_ga::{
 use fx_mq_jobs::Queries;
 use serde_json::{Map, Value, json};
 use sqlx::{
-    PgPool, PgTransaction, Postgres,
+    PgPool, PgTransaction,
     postgres::{PgConnectOptions, PgPoolOptions},
 };
-use tokio::time::sleep;
+use std::{
+    collections::BTreeMap,
+    hash::{Hash, Hasher},
+    sync::Arc,
+    time::Duration,
+};
+use tokio::sync::{Mutex, oneshot};
+use tracing::Level;
 use uuid::Uuid;
 
 const FX_MQ_JOBS_SCHEMA_NAME: &str = "fx_mq_jobs";
+const GENOTYPE_ID: &str = "00000000-0000-0000-0000-000000000001";
+const GENERATION_ID: i32 = 1;
+const TIMEOUT_MS: u64 = 5_000;
 
 #[sqlx::test(migrations = false)]
 async fn genotype_indexing_end_to_end(
     pool_opts: PgPoolOptions,
     connect_opts: PgConnectOptions,
 ) -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_thread_ids(true)
+        .with_max_level(Level::INFO)
+        .init();
+
     let pool = pool_opts
         .clone()
         .max_connections(12)
@@ -47,36 +57,43 @@ async fn genotype_indexing_end_to_end(
 
     let app_builder = ApplicationBuilder::default().with_pool(pool.clone());
 
-    let mut indexing_service = app_builder.indexing_service().build();
-    let encoder_id = seed_encoder(&pool).await?;
-    indexing_service
-        .load(&encoder_id)
-        .await
-        .context("load encoder into indexing service")?;
+    let indexing_service = app_builder.indexing_service().build();
+
+    seed_encoder(&pool).await?;
+
     let indexing_service = Arc::new(indexing_service);
 
-    let genotype_service = Arc::new(
+    let genotype_indexing_svc = Arc::new(
         app_builder
             .genotype_indexing_service(indexing_service.clone())
             .with_indexable(TestIndexer)
             .build(),
     );
 
-    let (request_id, generation_id, genotype_id) = seed_request_data(&pool).await?;
+    let genotype_id = Uuid::parse_str(GENOTYPE_ID)?;
+
+    let request_id = seed_request_data(&pool, &genotype_id, GENERATION_ID).await?;
 
     let queries = Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME));
 
-    let mut registry = fx_event_bus::EventHandlerRegistry::new();
-    genotype_indexing::register_event_handlers(queries.clone(), &mut registry);
+    let mut event_handlers = fx_event_bus::EventHandlerRegistry::new();
+    genotype_indexing::register_event_handlers(queries.clone(), &mut event_handlers);
+
+    // register a test-local handler that listens to GenotypeIndexedEvent
+    // and sets a semaphore when the expected genotype has been indexed
+    let (tx, rx) = oneshot::channel::<()>();
+    let done = Arc::new(Mutex::new(Some(tx)));
+    event_handlers.with_handler(GenotypeIndexedHandler { done: done.clone() });
 
     let event_pool = pool.clone();
     let event_handle = tokio::spawn(async move {
-        let mut listener = fx_event_bus::Listener::new(event_pool, registry);
+        let mut listener = fx_event_bus::Listener::new(event_pool, event_handlers);
         let _ = listener.listen(None).await;
     });
 
+    // Jobs
     let jobs_pool = pool.clone();
-    let jobs_service = genotype_service.clone();
+    let jobs_service = genotype_indexing_svc.clone();
     let job_registry = genotype_indexing::register_job_handlers(
         &jobs_service,
         fx_mq_jobs::RegistryBuilder::new(),
@@ -95,22 +112,55 @@ async fn genotype_indexing_end_to_end(
         let _ = listener.listen().await;
     });
 
-    publish_evaluated_event(&pool, request_id, generation_id, genotype_id).await?;
+    publish_evaluated_event(&pool, request_id, genotype_id).await?;
 
-    wait_for_embeddings(&pool, encoder_id).await?;
+    tokio::time::timeout(Duration::from_millis(TIMEOUT_MS), rx)
+        .await
+        .context("timed out waiting for genotype indexing")??;
 
     event_handle.abort();
     let _ = event_handle.await;
     jobs_handle.abort();
     let _ = jobs_handle.await;
 
+    let embeddings = fx_durable_ga::repositories::embeddings::Repository::new(pool.clone());
+    // FIXME
+    // assert that the record exits
+    // assert it has the expected tags
+
     Ok(())
 }
 
-async fn seed_request_data(pool: &PgPool) -> anyhow::Result<(Uuid, i32, Uuid)> {
+struct GenotypeIndexedHandler {
+    done: Arc<Mutex<Option<oneshot::Sender<()>>>>,
+}
+
+impl fx_event_bus::Handler<EmbeddingCreatedEvent> for GenotypeIndexedHandler {
+    type Error = fx_mq_jobs::PublishError;
+
+    fn handle<'a>(
+        &'a self,
+        _: Arc<EmbeddingCreatedEvent>,
+        _: chrono::DateTime<chrono::Utc>,
+        tx: sqlx::PgTransaction<'a>,
+    ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
+        let done = self.done.clone();
+
+        Box::pin(async move {
+            if let Some(sender) = done.lock().await.take() {
+                let _ = sender.send(());
+            }
+            (tx, Ok(()))
+        })
+    }
+}
+
+async fn seed_request_data(
+    pool: &PgPool,
+    genotype_id: &Uuid,
+    generation_id: i32,
+) -> anyhow::Result<Uuid> {
     let request_id = Uuid::now_v7();
-    let genotype_id = Uuid::now_v7();
-    let generation_id = 1;
     let requested_at = chrono::Utc::now();
     let goal = json!({ "Maximize": { "threshold": 0.9 } });
     let schedule = json!({
@@ -202,21 +252,21 @@ async fn seed_request_data(pool: &PgPool) -> anyhow::Result<(Uuid, i32, Uuid)> {
     .await
     .context("insert evaluation")?;
 
-    Ok((request_id, generation_id, genotype_id))
+    Ok(request_id)
 }
 
 async fn seed_encoder(pool: &PgPool) -> anyhow::Result<Uuid> {
     type TestBackend = NdArray<f32>;
-    let encoder_id = Uuid::now_v7();
-    let auto_config = AutoencoderConfig {
+    let id = Uuid::now_v7();
+    let config = AutoencoderConfig {
         input_size: 2,
         hidden_size: 4,
         latent_size: 2,
     };
-    let model_config = ModelConfig::Lstm(auto_config);
+    let model_config = ModelConfig::Lstm(config);
 
     let device = <TestBackend as Backend>::Device::default();
-    let model = LstmAutoencoder::<TestBackend>::new(&device, auto_config);
+    let model = LstmAutoencoder::<TestBackend>::new(&device, config);
     let recorder = BinBytesRecorder::<FullPrecisionSettings>::new();
     let model_bytes = Recorder::<TestBackend>::record(&recorder, model.into_record(), ())?;
     let checksum = vec![1_u8, 2, 3, 4];
@@ -239,7 +289,7 @@ async fn seed_encoder(pool: &PgPool) -> anyhow::Result<Uuid> {
         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
         "#,
     )
-    .bind(encoder_id)
+    .bind(id)
     .bind("lstm")
     .bind(serde_json::to_value(&model_config).expect("serialize config"))
     .bind(model_bytes)
@@ -252,51 +302,21 @@ async fn seed_encoder(pool: &PgPool) -> anyhow::Result<Uuid> {
     .await
     .context("insert encoder")?;
 
-    Ok(encoder_id)
+    Ok(id)
 }
 
 async fn publish_evaluated_event(
     pool: &PgPool,
     request_id: Uuid,
-    generation_id: i32,
     genotype_id: Uuid,
 ) -> anyhow::Result<()> {
     let tx = pool.begin().await?;
     let mut publisher = fx_event_bus::Publisher::new(tx);
     publisher
-        .publish(GenotypeEvaluatedEvent::new(
-            request_id,
-            generation_id,
-            genotype_id,
-        ))
+        .publish(GenotypeEvaluatedEvent::new(request_id, genotype_id))
         .await?;
     let tx: PgTransaction<'_> = publisher.into();
     tx.commit().await?;
-    Ok(())
-}
-
-async fn wait_for_embeddings(pool: &PgPool, encoder_id: Uuid) -> anyhow::Result<()> {
-    let mut attempts = 0;
-    let max_attempts = 50;
-    loop {
-        let count: i64 = sqlx::query_scalar::<Postgres, i64>(
-            r#"SELECT COUNT(*) FROM fx_durable_ga.embeddings WHERE encoded_with = $1"#,
-        )
-        .bind(encoder_id)
-        .fetch_one(pool)
-        .await?;
-
-        if count > 0 {
-            break;
-        }
-
-        attempts += 1;
-        if attempts >= max_attempts {
-            anyhow::bail!("timed out waiting for embeddings");
-        }
-        sleep(Duration::from_millis(100)).await;
-    }
-
     Ok(())
 }
 

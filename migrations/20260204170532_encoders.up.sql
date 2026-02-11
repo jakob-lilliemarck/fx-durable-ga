@@ -9,3 +9,10 @@ CREATE TABLE encoders (
     trained_at TIMESTAMPTZ NOT NULL,
     trained_on_checksum BYTEA NOT NULL
 );
+
+CREATE TABLE encoder_toggles (
+    encoder_id UUID NOT NULL,
+    type_hash INTEGER NOT NULL,
+    is_enabled BOOL NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL
+);

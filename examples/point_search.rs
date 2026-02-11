@@ -137,6 +137,12 @@ const TIMEOUT_SECONDS: u64 = 900;
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_thread_ids(true)
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
     dotenv::from_filename(".env.local").ok();
 
     // Initialize logging to see optimization progress

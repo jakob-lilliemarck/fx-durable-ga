@@ -1,8 +1,10 @@
 use crate::infrastructure::typesafe_builder::{Set, Unset};
 use crate::repositories::{embeddings, encoders, genotypes, requests};
 use crate::services::{self, genotype_explorer, genotype_indexing, indexing, lock, optimization};
+use fx_mq_jobs::{FX_MQ_JOBS_SCHEMA_NAME, Queries};
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::time::Duration;
 use uuid::Uuid;
 
 /// Bootstraps the optimization service with all required dependencies.
@@ -31,6 +33,7 @@ pub struct ApplicationBuilder<T1> {
     requests: Option<Arc<requests::Repository>>,
     embeddings: Option<Arc<embeddings::Repository>>,
     encoders: Option<Arc<encoders::Repository>>,
+    mq_queries: Arc<Queries>,
 }
 
 impl Default for ApplicationBuilder<Unset<PgPool>> {
@@ -42,6 +45,7 @@ impl Default for ApplicationBuilder<Unset<PgPool>> {
             lock: None,
             embeddings: None,
             encoders: None,
+            mq_queries: Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME)),
         }
     }
 }
@@ -53,7 +57,12 @@ impl ApplicationBuilder<Unset<PgPool>> {
         let requests = Arc::new(requests::Repository::new(pool.clone()));
         let lock = Arc::new(lock::Service::new(pool.clone()));
         let embeddings = Arc::new(embeddings::Repository::new(pool.clone()));
-        let encoders = Arc::new(encoders::Repository::new(pool.clone()));
+
+        // Number of encoders that can be cached at any one time
+        let capacity = 20;
+        // Expiration time after which cached encoders are re-fetched from the database
+        let ttl = Duration::from_secs(60 * 10);
+        let encoders = Arc::new(encoders::Repository::new(pool.clone(), ttl, capacity));
 
         ApplicationBuilder {
             _pool: Set::new(pool),
@@ -62,12 +71,13 @@ impl ApplicationBuilder<Unset<PgPool>> {
             lock: Some(lock),
             embeddings: Some(embeddings),
             encoders: Some(encoders),
+            mq_queries: self.mq_queries,
         }
     }
 }
 
 impl ApplicationBuilder<Set<PgPool>> {
-    pub fn build_explorer_svc(&self) -> services::genotype_explorer::Service {
+    pub fn explorer_service(&self) -> services::genotype_explorer::Service {
         match self {
             ApplicationBuilder {
                 genotypes: Some(genotypes),
@@ -77,7 +87,7 @@ impl ApplicationBuilder<Set<PgPool>> {
         }
     }
 
-    pub fn build_optimization_svc(&self, host_id: &Uuid) -> services::optimization::Service {
+    pub fn optimization_service(&self, host_id: &Uuid) -> services::optimization::Service {
         match self {
             ApplicationBuilder {
                 genotypes: Some(genotypes),
@@ -107,9 +117,16 @@ impl ApplicationBuilder<Set<PgPool>> {
     ) -> services::genotype_indexing::ServiceBuilder {
         match self {
             ApplicationBuilder {
+                encoders: Some(encoders),
                 genotypes: Some(genotypes),
+                mq_queries,
                 ..
-            } => genotype_indexing::Service::builder(genotypes.clone(), indexing.clone()),
+            } => genotype_indexing::Service::builder(
+                genotypes.clone(),
+                encoders.clone(),
+                indexing.clone(),
+                mq_queries.clone(),
+            ),
             _ => panic!("Missing dependency while constructing indexing service"),
         }
     }

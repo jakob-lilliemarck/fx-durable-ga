@@ -8,6 +8,7 @@ use fx_mq_jobs::Queries;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::Level;
 use uuid::Uuid;
 
 const FX_MQ_JOBS_SCHEMA_NAME: &str = "fx_mq_jobs";
@@ -66,6 +67,12 @@ async fn test_interrupt_request_end_to_end(
     pool_opts: PgPoolOptions,
     connect_opts: PgConnectOptions,
 ) -> anyhow::Result<()> {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_thread_ids(true)
+        .with_max_level(Level::INFO)
+        .init();
+
     let host_id = Uuid::now_v7();
 
     let pool = pool_opts

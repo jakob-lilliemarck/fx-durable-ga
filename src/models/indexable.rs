@@ -5,7 +5,7 @@ pub struct EncodeInput {
     pub dimensions: Vec<usize>,
 }
 
-/// Something that can be indexed by the indexing service
+/// Something that knows how to create encodable output tensors from genotypes
 pub trait GenotypeIndexer: TypeName + Send + Sync {
     fn input(&self, genotype: &Genotype) -> EncodeInput;
 

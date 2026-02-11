@@ -1,10 +1,18 @@
+use super::EncoderPairing;
 use crate::repositories::encoders::Encoder;
+use chrono::Utc;
 use sqlx::PgExecutor;
 use uuid::Uuid;
 
+pub(crate) struct TogglingResult {
+    pub(crate) is_enabled: bool,
+    pub(crate) was_changed: bool,
+}
+
+/// Get the latest encoder for a given type hash
 pub(crate) async fn get_encoder<'tx, E: PgExecutor<'tx>>(
     tx: E,
-    id: &Uuid,
+    encoder_id: &Uuid,
 ) -> Result<Option<Encoder>, super::Error> {
     let encoder = sqlx::query_as!(
         Encoder,
@@ -19,10 +27,10 @@ pub(crate) async fn get_encoder<'tx, E: PgExecutor<'tx>>(
                 shape_out,
                 trained_at,
                 trained_on_checksum
-            FROM fx_durable_ga.encoders
+            FROM encoders
             WHERE id = $1;
         "#,
-        id
+        encoder_id
     )
     .fetch_optional(tx)
     .await?;
@@ -55,9 +63,11 @@ mod tests_get {
         };
 
         let stored = store_encoder(&pool, &encoder).await?;
-        let fetched = get_encoder(&pool, &stored.id).await?;
 
-        let fetched = fetched.expect("expected encoder");
+        let fetched = get_encoder(&pool, &stored.id)
+            .await?
+            .expect("Expect an encoder to be returned");
+
         assert_eq!(stored.id, fetched.id);
         assert_eq!(stored.model_type, fetched.model_type);
         assert_eq!(stored.model_config, fetched.model_config);
@@ -69,15 +79,349 @@ mod tests_get {
 
         Ok(())
     }
+}
+
+pub(crate) async fn toggle_encoder_pairing<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    type_hash: i32,
+    encoder_id: &Uuid,
+    is_enabled: bool,
+) -> Result<TogglingResult, super::Error> {
+    let timestamp = Utc::now();
+
+    let result = sqlx::query_as!(
+        TogglingResult,
+        r#"
+            WITH last_state AS (
+                SELECT is_enabled
+                FROM fx_durable_ga.encoder_toggles
+                WHERE type_hash = $1 AND encoder_id = $2
+                ORDER BY timestamp DESC
+                LIMIT 1
+            ),
+            inserted AS (
+                INSERT INTO fx_durable_ga.encoder_toggles (
+                    type_hash,
+                    encoder_id,
+                    is_enabled,
+                    timestamp
+                )
+                SELECT $1, $2, $3, $4
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM last_state WHERE is_enabled = $3
+                )
+                RETURNING is_enabled
+            )
+            SELECT
+                is_enabled AS "is_enabled!:bool",
+                TRUE AS "was_changed!:bool"
+            FROM inserted
+            UNION ALL
+            SELECT
+                is_enabled AS "is_enabled!:bool",
+                FALSE AS "was_changed!:bool"
+            FROM last_state
+            WHERE NOT EXISTS (SELECT 1 FROM inserted);
+        "#,
+        type_hash,
+        encoder_id,
+        is_enabled,
+        timestamp
+    )
+    .fetch_one(tx)
+    .await?;
+
+    Ok(result)
+}
+
+#[cfg(test)]
+mod tests_toggle_encoder_pairing {
+    use super::{get_encoder_pairings, toggle_encoder_pairing};
+    use uuid::Uuid;
 
     #[sqlx::test(migrations = false)]
-    async fn it_returns_none_for_missing_encoder(pool: sqlx::PgPool) -> anyhow::Result<()> {
+    async fn it_toggles_pairing_on(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        let missing_id = Uuid::now_v7();
-        let encoder = get_encoder(&pool, &missing_id).await?;
+        let type_hash = 101;
+        let encoder_id = Uuid::now_v7();
 
-        assert!(encoder.is_none());
+        let result = toggle_encoder_pairing(&pool, type_hash, &encoder_id, true).await?;
+        assert!(result.is_enabled);
+        assert!(result.was_changed);
+
+        let pairings = get_encoder_pairings(&pool, &[type_hash]).await?;
+
+        assert_eq!(pairings.len(), 1);
+        assert_eq!(pairings[0].encoder_id, encoder_id);
+        assert_eq!(pairings[0].type_hash, type_hash);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_toggles_pairing_off(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let type_hash = 102;
+        let encoder_id = Uuid::now_v7();
+
+        let enabled = toggle_encoder_pairing(&pool, type_hash, &encoder_id, true).await?;
+        assert!(enabled.is_enabled);
+        assert!(enabled.was_changed);
+
+        let disabled = toggle_encoder_pairing(&pool, type_hash, &encoder_id, false).await?;
+        assert!(!disabled.is_enabled);
+        assert!(disabled.was_changed);
+
+        let pairings = get_encoder_pairings(&pool, &[type_hash]).await?;
+        assert!(pairings.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_does_not_duplicate_toggle_on(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let type_hash = 103;
+        let encoder_id = Uuid::now_v7();
+
+        let first_toggle = toggle_encoder_pairing(&pool, type_hash, &encoder_id, true).await?;
+        assert!(first_toggle.is_enabled);
+        assert!(first_toggle.was_changed);
+
+        let second_toggle = toggle_encoder_pairing(&pool, type_hash, &encoder_id, true).await?;
+        assert!(second_toggle.is_enabled);
+        assert!(!second_toggle.was_changed);
+
+        let pairings = get_encoder_pairings(&pool, &[type_hash]).await?;
+        assert_eq!(pairings.len(), 1);
+        assert_eq!(pairings[0].encoder_id, encoder_id);
+        assert_eq!(pairings[0].type_hash, type_hash);
+
+        let toggle_count = sqlx::query_scalar!(
+            r#"
+                SELECT COUNT(*)::BIGINT AS "count!:i64"
+                FROM fx_durable_ga.encoder_toggles
+                WHERE type_hash = $1 AND encoder_id = $2
+            "#,
+            type_hash,
+            encoder_id
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        assert_eq!(toggle_count, 1);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_does_not_duplicate_toggle_off(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let type_hash = 104;
+        let encoder_id = Uuid::now_v7();
+
+        let first_enable = toggle_encoder_pairing(&pool, type_hash, &encoder_id, true).await?;
+        assert!(first_enable.is_enabled);
+        assert!(first_enable.was_changed);
+
+        let first_disable = toggle_encoder_pairing(&pool, type_hash, &encoder_id, false).await?;
+        assert!(!first_disable.is_enabled);
+        assert!(first_disable.was_changed);
+
+        let second_disable = toggle_encoder_pairing(&pool, type_hash, &encoder_id, false).await?;
+        assert!(!second_disable.is_enabled);
+        assert!(!second_disable.was_changed);
+
+        let pairings = get_encoder_pairings(&pool, &[type_hash]).await?;
+        assert!(pairings.is_empty());
+
+        let toggle_count = sqlx::query_scalar!(
+            r#"
+                SELECT COUNT(*)::BIGINT AS "count!:i64"
+                FROM fx_durable_ga.encoder_toggles
+                WHERE type_hash = $1 AND encoder_id = $2
+            "#,
+            type_hash,
+            encoder_id
+        )
+        .fetch_one(&pool)
+        .await?;
+
+        assert_eq!(toggle_count, 2);
+
+        Ok(())
+    }
+}
+
+pub(crate) async fn get_encoder_pairings<'tx, E: PgExecutor<'tx>>(
+    tx: E,
+    type_hashes: &[i32],
+) -> Result<Vec<EncoderPairing>, super::Error> {
+    let toggled = sqlx::query_as!(
+        EncoderPairing,
+        r#"
+        SELECT encoder_id, type_hash
+        FROM (
+            SELECT DISTINCT ON (encoder_id, type_hash)
+                encoder_id,
+                type_hash,
+                is_enabled
+            FROM encoder_toggles
+            WHERE type_hash = ANY($1)
+            ORDER BY encoder_id, type_hash, timestamp DESC
+        ) latest
+        WHERE is_enabled = true;
+        "#,
+        type_hashes
+    )
+    .fetch_all(tx)
+    .await?;
+
+    Ok(toggled)
+}
+
+#[cfg(test)]
+mod tests_get_toggled_encoder_ids {
+    use super::{get_encoder_pairings, toggle_encoder_pairing};
+    use uuid::Uuid;
+
+    #[sqlx::test(migrations = false)]
+    async fn it_gets_enabled_encoder_pairings(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let encoder_a = Uuid::now_v7();
+        let encoder_b = Uuid::now_v7();
+        let type_hash_a = 201;
+        let type_hash_b = 202;
+
+        toggle_encoder_pairing(&pool, type_hash_a, &encoder_a, true).await?;
+        toggle_encoder_pairing(&pool, type_hash_b, &encoder_b, true).await?;
+
+        let pairings = get_encoder_pairings(&pool, &[type_hash_a, type_hash_b]).await?;
+
+        assert_eq!(pairings.len(), 2);
+        assert!(
+            pairings
+                .iter()
+                .any(|p| p.encoder_id == encoder_a && p.type_hash == type_hash_a)
+        );
+        assert!(
+            pairings
+                .iter()
+                .any(|p| p.encoder_id == encoder_b && p.type_hash == type_hash_b)
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_ignores_disabled_encoder_pairings(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let enabled_encoder = Uuid::now_v7();
+        let enabled_type_hash = 301;
+        toggle_encoder_pairing(&pool, enabled_type_hash, &enabled_encoder, true).await?;
+
+        let currently_disabled_encoder = Uuid::now_v7();
+        let currently_disabled_type_hash = 302;
+        toggle_encoder_pairing(
+            &pool,
+            currently_disabled_type_hash,
+            &currently_disabled_encoder,
+            false,
+        )
+        .await?;
+
+        let disabled_after_enabled_encoder = Uuid::now_v7();
+        let disabled_after_enabled_type_hash = 304;
+        toggle_encoder_pairing(
+            &pool,
+            disabled_after_enabled_type_hash,
+            &disabled_after_enabled_encoder,
+            true,
+        )
+        .await?;
+        toggle_encoder_pairing(
+            &pool,
+            disabled_after_enabled_type_hash,
+            &disabled_after_enabled_encoder,
+            false,
+        )
+        .await?;
+
+        let reenabled_encoder = Uuid::now_v7();
+        let reenabled_type_hash = 303;
+        toggle_encoder_pairing(&pool, reenabled_type_hash, &reenabled_encoder, false).await?;
+        toggle_encoder_pairing(&pool, reenabled_type_hash, &reenabled_encoder, true).await?;
+
+        let pairings = get_encoder_pairings(
+            &pool,
+            &[
+                enabled_type_hash,
+                currently_disabled_type_hash,
+                disabled_after_enabled_type_hash,
+                reenabled_type_hash,
+            ],
+        )
+        .await?;
+
+        assert_eq!(pairings.len(), 2);
+        assert!(
+            pairings
+                .iter()
+                .any(|p| p.encoder_id == enabled_encoder && p.type_hash == enabled_type_hash)
+        );
+        assert!(
+            pairings
+                .iter()
+                .any(|p| p.encoder_id == reenabled_encoder && p.type_hash == reenabled_type_hash)
+        );
+        assert!(
+            pairings
+                .iter()
+                .all(|p| p.type_hash != currently_disabled_type_hash)
+        );
+        assert!(
+            pairings
+                .iter()
+                .all(|p| p.type_hash != disabled_after_enabled_type_hash)
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_ignores_noncurrent_pairings(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let disabled_pair_encoder = Uuid::now_v7();
+        let disabled_pair_type_hash = 401;
+        toggle_encoder_pairing(&pool, disabled_pair_type_hash, &disabled_pair_encoder, true)
+            .await?;
+        toggle_encoder_pairing(
+            &pool,
+            disabled_pair_type_hash,
+            &disabled_pair_encoder,
+            false,
+        )
+        .await?;
+
+        let enabled_pair_encoder = Uuid::now_v7();
+        let enabled_pair_type_hash = 402;
+        toggle_encoder_pairing(&pool, enabled_pair_type_hash, &enabled_pair_encoder, false).await?;
+        toggle_encoder_pairing(&pool, enabled_pair_type_hash, &enabled_pair_encoder, true).await?;
+
+        let pairings =
+            get_encoder_pairings(&pool, &[disabled_pair_type_hash, enabled_pair_type_hash]).await?;
+
+        assert_eq!(pairings.len(), 1);
+        assert_eq!(pairings[0].encoder_id, enabled_pair_encoder);
+        assert_eq!(pairings[0].type_hash, enabled_pair_type_hash);
+
         Ok(())
     }
 }

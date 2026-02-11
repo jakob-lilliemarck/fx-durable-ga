@@ -11,7 +11,6 @@ impl ServiceBuilder {
         super::Service {
             embeddings: self.embeddings,
             encoders: self.encoders,
-            loaded: None,
         }
     }
 }
