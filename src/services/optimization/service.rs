@@ -123,7 +123,7 @@ impl Service {
                     1,    // First generation
                     None, // No parent_a
                     None, // No parent_b
-                );
+                )?;
                 events.push(GenotypeGeneratedEvent::new(request.id, genotype.id()));
                 genotypes.push(genotype);
             }

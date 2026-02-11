@@ -7,6 +7,12 @@ use std::time::Duration;
 use tracing::instrument;
 use uuid::Uuid;
 
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("Serialization error: {0}")]
+    Serialization(#[from] serde_json::Error),
+}
+
 /// Represents an individual genotype in the genetic algorithm population.
 /// Contains the genome data and metadata for tracking through generations.
 #[derive(Debug, Clone, FromRow)]
@@ -37,14 +43,11 @@ impl Genotype {
         generation_id: i32,
         parent_a: Option<&Uuid>,
         parent_b: Option<&Uuid>,
-    ) -> Self {
-        // FIXME:
-        // add a named error or a better logging here.
-        // We know its "serializable" because the compiler guarantees it, but there could still be an error during serialization.
-        let genome_value = serde_json::to_value(genome).expect("genome must be serializable");
-        let genome_hash = Self::compute_genome_hash(&genome_value);
+    ) -> Result<Self, Error> {
+        let genome_value = serde_json::to_value(genome)?;
+        let genome_hash = Self::compute_genome_hash(&genome_value)?;
 
-        Self {
+        Ok(Self {
             id: Uuid::now_v7(),
             generated_at: Utc::now(),
             type_name: type_name.to_string(),
@@ -55,19 +58,16 @@ impl Genotype {
             generation_id,
             parent_a: parent_a.map(Clone::clone),
             parent_b: parent_b.map(Clone::clone),
-        }
+        })
     }
 
     /// Computes a deterministic hash of the genome for deduplication and comparison.
-    pub(crate) fn compute_genome_hash<G: serde::Serialize>(genome: &G) -> i64 {
-        // FIXME:
-        // add a named error or a better logging here.
-        // We know its "serializable" because the compiler guarantees it, but there could still be an error during serialization.
-        let genome_value = serde_json::to_value(genome).expect("genome must be serializable");
+    pub(crate) fn compute_genome_hash<G: serde::Serialize>(genome: &G) -> Result<i64, Error> {
+        let genome_value = serde_json::to_value(genome)?;
         let canonical = canonicalize_json(&genome_value);
         let mut hasher = DefaultHasher::new();
         canonical.to_string().hash(&mut hasher);
-        hasher.finish() as i64
+        Ok(hasher.finish() as i64)
     }
 
     pub fn id(&self) -> Uuid {
@@ -134,25 +134,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_genome_hash_consistency_object_order() {
+    fn test_genome_hash_consistency_object_order() -> anyhow::Result<()> {
         let genome1 = serde_json::json!({"a": 1, "b": 2});
         let genome2 = serde_json::json!({"b": 2, "a": 1});
 
-        let hash1 = Genotype::compute_genome_hash(&genome1);
-        let hash2 = Genotype::compute_genome_hash(&genome2);
+        let hash1 = Genotype::compute_genome_hash(&genome1)?;
+        let hash2 = Genotype::compute_genome_hash(&genome2)?;
 
         assert_eq!(hash1, hash2);
+
+        Ok(())
     }
 
     #[test]
-    fn test_genome_hash_changes_with_values() {
+    fn test_genome_hash_changes_with_values() -> anyhow::Result<()> {
         let genome1 = serde_json::json!({"a": 1});
         let genome2 = serde_json::json!({"a": 2});
 
-        let hash1 = Genotype::compute_genome_hash(&genome1);
-        let hash2 = Genotype::compute_genome_hash(&genome2);
+        let hash1 = Genotype::compute_genome_hash(&genome1)?;
+        let hash2 = Genotype::compute_genome_hash(&genome2)?;
 
         assert_ne!(hash1, hash2);
+
+        Ok(())
     }
 }
 

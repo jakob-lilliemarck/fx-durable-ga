@@ -1,3 +1,4 @@
+use crate::models;
 use crate::services::lock;
 use crate::services::optimization::termination_listener::TerminationListenerError;
 use crate::{
@@ -32,4 +33,7 @@ pub enum Error {
 
     #[error("No fitness available for genotype: {genotype_id}")]
     NoFitness { genotype_id: Uuid },
+
+    #[error("Genotype error {0}")]
+    Genotype(#[from] models::GenotypeError),
 }

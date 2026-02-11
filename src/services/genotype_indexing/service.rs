@@ -378,7 +378,7 @@ mod test_support {
             generation_id,
             None::<&Uuid>,
             None::<&Uuid>,
-        );
+        )?;
         let genotype_id = genotype.id();
 
         new_genotypes(pool, vec![genotype]).await?;

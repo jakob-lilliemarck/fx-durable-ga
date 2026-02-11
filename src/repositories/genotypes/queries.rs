@@ -127,7 +127,7 @@ mod new_genotypes_tests {
             1,
             None,
             None,
-        )];
+        )?];
         let genotypes_clone = genotypes.clone();
 
         let inserted = new_genotypes(&pool, genotypes).await?;
@@ -169,7 +169,7 @@ mod new_genotypes_tests {
             1,
             None,
             None,
-        );
+        )?;
         let genotype_clone = genotype.clone();
 
         new_genotypes(&pool, vec![genotype]).await?;
@@ -240,7 +240,7 @@ mod check_if_generation_exists_tests {
             1,
             None,
             None,
-        );
+        )?;
 
         new_genotypes(&pool, vec![genotype]).await?;
 
@@ -345,7 +345,7 @@ mod get_genotype_tests {
             1,
             None,
             None,
-        );
+        )?;
         let genotype_id = genotype.id;
 
         new_genotypes(&pool, vec![genotype]).await?;
@@ -500,7 +500,7 @@ mod record_fitness_tests {
             1,
             None,
             None,
-        );
+        )?;
         let genotype_id = genotype.id;
         new_genotypes(&pool, vec![genotype]).await?;
 
@@ -575,7 +575,7 @@ mod record_fitness_tests {
                 1,
                 None,
                 None,
-            ),
+            )?,
             Genotype::new(
                 "test",
                 1,
@@ -584,7 +584,7 @@ mod record_fitness_tests {
                 1,
                 None,
                 None,
-            ),
+            )?,
         ];
         let ids: Vec<Uuid> = genotypes.iter().map(|g| g.id()).collect();
         new_genotypes(&pool, genotypes).await?;
@@ -633,7 +633,7 @@ mod record_fitness_tests {
             1,
             None,
             None,
-        )];
+        )?];
         let genotype_id = genotypes[0].id();
         new_genotypes(&pool, genotypes).await?;
 
@@ -722,7 +722,7 @@ mod get_population_tests {
                 i as i32,
                 None,
                 None,
-            ));
+            )?);
         }
         new_genotypes(&pool, genotypes).await?;
 
@@ -791,7 +791,7 @@ mod get_population_tests {
                 1,
                 None,
                 None,
-            ),
+            )?,
             Genotype::new(
                 "test",
                 1,
@@ -800,7 +800,7 @@ mod get_population_tests {
                 1,
                 None,
                 None,
-            ),
+            )?,
             Genotype::new(
                 "test",
                 1,
@@ -809,7 +809,7 @@ mod get_population_tests {
                 1,
                 None,
                 None,
-            ),
+            )?,
         ];
 
         let host_id = Uuid::now_v7();
@@ -1347,9 +1347,9 @@ mod tests {
         let (rid_1, ..) = super::seeding::seed(&pool).await;
 
         // Test hashes for genomes in request_id_1: [1,2,3] and [4,5,6]
-        let hash_1_2_3 = Genotype::compute_genome_hash(&[1, 2, 3]);
-        let hash_4_5_6 = Genotype::compute_genome_hash(&[4, 5, 6]);
-        let hash_nonexistent = Genotype::compute_genome_hash(&[99, 100, 101]);
+        let hash_1_2_3 = Genotype::compute_genome_hash(&[1, 2, 3])?;
+        let hash_4_5_6 = Genotype::compute_genome_hash(&[4, 5, 6])?;
+        let hash_nonexistent = Genotype::compute_genome_hash(&[99, 100, 101])?;
 
         let candidate_hashes = vec![hash_1_2_3, hash_4_5_6, hash_nonexistent];
 
@@ -1374,8 +1374,8 @@ mod tests {
 
         // Test with hashes that don't exist in the database
         let nonexistent_hashes = vec![
-            Genotype::compute_genome_hash(&[99, 100, 101]),
-            Genotype::compute_genome_hash(&[200, 201, 202]),
+            Genotype::compute_genome_hash(&[99, 100, 101])?,
+            Genotype::compute_genome_hash(&[200, 201, 202])?,
         ];
 
         let intersection = super::get_intersection(&pool, rid_1, &nonexistent_hashes).await?;
@@ -1392,8 +1392,8 @@ mod tests {
         let (rid_1, rid_2, ..) = super::seeding::seed(&pool).await;
 
         // Test with hashes from request_2: [7,8,9], [10,11,12], [13,14,15]
-        let hash_7_8_9 = Genotype::compute_genome_hash(&[7, 8, 9]);
-        let hash_10_11_12 = Genotype::compute_genome_hash(&[10, 11, 12]);
+        let hash_7_8_9 = Genotype::compute_genome_hash(&[7, 8, 9])?;
+        let hash_10_11_12 = Genotype::compute_genome_hash(&[10, 11, 12])?;
 
         let candidate_hashes = vec![hash_7_8_9, hash_10_11_12];
 
@@ -1848,7 +1848,7 @@ mod get_timings_tests {
                 1,
                 None,
                 None,
-            ),
+            )?,
             Genotype::new(
                 "timings",
                 1,
@@ -1857,7 +1857,7 @@ mod get_timings_tests {
                 1,
                 None,
                 None,
-            ),
+            )?,
             Genotype::new(
                 "timings",
                 1,
@@ -1866,7 +1866,7 @@ mod get_timings_tests {
                 1,
                 None,
                 None,
-            ),
+            )?,
         ];
         let ids: Vec<Uuid> = genotypes.iter().map(|g| g.id).collect();
         new_genotypes(pool, genotypes).await?;
@@ -1984,7 +1984,8 @@ mod seeding {
                 1,
                 None,
                 None,
-            ),
+            )
+            .unwrap(),
             Genotype::new(
                 "test",
                 1,
@@ -1993,7 +1994,8 @@ mod seeding {
                 2,
                 None,
                 None,
-            ),
+            )
+            .unwrap(),
             Genotype::new(
                 "test",
                 1,
@@ -2002,7 +2004,8 @@ mod seeding {
                 1,
                 None,
                 None,
-            ),
+            )
+            .unwrap(),
             Genotype::new(
                 "test",
                 1,
@@ -2011,7 +2014,8 @@ mod seeding {
                 1,
                 None,
                 None,
-            ),
+            )
+            .unwrap(),
             Genotype::new(
                 "test",
                 1,
@@ -2020,7 +2024,8 @@ mod seeding {
                 2,
                 None,
                 None,
-            ),
+            )
+            .unwrap(),
         ];
 
         let gid_1 = genotypes[0].id;
@@ -2084,7 +2089,8 @@ mod seeding {
             1,
             None,
             None,
-        );
+        )
+        .unwrap();
         let root_id = root.id();
 
         let child = Genotype::new(
@@ -2095,7 +2101,8 @@ mod seeding {
             2,
             Some(&root_id),
             None,
-        );
+        )
+        .unwrap();
         let child_id = child.id();
 
         let grandchild = Genotype::new(
@@ -2106,7 +2113,8 @@ mod seeding {
             3,
             Some(&child_id),
             None,
-        );
+        )
+        .unwrap();
         let grandchild_id = grandchild.id();
 
         new_genotypes(pool, vec![root, child, grandchild])

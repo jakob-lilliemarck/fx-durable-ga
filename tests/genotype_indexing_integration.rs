@@ -17,6 +17,7 @@ use serde_json::{Map, Value, json};
 use sqlx::{
     PgPool, PgTransaction,
     postgres::{PgConnectOptions, PgPoolOptions},
+    Row,
 };
 use std::{
     collections::BTreeMap,
@@ -126,10 +127,53 @@ async fn genotype_indexing_end_to_end(
     jobs_handle.abort();
     let _ = jobs_handle.await;
 
-    let embeddings = fx_durable_ga::repositories::embeddings::Repository::new(pool.clone());
-    // FIXME
-    // assert that the record exits
-    // assert it has the expected tags
+    let record = sqlx::query(
+        r#"
+        SELECT id, encoded_with
+        FROM fx_durable_ga.embeddings
+        WHERE encoded_with = $1
+        ORDER BY encoded_at DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(encoder_id)
+    .fetch_one(&pool)
+    .await
+    .context("fetch indexed embedding")?;
+
+    let embedding_id: Uuid = record.try_get("id")?;
+    let encoded_with: Uuid = record.try_get("encoded_with")?;
+    assert_eq!(encoded_with, encoder_id, "embedding encoded with unexpected encoder");
+
+    let rows = sqlx::query(
+        r#"
+        SELECT tag_name
+        FROM fx_durable_ga.embedding_tags
+        WHERE embedding_id = $1
+        ORDER BY tag_name
+        "#,
+    )
+    .bind(embedding_id)
+    .fetch_all(&pool)
+    .await
+    .context("fetch embedding tags")?;
+
+    let mut actual_tags: Vec<String> = rows
+        .into_iter()
+        .map(|row| row.try_get("tag_name"))
+        .collect::<Result<_, _>>()?;
+    actual_tags.sort();
+
+    let mut expected_tags = vec![
+        "type:Genotype".to_string(),
+        format!("encoder_id:{}", encoder_id),
+        format!("type_name:{}", TestIndexer::TYPE_NAME),
+        format!("type_hash:{}", TestIndexer::TYPE_HASH),
+        format!("context_hash:{}", TestIndexer::CONTEXT_HASH),
+    ];
+    expected_tags.sort();
+
+    assert_eq!(actual_tags, expected_tags, "embedding tags mismatch");
 
     Ok(())
 }

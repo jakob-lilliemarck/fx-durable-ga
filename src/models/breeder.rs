@@ -52,7 +52,7 @@ impl Breeder {
             next_generation_id,
             Some(&parent_a.id),
             Some(&parent_b.id),
-        );
+        )?;
 
         Ok(child)
     }
@@ -180,6 +180,7 @@ mod tests {
             None,
             None,
         )
+        .unwrap()
     }
 
     /// Prefers new hashes over ones already in `existing`.

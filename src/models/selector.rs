@@ -117,30 +117,16 @@ fn spin_roulette(
 #[cfg(test)]
 mod spin_roulette_tests {
     use super::*;
-    use serde_json;
-    use uuid::Uuid;
 
     const TOLERANCE: f64 = 0.07;
-
-    fn create_test_genotype(id: &str) -> Genotype {
-        Genotype::new(
-            "test",
-            123,
-            serde_json::json!([1, 2, 3]),
-            Uuid::parse_str(id).unwrap(),
-            1,
-            None,
-            None,
-        )
-    }
 
     #[test]
     fn it_spins_the_roulette() {
         // Create candidates with fitness values 0.1, 0.3, 0.6
         let genotypes = vec![
-            create_test_genotype("00000000-0000-0000-0000-000000000001"),
-            create_test_genotype("00000000-0000-0000-0000-000000000002"),
-            create_test_genotype("00000000-0000-0000-0000-000000000003"),
+            super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000001"),
+            super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000002"),
+            super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000003"),
         ];
         let candidates: Vec<(&Genotype, f64)> = vec![
             (&genotypes[0], 0.1),
@@ -176,7 +162,8 @@ mod spin_roulette_tests {
 
     #[test]
     fn it_always_selects_single_candidate() {
-        let genotype = create_test_genotype("00000000-0000-0000-0000-000000000001");
+        let genotype =
+            super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000001");
         let candidates = vec![(&genotype, 1.0)];
         let mut rng = rand::rng();
 
@@ -188,8 +175,10 @@ mod spin_roulette_tests {
 
     #[test]
     fn it_distributes_equal_fitness_evenly() {
-        let genotype_1 = create_test_genotype("00000000-0000-0000-0000-000000000001");
-        let genotype_2 = create_test_genotype("00000000-0000-0000-0000-000000000002");
+        let genotype_1 =
+            super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000001");
+        let genotype_2 =
+            super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000002");
         let candidates = vec![(&genotype_1, 1.0), (&genotype_2, 1.0)];
         let mut counts = [0; 2];
         let mut rng = rand::rng();
@@ -212,7 +201,8 @@ mod spin_roulette_tests {
 
     #[test]
     fn it_fails_when_total_fitness_is_incorrect() {
-        let genotype = create_test_genotype("00000000-0000-0000-0000-000000000001");
+        let genotype =
+            super::test_utilities::create_test_genotype("00000000-0000-0000-0000-000000000001");
         let candidates = vec![(&genotype, 0.0)];
         let total_fitness = 1.0;
         let offset = 0.0;
@@ -758,5 +748,6 @@ mod test_utilities {
             None,
             None,
         )
+        .unwrap()
     }
 }
