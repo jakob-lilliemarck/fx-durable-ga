@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id,\n                model_type,\n                model_config,\n                model_weights,\n                model_format,\n                shape_in,\n                shape_out,\n                trained_at,\n                trained_on_checksum\n            FROM fx_durable_ga.encoders\n            WHERE id = $1;\n        ",
+  "query": "\n            SELECT\n                id,\n                model_type,\n                model_config,\n                model_weights,\n                model_format,\n                shape_in,\n                shape_out,\n                trained_at,\n                trained_on_checksum\n            FROM encoders\n            WHERE id = $1;\n        ",
   "describe": {
     "columns": [
       {
@@ -66,5 +66,5 @@
       false
     ]
   },
-  "hash": "aa6f197a3c097bcb6c431cf83cc05e4a1be132c81d95562ab389ec35c31495a0"
+  "hash": "089e48d2565f96c257011277a4fafff9a7eacd64041a34d91c420a515a538da1"
 }

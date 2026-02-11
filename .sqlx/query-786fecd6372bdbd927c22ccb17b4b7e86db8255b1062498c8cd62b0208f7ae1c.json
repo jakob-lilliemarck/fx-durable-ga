@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT encoder_id, type_hash\n        FROM (\n            SELECT DISTINCT ON (encoder_id, type_hash)\n                encoder_id,\n                type_hash,\n                is_enabled\n            FROM encoder_toggles\n            WHERE type_hash = ANY($1)\n            ORDER BY encoder_id, type_hash, timestamp DESC\n        ) latest\n        WHERE is_enabled = true;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "encoder_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "type_hash",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4Array"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "786fecd6372bdbd927c22ccb17b4b7e86db8255b1062498c8cd62b0208f7ae1c"
+}

@@ -15,9 +15,8 @@ use fx_durable_ga::{
 use fx_mq_jobs::Queries;
 use serde_json::{Map, Value, json};
 use sqlx::{
-    PgPool, PgTransaction,
+    PgPool, PgTransaction, Row,
     postgres::{PgConnectOptions, PgPoolOptions},
-    Row,
 };
 use std::{
     collections::BTreeMap,
@@ -143,7 +142,10 @@ async fn genotype_indexing_end_to_end(
 
     let embedding_id: Uuid = record.try_get("id")?;
     let encoded_with: Uuid = record.try_get("encoded_with")?;
-    assert_eq!(encoded_with, encoder_id, "embedding encoded with unexpected encoder");
+    assert_eq!(
+        encoded_with, encoder_id,
+        "embedding encoded with unexpected encoder"
+    );
 
     let rows = sqlx::query(
         r#"

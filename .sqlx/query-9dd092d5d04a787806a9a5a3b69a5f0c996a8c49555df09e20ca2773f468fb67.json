@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH last_state AS (\n                SELECT is_enabled\n                FROM fx_durable_ga.encoder_toggles\n                WHERE type_hash = $1 AND encoder_id = $2\n                ORDER BY timestamp DESC\n                LIMIT 1\n            ),\n            inserted AS (\n                INSERT INTO fx_durable_ga.encoder_toggles (\n                    type_hash,\n                    encoder_id,\n                    is_enabled,\n                    timestamp\n                )\n                SELECT $1, $2, $3, $4\n                WHERE NOT EXISTS (\n                    SELECT 1 FROM last_state WHERE is_enabled = $3\n                )\n                RETURNING is_enabled\n            )\n            SELECT\n                is_enabled AS \"is_enabled!:bool\",\n                TRUE AS \"was_changed!:bool\"\n            FROM inserted\n            UNION ALL\n            SELECT\n                is_enabled AS \"is_enabled!:bool\",\n                FALSE AS \"was_changed!:bool\"\n            FROM last_state\n            WHERE NOT EXISTS (SELECT 1 FROM inserted);\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_enabled!:bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "was_changed!:bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Uuid",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "9dd092d5d04a787806a9a5a3b69a5f0c996a8c49555df09e20ca2773f468fb67"
+}

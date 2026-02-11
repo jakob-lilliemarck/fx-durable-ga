@@ -158,8 +158,18 @@ impl Service {
             .search_genotypes(&filter, genotype_ids.len() as i64)
             .await?;
 
-        // FIXME!
-        // consider validating that each genotype has the expected type_hash and type_name
+        for (genotype, ..) in &genotypes {
+            if genotype.type_hash() != grouping_key.type_hash
+                || genotype.type_name() != grouping_key.type_name.as_str()
+            {
+                return Err(super::Error::GroupingMismatch {
+                    grouping: grouping_key.clone(),
+                    genotype_id: genotype.id(),
+                    actual_type_hash: genotype.type_hash(),
+                    actual_type_name: genotype.type_name().to_owned(),
+                });
+            }
+        }
 
         let indexer = match self.indexers.get(&grouping_key.type_hash) {
             Some(indexer) => indexer,
@@ -530,6 +540,7 @@ mod tests_index_genotype_group {
         TestIndexer, build_services, insert_genotype, seed_encoder, seed_request,
     };
     use crate::migrations;
+    use crate::services::genotype_indexing::Error;
     use anyhow::Context;
     use serde_json::json;
     use sqlx::Row;
@@ -634,6 +645,128 @@ mod tests_index_genotype_group {
                 .context("missing tags for embedding")?;
             let actual: HashSet<String> = stored.into_iter().collect();
             assert_eq!(actual, expected);
+        }
+
+        Ok(())
+    }
+
+    /// Validates the "all bad" case: a batch entirely composed of mismatched genotypes fails with GroupingMismatch.
+    #[sqlx::test(migrations = false)]
+    async fn it_errors_on_grouping_mismatch(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        migrations::run_default_migrations(&pool).await?;
+
+        let services = build_services(&pool, true).await?;
+        let encoder_id = seed_encoder(&pool).await?;
+        services
+            .indexing
+            .enable_encoder_pairing(&encoder_id, TestIndexer::TYPE_HASH)
+            .await?;
+
+        let request_id =
+            seed_request(&pool, TestIndexer::TYPE_NAME, TestIndexer::TYPE_HASH).await?;
+        // Insert a genotype with mismatching type info
+        let mismatched_hash = TestIndexer::TYPE_HASH + 1;
+        let mismatched_type_name = "Mismatched";
+        let mismatched_genotype = insert_genotype(
+            &pool,
+            request_id,
+            mismatched_type_name,
+            mismatched_hash,
+            json!([1.0]),
+            1,
+        )
+        .await?;
+
+        let grouping_key = super::GroupingKey {
+            encoder_id,
+            type_hash: TestIndexer::TYPE_HASH,
+            type_name: TestIndexer::TYPE_NAME.to_string(),
+        };
+
+        let result = services
+            .genotype_indexing
+            .index_genotype_group(&grouping_key, &[mismatched_genotype])
+            .await;
+
+        match result {
+            Err(Error::GroupingMismatch {
+                grouping,
+                genotype_id,
+                actual_type_hash,
+                actual_type_name,
+            }) => {
+                assert_eq!(grouping, grouping_key);
+                assert_eq!(genotype_id, mismatched_genotype);
+                assert_eq!(actual_type_hash, mismatched_hash);
+                assert_eq!(actual_type_name, mismatched_type_name);
+            }
+            other => panic!("expected GroupingMismatch error, got {other:?}"),
+        }
+
+        Ok(())
+    }
+
+    /// Validates the "some bad" case: even when most genotypes are correct, any mismatch forces a GroupingMismatch error.
+    #[sqlx::test(migrations = false)]
+    async fn it_errors_when_any_genotype_mismatches(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        migrations::run_default_migrations(&pool).await?;
+
+        let services = build_services(&pool, true).await?;
+        let encoder_id = seed_encoder(&pool).await?;
+        services
+            .indexing
+            .enable_encoder_pairing(&encoder_id, TestIndexer::TYPE_HASH)
+            .await?;
+
+        let request_id =
+            seed_request(&pool, TestIndexer::TYPE_NAME, TestIndexer::TYPE_HASH).await?;
+
+        let matching = insert_genotype(
+            &pool,
+            request_id,
+            TestIndexer::TYPE_NAME,
+            TestIndexer::TYPE_HASH,
+            json!([1.0, 2.0]),
+            1,
+        )
+        .await?;
+
+        let mismatched_hash = TestIndexer::TYPE_HASH + 42;
+        let mismatched_type_name = "AnotherType";
+        let mismatched = insert_genotype(
+            &pool,
+            request_id,
+            mismatched_type_name,
+            mismatched_hash,
+            json!([3.0, 4.0]),
+            1,
+        )
+        .await?;
+
+        let grouping_key = super::GroupingKey {
+            encoder_id,
+            type_hash: TestIndexer::TYPE_HASH,
+            type_name: TestIndexer::TYPE_NAME.to_string(),
+        };
+
+        let result = services
+            .genotype_indexing
+            .index_genotype_group(&grouping_key, &[matching, mismatched])
+            .await;
+
+        match result {
+            Err(Error::GroupingMismatch {
+                grouping,
+                genotype_id,
+                actual_type_hash,
+                actual_type_name,
+            }) => {
+                assert_eq!(grouping, grouping_key);
+                assert_eq!(genotype_id, mismatched);
+                assert_eq!(actual_type_hash, mismatched_hash);
+                assert_eq!(actual_type_name, mismatched_type_name);
+            }
+            other => panic!("expected GroupingMismatch error, got {other:?}"),
         }
 
         Ok(())
