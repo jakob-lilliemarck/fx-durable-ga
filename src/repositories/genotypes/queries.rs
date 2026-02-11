@@ -1939,7 +1939,7 @@ mod get_timings_tests {
 
 #[cfg(test)]
 mod seeding {
-    use super::record_evaluation;
+    use super::{record_evaluation, record_evaluations};
     use crate::models::{Evaluation, FitnessGoal, Genotype, Request, Schedule, Selector};
     use crate::repositories::genotypes::new_genotypes;
     use crate::repositories::requests::queries::new_request;
@@ -2033,46 +2033,32 @@ mod seeding {
 
         let host_id = Uuid::now_v7();
 
-        // FIXME:
-        // Use the new batch insert method record_evaluations instead!
-        record_evaluation(
-            pool,
-            &Evaluation::new(
+        let evaluations = vec![
+            Evaluation::new(
                 gid_1,
                 0.11,
                 Some(Utc::now()),
                 Some(Utc::now()),
                 Some(host_id.clone()),
             ),
-        )
-        .await
-        .unwrap();
-        // genotype_id_2 has not fitness
-        record_evaluation(
-            pool,
-            &Evaluation::new(
+            Evaluation::new(
                 gid_3,
                 0.12,
                 Some(Utc::now()),
                 Some(Utc::now()),
                 Some(host_id.clone()),
             ),
-        )
-        .await
-        .unwrap();
-        record_evaluation(
-            pool,
-            &Evaluation::new(
+            Evaluation::new(
                 gid_4,
                 0.42,
                 Some(Utc::now()),
                 Some(Utc::now()),
                 Some(host_id.clone()),
             ),
-        )
-        .await
-        .unwrap();
-        // genotype_id_5 has not fitness
+        ];
+
+        record_evaluations(pool, &evaluations).await.unwrap();
+        // genotype_id_2 and genotype_id_5 have no fitness
         (rid_1, rid_2, [gid_1, gid_2, gid_3, gid_4, gid_5])
     }
 

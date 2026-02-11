@@ -132,18 +132,7 @@ impl Service {
                     let mut publisher =
                         fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx.tx(), &self.mq_queries);
 
-                    for job in jobs {
-                        // FIXME!
-                        //
-                        // This is terrible! Add a `publish_many` method to the publisher!!
-                        if let Err(error) = publisher.publish(&job).await {
-                            tracing::error!(
-                                message = "Error encountered processing IndexGenotypes",
-                                error = error.to_string()
-                            );
-                            break;
-                        };
-                    }
+                    publisher.publish_many(&jobs).await?;
 
                     let tx: PgTransaction<'_> = publisher.into();
                     Ok((tx, ()))
