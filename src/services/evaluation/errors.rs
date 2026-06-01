@@ -21,6 +21,9 @@ pub enum Error {
     #[error("Synchronization service error: {0}")]
     SynchronizationService(#[from] synchronization::Error),
 
+    #[error("Evaluation aborted by semaphore: {0}")]
+    Aborted(String),
+
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }

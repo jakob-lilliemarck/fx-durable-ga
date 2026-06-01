@@ -116,22 +116,52 @@ impl Service {
     }
 
     /// Evaluates a genotype and stores the result.
+    ///
+    /// `drop_on` semaphores cause the evaluation to abort silently — the job
+    /// returns `Ok(())` and will not be retried. Use when the evaluation is
+    /// no longer needed (e.g., optimization goal reached).
+    ///
+    /// `retry_on` semaphores cause the evaluation to abort with an error —
+    /// the job will be retried later. Use for transient conditions like
+    /// application shutdown.
     #[instrument(level = "info", skip(self))]
     pub(crate) async fn evaluate_genotype(
         &self,
         genotype: Genotype,
-        semaphores: Vec<&str>,
+        drop_on: Vec<&str>,
+        retry_on: Vec<&str>,
     ) -> Result<(), super::Error> {
         let started_at = Utc::now();
 
-        // Wait for the first semaphore
-        let semaphores = future::select_all(semaphores.iter().map(|s| {
-            self.synchronization.wait_for(s, &started_at).boxed() as future::BoxFuture<_>
-        }));
+        // Evaluate, with optional semaphore-based abort/retry
+        let (fitness, completed_at) = if drop_on.is_empty() && retry_on.is_empty() {
+            self.evaluate(&genotype.type_name, genotype.genome).await?
+        } else {
+            // Merge both lists into one, tracking the boundary for dispatch
+            let drop_count = drop_on.len();
+            let all_names: Vec<&str> = drop_on
+                .into_iter()
+                .chain(retry_on)
+                .collect();
 
-        let (fitness, completed_at) = tokio::select! {
-            result = self.evaluate(&genotype.type_name, genotype.genome) => result?,
-            (raised, _, _) = semaphores => return Ok(raised?)
+            let futures: Vec<_> = all_names
+                .iter()
+                .map(|s| {
+                    self.synchronization.wait_for(s, &started_at).boxed() as future::BoxFuture<_>
+                })
+                .collect();
+
+            let semaphores = future::select_all(futures);
+
+            tokio::select! {
+                result = self.evaluate(&genotype.type_name, genotype.genome) => result?,
+                (raised, index, _) = semaphores => {
+                    if index < drop_count {
+                        return Ok(raised?);
+                    }
+                    return Err(super::Error::Aborted(all_names[index].to_string()));
+                }
+            }
         };
 
         let host_id = self.host_id.clone();
@@ -202,5 +232,136 @@ where
 
             Ok(fitness)
         })
+    }
+}
+
+#[cfg(test)]
+mod tests_evaluate_genotype {
+    use super::*;
+    use crate::configuration::PollIntervalSeconds;
+    use crate::infrastructure::db;
+    use crate::infrastructure::di::Container;
+    use crate::services::evaluation;
+    use futures::future::BoxFuture;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    struct SlowEvaluator;
+
+    impl Evaluator for SlowEvaluator {
+        type Type = serde_json::Value;
+
+        fn evaluate<'a>(
+            &'a self,
+            _instance: &'a Self::Type,
+        ) -> BoxFuture<'a, Result<f64, Box<dyn std::error::Error + Send + Sync>>> {
+            Box::pin(async move {
+                tokio::time::sleep(Duration::from_millis(200)).await;
+                Ok(0.5)
+            })
+        }
+    }
+
+    struct TestContext {
+        evaluation: Arc<evaluation::Service>,
+        synchronization: Arc<crate::services::synchronization::Service>,
+    }
+
+    async fn setup(pool: PgPool) -> anyhow::Result<TestContext> {
+        let mut c = Container::new();
+        crate::register(&mut c);
+
+        // Override poll interval and pools with the test database
+        c.provide(|_| Box::pin(async { Ok(PollIntervalSeconds { value: 60 }) }));
+        let ro = pool.clone();
+        c.provide(|_| Box::pin(async { Ok(db::ReadPool { pool: ro }) }));
+        let wr = pool.clone();
+        c.provide(|_| Box::pin(async { Ok(db::WritePool { pool: wr }) }));
+
+        c.invoke().await?;
+
+        // The synchronization service is already registered by invoke_mux_listening.
+        // Take the mux from the container and spawn the listener so notifications
+        // are dispatched to the agent.
+        use crate::infrastructure::registrations::ProvidedPgMux;
+        let mux = c.get::<ProvidedPgMux>().await?;
+        let mut mux_lock = mux.lock().await;
+        if let Some(mux) = mux_lock.take() {
+            tokio::spawn(mux.listen());
+        }
+
+        // Get the evaluation service and register a slow evaluator
+        use crate::services::synchronization;
+        let synchronization = c.get::<Arc<synchronization::Service>>().await?;
+        let evaluation = c.get::<Arc<evaluation::Service>>().await?;
+        evaluation.register("test", SlowEvaluator).await;
+
+        Ok(TestContext { evaluation, synchronization })
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_evaluates_genotype_normally(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        let ctx = setup(pool.clone()).await?;
+
+        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2]), None, None, None, None)?;
+        let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
+        let genotype = stored.into_iter().next().unwrap();
+
+        ctx.evaluation.evaluate_genotype(genotype, vec![], vec![]).await.unwrap();
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_ok_on_drop_semaphore(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        let ctx = setup(pool.clone()).await?;
+
+        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2]), None, None, None, None)?;
+        let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
+        let genotype = stored.into_iter().next().unwrap();
+
+        // Raise the drop_on semaphore after a short delay
+        let sync = ctx.synchronization.clone();
+        let pool_clone = pool.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let mut tx = pool_clone.begin().await.unwrap();
+            sync.raise(&mut tx, "test-drop").await.unwrap();
+            tx.commit().await.unwrap();
+        });
+
+        let result = ctx.evaluation.evaluate_genotype(genotype, vec!["test-drop"], vec![]).await;
+        assert!(result.is_ok());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_aborted_on_retry_semaphore(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+        let ctx = setup(pool.clone()).await?;
+
+        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2]), None, None, None, None)?;
+        let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
+        let genotype = stored.into_iter().next().unwrap();
+
+        // Raise the retry_on semaphore after a short delay
+        let sync = ctx.synchronization.clone();
+        let pool_clone = pool.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let mut tx = pool_clone.begin().await.unwrap();
+            sync.raise(&mut tx, "test-retry").await.unwrap();
+            tx.commit().await.unwrap();
+        });
+
+        let result = ctx.evaluation.evaluate_genotype(genotype, vec![], vec!["test-retry"]).await;
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), crate::services::evaluation::Error::Aborted(_)));
+
+        Ok(())
     }
 }

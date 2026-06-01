@@ -155,7 +155,7 @@ impl Service {
         let genotype = self.genotypes_ro.get_genotype(&genotype_id).await?;
 
         self.evaluation
-            .evaluate_genotype(genotype, vec![&request_id.to_string()])
+            .evaluate_genotype(genotype, vec![&request_id.to_string()], vec![])
             .await?;
 
         Ok(())
