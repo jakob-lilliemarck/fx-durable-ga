@@ -1,0 +1,58 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                digest,\n                encodable_type_name,\n                model_config,\n                model_weights,\n                model_format,\n                shape_in,\n                shape_out\n            FROM encoders\n            WHERE digest = $1;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "digest",
+        "type_info": "Bpchar"
+      },
+      {
+        "ordinal": 1,
+        "name": "encodable_type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "model_config",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "model_weights",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 4,
+        "name": "model_format",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "shape_in",
+        "type_info": "Int4Array"
+      },
+      {
+        "ordinal": 6,
+        "name": "shape_out",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bpchar"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "29f322c91ba45cbaa4043501d91120dd3be02201476ef1eb8652695b60d2a292"
+}

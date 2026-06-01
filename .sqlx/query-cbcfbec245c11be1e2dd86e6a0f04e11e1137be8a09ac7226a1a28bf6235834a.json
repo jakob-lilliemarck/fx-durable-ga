@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT et_assoc.tag_name\n        FROM fx_durable_ga.embedding_tags et_filter\n        JOIN fx_durable_ga.embedding_tags et_assoc ON et_filter.embedding_id = et_assoc.embedding_id\n        WHERE\n            ($1::TEXT[] IS NULL OR et_filter.tag_name = ANY($1::TEXT[]))\n            AND ($2::TEXT IS NULL OR et_assoc.tag_name ILIKE '%' || $2 || '%')\n            AND et_assoc.tag_name != ALL($1)\n            AND ($3::TEXT IS NULL OR et_assoc.tag_name > $3)\n        ORDER BY et_assoc.tag_name\n        LIMIT $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tag_name",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cbcfbec245c11be1e2dd86e6a0f04e11e1137be8a09ac7226a1a28bf6235834a"
+}

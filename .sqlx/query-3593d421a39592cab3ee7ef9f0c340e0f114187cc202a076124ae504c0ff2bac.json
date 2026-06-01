@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH reference_centroid AS (\n            SELECT AVG(e.value) AS centroid\n            FROM fx_durable_ga.embeddings e\n            WHERE e.encoder_digest = $1::CHAR(64)\n                AND (\n                    $2::BIGINT[] IS NULL\n                    OR e.id IN (\n                        SELECT et.embedding_id\n                        FROM fx_durable_ga.embedding_tags et\n                        WHERE et.tag_hash = ANY($2::BIGINT[])\n                    )\n                )\n        )\n        SELECT\n            e.id AS \"embedding_id!: Uuid\",\n            e.value <=> rc.centroid AS \"distance!: f64\",\n            ARRAY_AGG(t.tag_name ORDER BY t.tag_name ASC) AS \"tags!: Vec<String>\"\n        FROM fx_durable_ga.embeddings e\n        CROSS JOIN reference_centroid rc\n        LEFT JOIN fx_durable_ga.embedding_tags t ON e.id = t.embedding_id\n        WHERE\n            rc.centroid IS NOT NULL\n            AND e.encoder_digest = $1::CHAR(64)\n            AND (\n                $3::BIGINT[] IS NULL\n                OR e.id IN (\n                    SELECT et.embedding_id\n                    FROM fx_durable_ga.embedding_tags et\n                    WHERE et.tag_hash = ANY($3::BIGINT[])\n                )\n            )\n        GROUP BY e.id, e.value, rc.centroid\n        ORDER BY\n            CASE WHEN $4::TEXT = 'asc' THEN e.value <=> rc.centroid END ASC,\n            CASE WHEN $4::TEXT = 'desc' THEN e.value <=> rc.centroid END DESC,\n            e.id\n        LIMIT $5;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "embedding_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "distance!: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 2,
+        "name": "tags!: Vec<String>",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bpchar",
+        "Int8Array",
+        "Int8Array",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "3593d421a39592cab3ee7ef9f0c340e0f114187cc202a076124ae504c0ff2bac"
+}

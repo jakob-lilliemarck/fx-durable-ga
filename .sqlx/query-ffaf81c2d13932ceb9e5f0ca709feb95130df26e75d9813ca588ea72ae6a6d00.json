@@ -1,0 +1,51 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            entity_id,\n            entity_type_name,\n            indexer_digest::TEXT AS \"indexer_id: String\",\n            metadata,\n            requested_at\n        FROM fx_durable_ga.requested_embeddings\n        WHERE\n            (handled_at IS NULL OR $1::BOOL)\n            AND (\n                $2::CHAR(64) IS NULL\n                OR indexer_digest = $2::CHAR(64)\n            )\n            AND (\n                $3::TEXT IS NULL\n                OR entity_type_name = $3::TEXT\n            )\n            AND (\n                $4::TIMESTAMPTZ IS NULL\n                OR requested_at > $4::TIMESTAMPTZ\n                OR (requested_at = $4::TIMESTAMPTZ AND entity_id > $5::UUID)\n            )\n        ORDER BY requested_at, entity_id\n        LIMIT $6;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "entity_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "entity_type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "indexer_id: String",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "requested_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Bpchar",
+        "Text",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      null,
+      false,
+      false
+    ]
+  },
+  "hash": "ffaf81c2d13932ceb9e5f0ca709feb95130df26e75d9813ca588ea72ae6a6d00"
+}

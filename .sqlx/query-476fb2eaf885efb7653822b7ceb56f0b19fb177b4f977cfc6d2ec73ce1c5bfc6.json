@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH bin_definitions AS (\n            SELECT bin_index, tag_hash\n            FROM UNNEST($1::BIGINT[], $2::BIGINT[]) AS t(bin_index, tag_hash)\n        ),\n        embedding_matches AS (\n            SELECT\n                bd.bin_index,\n                et.embedding_id,\n                COUNT(DISTINCT et.tag_hash) AS matched_tags\n            FROM bin_definitions bd\n            JOIN embedding_tags et ON et.tag_hash = bd.tag_hash\n            GROUP BY bd.bin_index, et.embedding_id\n        ),\n        required_counts AS (\n            SELECT\n                bin_index,\n                COUNT(DISTINCT tag_hash) AS required_tags\n            FROM bin_definitions\n            GROUP BY bin_index\n        )\n        SELECT\n            em.bin_index \"bin_index!\",\n            em.embedding_id \"embedding_id!: Uuid\"\n        FROM embedding_matches em\n        JOIN required_counts rc ON em.bin_index = rc.bin_index\n        WHERE em.matched_tags = rc.required_tags\n        ORDER BY em.bin_index, em.embedding_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bin_index!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "embedding_id!: Uuid",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      null,
+      false
+    ]
+  },
+  "hash": "476fb2eaf885efb7653822b7ceb56f0b19fb177b4f977cfc6d2ec73ce1c5bfc6"
+}

@@ -6,9 +6,18 @@
 # Cargo.lock
 
 # Local environment files
-.env.local
-.env.*.local
+.env
+.env.*
 .envrc
+
+# Sensitive files
+db_dumps/
+*.dump
+secrets.*
+credentials.*
+*.pem
+*.key
+*.p12
 
 # IDE files
 .vscode/

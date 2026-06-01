@@ -1,39 +1,118 @@
-//! Neural Architecture Search with Genetic Algorithms
-//!
-//! Demonstrates using fx_durable_ga to optimize neural network hyperparameters:
-//! hidden size, number of layers, activation function, bias usage, and learning rate.
-//!
-//! **IMPORTANT!**
-//! This library requires fx-durable-ga-example-simple-regression to be installed and available on the PATH. The crate is available here:
-//! https://github.com/jakob-lilliemarck/fx-durable-ga-simple-regression
-//!
-//! This workaround is required as the Autodiff backend of the Burn ML framework currently does not free memory between training run.
-//! As such, running multiple training runs will cause unbounded memory allocation.
-//!
-//! This example handles that by running each training run as a subprocess, in which case all memory allocations are freed after each run.
-
 use anyhow::Result;
-use fx_durable_ga::{
-    bootstrap,
-    models::{
-        Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, Request, Schedule, Selector, Temperature, Terminated,
-    },
-    register_event_handlers, register_job_handlers,
+use chrono::Utc;
+use futures::lock::Mutex;
+use fx_durable_ga::repositories::genotypes::TypeName;
+use fx_durable_ga::services::optimization::{
+    self as foreign_service, FitnessGoal, OptimizerRegistry, Schedule, Selector,
 };
-use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
-use fx_mq_jobs::Queries;
-use serde::Deserialize;
-use sqlx::postgres::PgPoolOptions;
-use std::time::Duration;
-use std::{env, sync::Arc};
-use tracing::Level;
-use uuid::Uuid;
+use fx_durable_ga::{configuration, infrastructure::di::Container, services::evaluation};
+use rand::{Rng, RngCore};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::Arc;
 
-const WORKERS: usize = 4;
 const FITNESS_TARGET: f64 = 0.1;
+const TYPE_NAME: &str = "neural_architecture";
 
-#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_thread_ids(true)
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
+    dotenvy::from_filename(".env.local").ok();
+
+    // Create a DI container
+    let mut c = Container::new();
+
+    // Invoke optimizer registration
+    c.invokable(|c| {
+        Box::pin(async move {
+            let svc = foreign_service::OptimizationService::new(
+                "neural_architecture",
+                ArchitectureManager,
+            );
+            let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
+            let mut lock = provided.lock().await;
+            lock.register(svc.type_name, svc.optimizer);
+            Ok(())
+        })
+    });
+
+    // Invoke evaluator registration
+    c.invokable(|c| {
+        Box::pin(async move {
+            let provided = c.get::<Arc<evaluation::Service>>().await?;
+            provided.register(TYPE_NAME, ArchitectureManager).await;
+            Ok(())
+        })
+    });
+
+    // Register fx-durable-ga with the DI container
+    //
+    // NOTE!
+    // Any provider overwrites must happen after registration!
+    fx_durable_ga::register(&mut c);
+
+    // Overwrite a configuration provider
+    c.provide(|_| Box::pin(async { Ok(configuration::JobWorkerCount { value: 8 }) }));
+
+    // Invoke all invokables
+    c.invoke().await?;
+
+    // Get an app instance from the container
+    let app = c.get::<Arc<fx_durable_ga::bootstrap::App>>().await?;
+
+    // Get a timestamp just before we start the optimization
+    let started = Utc::now();
+
+    // Create the optimization request
+    let request_id = app
+        .services()
+        .optimization()
+        .request_new(
+            String::from(TYPE_NAME),
+            FitnessGoal::minimize(FITNESS_TARGET)?,
+            Schedule::generational(10, 10),
+            Selector::tournament(5),
+            Some(serde_json::json!({
+                "mutation_rate": 0.4,
+                "temperature": 0.8,
+            })),
+            None::<()>,
+        )
+        .await?;
+
+    println!("Optimization request submitted: {}", request_id);
+
+    app.services()
+        .synchronization()
+        .wait_for(&request_id.to_string(), &started)
+        .await?;
+
+    let (genotype, fitness) = app
+        .services()
+        .optimization()
+        .get_best_genotype(request_id)
+        .await?
+        .expect("evaluations should exist");
+
+    if fitness >= FITNESS_TARGET {
+        println!("Exhausted the optimization budget without reaching the optimization goal")
+    }
+
+    println!(
+        "Request completed. Best genotype: {} with fitness {:.6}",
+        genotype.id(),
+        fitness
+    );
+
+    Ok(())
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum ActivationFunction {
     Relu,
     Gelu,
@@ -50,207 +129,184 @@ impl std::fmt::Display for ActivationFunction {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct NeuralArchitecture {
-    pub hidden_size: usize,
-    pub num_hidden_layers: usize,
-    pub activation_fn: ActivationFunction,
-    pub use_bias: bool,
-    pub learning_rate: f64,
+    hidden_size: usize,
+    num_hidden_layers: usize,
+    activation_fn: ActivationFunction,
+    use_bias: bool,
+    learning_rate: f64,
 }
 
-impl Encodeable for NeuralArchitecture {
-    const NAME: &'static str = "neural_architecture";
-
-    type Phenotype = NeuralArchitecture;
-
-    fn morphology() -> Vec<GeneBounds> {
-        vec![
-            GeneBounds::integer(0, 3, 4).unwrap(), // hidden_size: [32, 64, 128, 256]
-            GeneBounds::integer(0, 7, 8).unwrap(), // num_hidden_layers: [1, 2, 3, 4, 5, 6, 7, 8]
-            GeneBounds::integer(0, 2, 3).unwrap(), // activation_fn: [ReLU, GELU, Sigmoid]
-            GeneBounds::integer(0, 1, 2).unwrap(), // use_bias: [false, true]
-            GeneBounds::integer(0, 2, 3).unwrap(), // learning_rate: [1e-4, 1e-3, 1e-2]
-        ]
-    }
-
-    fn encode(&self) -> Vec<i64> {
-        let hidden_size_idx = match self.hidden_size {
-            32 => 0,
-            64 => 1,
-            128 => 2,
-            256 => 3,
-            _ => 1,
-        };
-
-        let layers_idx = (self.num_hidden_layers - 1).min(2) as i64;
-
-        let activation_idx = match self.activation_fn {
-            ActivationFunction::Relu => 0,
-            ActivationFunction::Gelu => 1,
-            ActivationFunction::Sigmoid => 2,
-        };
-
-        let bias_idx = if self.use_bias { 1 } else { 0 };
-
-        let lr_idx = if self.learning_rate <= 1e-4 {
-            0
-        } else if self.learning_rate <= 1e-3 {
-            1
-        } else {
-            2
-        };
-
-        vec![
-            hidden_size_idx,
-            layers_idx,
-            activation_idx,
-            bias_idx,
-            lr_idx,
-        ]
-    }
-
-    fn decode(genes: &[i64]) -> Self::Phenotype {
-        let hidden_size = match genes[0] {
-            0 => 32,
-            1 => 64,
-            2 => 128,
-            3 => 256,
-            _ => 64,
-        };
-
-        let num_hidden_layers = (genes[1] + 1).clamp(1, 8) as usize;
-
-        let activation_fn = match genes[2] {
-            0 => ActivationFunction::Relu,
-            1 => ActivationFunction::Gelu,
-            2 => ActivationFunction::Sigmoid,
-            _ => ActivationFunction::Relu,
-        };
-
-        let use_bias = genes[3] == 1;
-
-        let learning_rate = match genes[4] {
-            0 => 1e-4,
-            1 => 1e-3,
-            2 => 1e-2,
-            _ => 1e-3,
-        };
-
-        NeuralArchitecture {
-            hidden_size,
-            num_hidden_layers,
-            activation_fn,
-            use_bias,
-            learning_rate,
-        }
-    }
-}
-
-struct ArchitectureEvaluator;
+#[derive(Clone, Copy)]
+struct ArchitectureManager;
 
 #[derive(Deserialize)]
 struct ResultOutput {
     validation_loss: f64,
 }
 
-impl Evaluator<NeuralArchitecture> for ArchitectureEvaluator {
-    fn fitness<'a>(
+impl ArchitectureManager {
+    fn random_arch(rng: &mut dyn RngCore) -> NeuralArchitecture {
+        let hidden_choices = [32usize, 64, 128, 256];
+        let layer_choices = [1usize, 2, 3, 4, 5, 6, 7, 8];
+        let activation_choices = [
+            ActivationFunction::Relu,
+            ActivationFunction::Gelu,
+            ActivationFunction::Sigmoid,
+        ];
+        let lr_choices = [1e-4f64, 1e-3, 1e-2];
+
+        NeuralArchitecture {
+            hidden_size: hidden_choices[rng.random_range(0..hidden_choices.len())],
+            num_hidden_layers: layer_choices[rng.random_range(0..layer_choices.len())],
+            activation_fn: activation_choices[rng.random_range(0..activation_choices.len())],
+            use_bias: rng.random_range(0..2) == 1,
+            learning_rate: lr_choices[rng.random_range(0..lr_choices.len())],
+        }
+    }
+}
+
+impl TypeName for ArchitectureManager {
+    fn type_name(&self) -> &'static str {
+        TYPE_NAME
+    }
+}
+
+impl foreign_service::Optimizer for ArchitectureManager {
+    type Type = NeuralArchitecture;
+
+    fn random(&self, _user_defined: &Value) -> anyhow::Result<Self::Type> {
+        let mut rng = rand::rng();
+        Ok(Self::random_arch(&mut rng))
+    }
+
+    fn crossover(
         &self,
-        _genotype_id: Uuid,
-        phenotype: NeuralArchitecture,
-        _: &Request,
-        _: &'a Box<dyn Terminated>,
-    ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
+        parent1: Self::Type,
+        parent2: Self::Type,
+        _user_defined: &Value,
+    ) -> anyhow::Result<Self::Type> {
+        let mut rng = rand::rng();
+        let mut pick = || rng.random_range(0..2) == 0;
+
+        Ok(NeuralArchitecture {
+            hidden_size: if pick() {
+                parent1.hidden_size
+            } else {
+                parent2.hidden_size
+            },
+            num_hidden_layers: if pick() {
+                parent1.num_hidden_layers
+            } else {
+                parent2.num_hidden_layers
+            },
+            activation_fn: if pick() {
+                parent1.activation_fn
+            } else {
+                parent2.activation_fn
+            },
+            use_bias: if pick() {
+                parent1.use_bias
+            } else {
+                parent2.use_bias
+            },
+            learning_rate: if pick() {
+                parent1.learning_rate
+            } else {
+                parent2.learning_rate
+            },
+        })
+    }
+
+    fn mutate(&self, genome: &mut Self::Type, user_defined: &Value) -> anyhow::Result<()> {
+        let mut rng = rand::rng();
+        // Reads mutation parameters from flat user_defined payload.
+        let mutation_rate = user_defined
+            .get("mutation_rate")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.4)
+            .clamp(0.0, 1.0);
+        let temperature = user_defined
+            .get("temperature")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.8);
+        let disruptive_rate = (mutation_rate * temperature.max(0.1)).min(1.0);
+        // Temperature scales how disruptive mutations are.
+
+        let maybe = |rate: f64, rng: &mut dyn RngCore| rng.random_range(0.0..1.0) < rate;
+
+        let hidden_choices = [32usize, 64, 128, 256];
+        let layer_choices = [1usize, 2, 3, 4, 5, 6, 7, 8];
+        let activation_choices = [
+            ActivationFunction::Relu,
+            ActivationFunction::Gelu,
+            ActivationFunction::Sigmoid,
+        ];
+        let lr_choices = [1e-4f64, 1e-3, 1e-2];
+
+        if maybe(mutation_rate, &mut rng) {
+            genome.hidden_size = hidden_choices[rng.random_range(0..hidden_choices.len())];
+        }
+        if maybe(disruptive_rate, &mut rng) {
+            genome.num_hidden_layers = layer_choices[rng.random_range(0..layer_choices.len())];
+        }
+        if maybe(mutation_rate, &mut rng) {
+            genome.activation_fn =
+                activation_choices[rng.random_range(0..activation_choices.len())];
+        }
+        if maybe(mutation_rate, &mut rng) {
+            genome.use_bias = !genome.use_bias;
+        }
+        if maybe(disruptive_rate, &mut rng) {
+            genome.learning_rate = lr_choices[rng.random_range(0..lr_choices.len())];
+        }
+
+        Ok(())
+    }
+}
+
+impl evaluation::Evaluator for ArchitectureManager {
+    type Type = NeuralArchitecture;
+
+    fn evaluate<'a>(
+        &'a self,
+        genome: &'a Self::Type,
+    ) -> futures::future::BoxFuture<
+        'a,
+        std::result::Result<f64, Box<dyn std::error::Error + Send + Sync>>,
+    > {
         Box::pin(async move {
-            // Spawn the binary
             let output = tokio::process::Command::new("fx-example-regression")
                 .args([
                     "--hidden-size",
-                    &phenotype.hidden_size.to_string(),
+                    &genome.hidden_size.to_string(),
                     "--num-hidden-layers",
-                    &phenotype.num_hidden_layers.to_string(),
+                    &genome.num_hidden_layers.to_string(),
                     "--activation-fn",
-                    &phenotype.activation_fn.to_string(),
+                    &genome.activation_fn.to_string(),
                     "--learning-rate",
-                    &phenotype.learning_rate.to_string(),
+                    &genome.learning_rate.to_string(),
                 ])
                 .output()
                 .await
-                .expect("Failed to run fx-example-regression");
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
-            // Print stderr logs (your tracing output)
+            if !output.status.success() {
+                return Err(format!(
+                    "fx-example-regression failed: status={} stderr={}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                )
+                .into());
+            }
+
             eprintln!("{}", String::from_utf8_lossy(&output.stderr));
 
-            // Parse stdout as JSON (the ResultOutput struct)
-            let result: ResultOutput =
-                serde_json::from_slice(&output.stdout).expect("Invalid JSON from training binary");
+            let result: ResultOutput = serde_json::from_slice(&output.stdout)
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)?;
 
             Ok(result.validation_loss)
         })
     }
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    dotenv::from_filename(".env.local").ok();
-    tracing_subscriber::fmt()
-        .pretty()
-        .with_thread_ids(true)
-        .with_max_level(Level::INFO)
-        .init();
-
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
-        .connect(&database_url)
-        .await?;
-
-    // Run all default migrations
-    fx_durable_ga::migrations::run_default_migrations(&pool).await?;
-
-    let service = Arc::new(
-        bootstrap(pool.clone())
-            .await?
-            .register::<NeuralArchitecture, _>(ArchitectureEvaluator)
-            .await?
-            .build(),
-    );
-
-    let mut registry = fx_event_bus::EventHandlerRegistry::new();
-    register_event_handlers(
-        Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME)),
-        service.clone(),
-        &mut registry,
-    );
-    let mut listener = fx_event_bus::Listener::new(pool.clone(), registry);
-    tokio::spawn(async move { listener.listen(None).await });
-
-    let host_id = Uuid::parse_str("00000000-0000-0000-0000-123456789abc")?;
-    let mut jobs_listener = fx_mq_jobs::Listener::new(
-        pool.clone(),
-        register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
-        WORKERS,
-        host_id,
-        Duration::from_secs(600),
-    )
-    .await?;
-    tokio::spawn(async move { jobs_listener.listen().await });
-
-    service
-        .new_optimization_request(
-            NeuralArchitecture::NAME,
-            NeuralArchitecture::HASH,
-            FitnessGoal::minimize(FITNESS_TARGET)?,
-            Schedule::generational(10, 10),
-            Selector::tournament(5, 15)?,
-            Mutagen::new(Temperature::constant(0.8)?, MutationRate::constant(0.4)?),
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(15),
-            None::<()>,
-        )
-        .await?;
-
-    tokio::time::sleep(Duration::from_secs(3600)).await;
-    Ok(())
 }

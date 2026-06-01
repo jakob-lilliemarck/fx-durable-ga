@@ -1,199 +1,56 @@
-use super::jobs::{
-    EvaluateGenotypeMessage, GenerateInitialPopulationMessage, MaintainPopulationMessage,
+use super::jobs::MaintainPopulationMessage;
+use crate::services::optimization::repositories::requests;
+use crate::services::{
+    budgeting::{self, TransactionsFilter},
+    evaluation,
+    optimization::{
+        self,
+        service::{REASON_OPTIMIZATION_CHARGED, REASON_OPTIMIZATION_CREATED},
+    },
 };
-use crate::{
-    models::{Conclusion, RequestConclusion},
-    services::optimization,
-};
-use chrono::Utc;
+use futures::future::BoxFuture;
 use fx_event_bus::Handler;
 use fx_mq_jobs::Queries;
-use serde::{Deserialize, Serialize};
 use sqlx::PgTransaction;
-use std::sync::Arc;
+use std::{ops::Neg, sync::Arc};
 use tracing::instrument;
-use uuid::Uuid;
-
-// ============================================================
-// OptimizationRequested
-// ============================================================
-
-/// Event published when a new optimization request is created.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct OptimizationRequestedEvent {
-    request_id: Uuid,
-}
-
-impl fx_event_bus::Event for OptimizationRequestedEvent {
-    const NAME: &'static str = "OptimizationRequested";
-}
-
-impl OptimizationRequestedEvent {
-    /// Creates a new optimization requested event.
-    pub fn new(request_id: Uuid) -> Self {
-        Self { request_id }
-    }
-}
-
-/// Handler that responds to optimization requests by scheduling initial population generation.
-pub struct OptimizationRequestedHandler {
-    queries: Arc<Queries>,
-}
-
-impl Handler<OptimizationRequestedEvent> for OptimizationRequestedHandler {
-    type Error = fx_mq_jobs::PublishError;
-
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
-    fn handle<'a>(
-        &'a self,
-        input: std::sync::Arc<OptimizationRequestedEvent>,
-        _: chrono::DateTime<chrono::Utc>,
-        tx: sqlx::PgTransaction<'a>,
-    ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
-        Box::pin(async move {
-            let mut publisher = fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx, &self.queries);
-
-            let ret = match publisher
-                .publish(&GenerateInitialPopulationMessage {
-                    request_id: input.request_id,
-                })
-                .await
-            {
-                Err(err) => {
-                    tracing::error!(
-                        message = "Failed to publish GenerateInitialPopulation",
-                        request_id = input.request_id.to_string()
-                    );
-                    Err(err)
-                }
-                _ => Ok(()),
-            };
-
-            (publisher.into(), ret)
-        })
-    }
-}
-
-// ============================================================
-// GenotypeGenerated
-// ============================================================
-
-/// Event published when a new genotype is generated for evaluation.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct GenotypeGenerated {
-    request_id: Uuid,
-    genotype_id: Uuid,
-}
-
-impl fx_event_bus::Event for GenotypeGenerated {
-    const NAME: &'static str = "GenotypeGenerated";
-}
-
-impl GenotypeGenerated {
-    /// Creates a new genotype generated event.
-    pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
-        Self {
-            request_id,
-            genotype_id,
-        }
-    }
-}
-
-/// Handler that responds to genotype generation by scheduling evaluation jobs.
-pub struct GenotypeGeneratedHandlerEvent {
-    queries: Arc<Queries>,
-}
-
-impl Handler<GenotypeGenerated> for GenotypeGeneratedHandlerEvent {
-    type Error = fx_mq_jobs::PublishError;
-
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
-    fn handle<'a>(
-        &'a self,
-        input: Arc<GenotypeGenerated>,
-        _: chrono::DateTime<chrono::Utc>,
-        tx: sqlx::PgTransaction<'a>,
-    ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
-        Box::pin(async move {
-            let mut publisher = fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx, &self.queries);
-
-            let ret = match publisher
-                .publish(&EvaluateGenotypeMessage {
-                    request_id: input.request_id,
-                    genotype_id: input.genotype_id,
-                })
-                .await
-            {
-                Err(err) => {
-                    tracing::error!(
-                        message = "Failed to publish EvaluateGenotype",
-                        request_id = input.request_id.to_string(),
-                        genotype_id = input.genotype_id.to_string()
-                    );
-                    Err(err)
-                }
-                _ => Ok(()),
-            };
-
-            (publisher.into(), ret)
-        })
-    }
-}
-
-// ============================================================
-// GenotypeEvaluated
-// ============================================================
-
-/// Event published when a genotype's fitness has been evaluated.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct GenotypeEvaluatedEvent {
-    request_id: Uuid,
-    genotype_id: Uuid,
-}
-
-impl fx_event_bus::Event for GenotypeEvaluatedEvent {
-    const NAME: &'static str = "GenotypeEvaluated";
-}
-
-impl GenotypeEvaluatedEvent {
-    /// Creates a new genotype evaluated event.
-    pub fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
-        Self {
-            request_id,
-            genotype_id,
-        }
-    }
-}
-
 /// Handler that responds to genotype evaluations by scheduling population maintenance.
 pub struct GenotypeEvaluatedHandler {
     queries: Arc<Queries>,
 }
 
-impl Handler<GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
-    type Error = fx_mq_jobs::PublishError;
+impl Handler<evaluation::GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
+    type Error = super::Error;
 
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id, genotype_id = %input.genotype_id))]
+    #[instrument(level = "debug", skip(self, tx))]
     fn handle<'a>(
         &'a self,
-        input: Arc<GenotypeEvaluatedEvent>,
-        _: chrono::DateTime<chrono::Utc>,
+        input: Arc<evaluation::GenotypeEvaluatedEvent>,
+        _polled_at: chrono::DateTime<chrono::Utc>,
         tx: sqlx::PgTransaction<'a>,
     ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
         Box::pin(async move {
+            // Return early if there is no request id (eg. noise analytics)
+            let Some(request_id) = input.request_id else {
+                return (tx, Ok(()));
+            };
+
             let mut publisher = fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx, &self.queries);
 
             let ret = match publisher
-                .publish(&MaintainPopulationMessage {
-                    request_id: input.request_id,
-                })
+                .publish(&MaintainPopulationMessage::new(
+                    request_id,
+                    input.genotype_id,
+                    input.fitness,
+                ))
                 .await
             {
                 Err(err) => {
                     tracing::error!(
                         message = "Failed to publish MaintainPopulation",
-                        request_id = input.request_id.to_string(),
+                        request_id = request_id.to_string(),
                     );
+                    let err: super::Error = err.into();
                     Err(err)
                 }
                 _ => Ok(()),
@@ -204,203 +61,108 @@ impl Handler<GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
     }
 }
 
-// ============================================================
-// RequestCompleted
-// ============================================================
-
-/// Event published when an optimization request reaches its fitness goal.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct RequestCompletedEvent {
-    request_id: Uuid,
+/// Handler that responds to genotype evaluations by scheduling population maintenance.
+pub struct TransactionCreatedHandler {
+    queries: Arc<Queries>,
+    optimizations: Arc<super::Service>,
 }
 
-impl fx_event_bus::Event for RequestCompletedEvent {
-    const NAME: &'static str = "RequestCompleted";
-}
-
-impl RequestCompletedEvent {
-    /// Creates a new request completed event.
-    pub fn new(request_id: Uuid) -> Self {
-        Self { request_id }
-    }
-}
-
-/// Handler that concludes optimization requests when they complete successfully.
-pub struct RequestCompletedHandler {
-    optimization: Arc<optimization::Service>,
-}
-
-impl Handler<RequestCompletedEvent> for RequestCompletedHandler {
+impl Handler<budgeting::TransactionCreatedEvent> for TransactionCreatedHandler {
     type Error = super::Error;
 
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
+    #[instrument(level = "debug", skip(self, tx))]
     fn handle<'a>(
         &'a self,
-        input: Arc<RequestCompletedEvent>,
-        _: chrono::DateTime<chrono::Utc>,
+        input: Arc<budgeting::TransactionCreatedEvent>,
+        _polled_at: chrono::DateTime<chrono::Utc>,
         tx: sqlx::PgTransaction<'a>,
-    ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
-        let optimization = self.optimization.clone();
-
+    ) -> BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), super::Error>)> {
         Box::pin(async move {
-            if let Err(err) = optimization
-                .conclude_request(RequestConclusion {
-                    request_id: input.request_id,
-                    concluded_at: Utc::now(),
-                    concluded_with: Conclusion::Completed,
-                })
-                .await
+            if ![REASON_OPTIMIZATION_CREATED, REASON_OPTIMIZATION_CHARGED]
+                .contains(&input.reason.as_str())
             {
-                tracing::error!(message = "Could not conclude request", error = ?err)
+                return (tx, Ok(()));
             }
 
-            (tx, Ok(()))
+            let filter =
+                requests::SearchRequestsFilter::default().with_account_id(input.account_id);
+
+            let requests = match self
+                .optimizations
+                .requests_ro
+                .search_requests(&filter, 1)
+                .await
+            {
+                Err(err) => return (tx, Err(err.into())),
+                Ok(request) => request,
+            };
+
+            let Some(request) = requests.into_iter().next() else {
+                return (tx, Err(super::Error::NoRequestOfAccount(input.account_id)));
+            };
+
+            let mut publisher = fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx, &self.queries);
+
+            if input.reason == REASON_OPTIMIZATION_CHARGED {
+                if let Err(err) = publisher
+                    .publish(&super::jobs::BreedGenotypesMessage::new(
+                        request.id,
+                        input.amount.neg(), // Negated to get the count to breed, as the charge should be negative
+                    ))
+                    .await
+                {
+                    tracing::error!(
+                        message = "Failed to publish BreedGenotypes",
+                        request_id = %request.id,
+                    );
+                    return (publisher.into(), Err(err.into()));
+                };
+            }
+
+            if input.reason == REASON_OPTIMIZATION_CREATED {
+                let filter = TransactionsFilter::default()
+                    .with_account_id(request.account_id)
+                    .with_reason(REASON_OPTIMIZATION_CHARGED);
+
+                let last_charge_id = match self.optimizations.transactions_ro.history(&filter, 1).await {
+                    Err(err) => return (publisher.into(), Err(err.into())),
+                    Ok(transactions) => transactions.into_iter().next().map(|t| t.id),
+                };
+
+                if let Err(err) = publisher
+                    .publish(&super::jobs::ChargeOptimizationBudgetMessage::new(
+                        request.account_id,
+                        request.schedule.population_size as i64,
+                        last_charge_id,
+                    ))
+                    .await
+                {
+                    tracing::error!(
+                        message = "Failed to publish ChargeOptimizationBudget",
+                        request_id = %request.id,
+                    );
+                    return (publisher.into(), Err(err.into()));
+                }
+            }
+
+            return (publisher.into(), Ok(()));
         })
     }
 }
-
-// ============================================================
-// RequestTerminated
-// ============================================================
-
-/// Event published when an optimization request is terminated before completion.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct RequestTerminatedEvent {
-    request_id: Uuid,
-}
-
-impl fx_event_bus::Event for RequestTerminatedEvent {
-    const NAME: &'static str = "RequestTerminated";
-}
-
-impl RequestTerminatedEvent {
-    /// Creates a new request terminated event.
-    pub fn new(request_id: Uuid) -> Self {
-        Self { request_id }
-    }
-}
-
-/// Handler that concludes optimization requests when they are terminated early.
-pub struct RequestTerminatedHandler {
-    optimization: Arc<optimization::Service>,
-}
-
-impl Handler<RequestTerminatedEvent> for RequestTerminatedHandler {
-    type Error = super::Error;
-
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
-    fn handle<'a>(
-        &'a self,
-        input: Arc<RequestTerminatedEvent>,
-        _: chrono::DateTime<chrono::Utc>,
-        tx: sqlx::PgTransaction<'a>,
-    ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
-        Box::pin(async move {
-            let optimization = self.optimization.clone();
-
-            if let Err(err) = optimization
-                .conclude_request(RequestConclusion {
-                    request_id: input.request_id,
-                    concluded_at: Utc::now(),
-                    concluded_with: Conclusion::Terminated,
-                })
-                .await
-            {
-                tracing::error!(message = "Could not conclude request", error = ?err)
-            }
-
-            (tx, Ok(()))
-        })
-    }
-}
-
-// ============================================================
-// RequestInterrupted
-// ============================================================
-
-/// Event published when an optimization request is manually interrupted.
-#[derive(Clone, Serialize, Deserialize)]
-pub struct RequestInterruptedEvent {
-    request_id: Uuid,
-}
-
-impl fx_event_bus::Event for RequestInterruptedEvent {
-    const NAME: &'static str = "RequestInterrupted";
-}
-
-impl RequestInterruptedEvent {
-    /// Creates a new request interrupted event.
-    pub fn new(request_id: Uuid) -> Self {
-        Self { request_id }
-    }
-}
-
-/// Handler that concludes optimization requests when they are manually interrupted.
-pub struct RequestInterruptedHandler {
-    optimization: Arc<optimization::Service>,
-}
-
-impl Handler<RequestInterruptedEvent> for RequestInterruptedHandler {
-    type Error = super::Error;
-
-    #[instrument(level = "debug", skip(self, input, tx), fields(request_id = %input.request_id))]
-    fn handle<'a>(
-        &'a self,
-        input: Arc<RequestInterruptedEvent>,
-        _: chrono::DateTime<chrono::Utc>,
-        tx: sqlx::PgTransaction<'a>,
-    ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
-        Box::pin(async move {
-            let optimization = self.optimization.clone();
-
-            if let Err(err) = optimization
-                .conclude_request(RequestConclusion {
-                    request_id: input.request_id,
-                    concluded_at: Utc::now(),
-                    concluded_with: Conclusion::Interrupted,
-                })
-                .await
-            {
-                tracing::error!(message = "Could not conclude request", error = ?err)
-            }
-
-            (tx, Ok(()))
-        })
-    }
-}
-
-// ============================================================
-// Registration
-// ============================================================
 
 /// Registers all optimization event handlers with the event bus registry.
 #[instrument(level = "debug", skip_all)]
-pub fn register_event_handlers(
-    queries: Arc<Queries>,
-    optimization: Arc<optimization::Service>,
+pub(crate) fn register_event_handlers(
     registry: &mut fx_event_bus::EventHandlerRegistry,
+    optimizations: &Arc<optimization::Service>,
+    queries: &Arc<Queries>,
 ) {
-    registry.with_handler(OptimizationRequestedHandler {
+    registry.with_handler(TransactionCreatedHandler {
         queries: queries.clone(),
-    });
-
-    registry.with_handler(GenotypeGeneratedHandlerEvent {
-        queries: queries.clone(),
+        optimizations: optimizations.clone(),
     });
 
     registry.with_handler(GenotypeEvaluatedHandler {
         queries: queries.clone(),
-    });
-
-    registry.with_handler(RequestCompletedHandler {
-        optimization: optimization.clone(),
-    });
-
-    registry.with_handler(RequestTerminatedHandler {
-        optimization: optimization.clone(),
-    });
-
-    registry.with_handler(RequestInterruptedHandler {
-        optimization: optimization.clone(),
     });
 }

@@ -19,9 +19,9 @@ truncate_schema_tables() {
     local schema="$1"
     shift
     local tables=("$@")
-    
+
     echo "📋 Truncating tables in schema: $schema"
-    
+
     for table in "${tables[@]}"; do
         echo "  - Truncating $schema.$table"
         if ! psql "$DATABASE_URL" -c "TRUNCATE TABLE $schema.\"$table\" CASCADE;" >/dev/null 2>&1; then
@@ -34,7 +34,7 @@ truncate_schema_tables() {
 
 # fx_durable_ga schema tables
 FX_DURABLE_GA_TABLES=(
-    "fitness"
+    "evaluations"
     "genotypes"
     "requests"
     "morphologies"

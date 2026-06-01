@@ -48,8 +48,13 @@ where
 pub async fn run_default_migrations(pool: &PgPool) -> anyhow::Result<()> {
     let mut tx = pool.begin().await?;
 
+    tracing::info!("Running fx-event-bus migrations...");
     fx_event_bus::run_migrations(&mut tx).await?;
+
+    tracing::info!("Running fx-mq-jobs migrations...");
     fx_mq_jobs::run_migrations(&mut tx, fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME).await?;
+
+    tracing::info!("Running workspace migrations...");
     run_migrations(&mut tx).await?;
 
     tx.commit().await?;

@@ -1,49 +1,139 @@
-//! Feature Engineering Optimization with Genetic Algorithms
-//!
-//! Demonstrates using fx_durable_ga to optimize feature selection and preprocessing
-//! pipelines for time series forecasting.
-//!
-//! **IMPORTANT!**
-//! This library requires fx-durable-ga-example-feature-engineering to be installed
-//! and available on the PATH as `feng`. The crate is available at:
-//! https://github.com/jakob-lilliemarck/fx-durable-ga-example-feature-engineering
-//!
-//! This example optimizes:
-//! - Which 7 features to use from available columns (TEMP, PRES, DEWP, etc.)
-//! - Preprocessing pipeline for each feature (max 2 transforms: ZSCORE, ROC, STD)
-//! - Neural network hyperparameters (hidden size, learning rate, sequence length)
-//!
-//! Search space: ~2.8 × 10^26 possible configurations
-//! (11^7 source columns × 3^7 pipeline lengths × 12^7 transform_1 × 12^7 transform_2 × 6 hidden sizes × 3 learning rates × 10 sequence lengths)
-
 use anyhow::Result;
-use fx_durable_ga::{
-    bootstrap,
-    models::{
-        Crossover, Distribution, Encodeable, Evaluator, FitnessGoal, GeneBounds, Mutagen,
-        MutationRate, Request, Schedule, Selector, Temperature, Terminated,
-    },
-    register_event_handlers, register_job_handlers,
+use chrono::Utc;
+use futures::lock::Mutex;
+use fx_durable_ga::repositories::genotypes::TypeName;
+use fx_durable_ga::services::optimization::{
+    self as foreign_service, FitnessGoal, OptimizerRegistry, Schedule, Selector,
 };
-use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
-use fx_mq_jobs::Queries;
-use serde::Deserialize;
-use sqlx::postgres::PgPoolOptions;
-use std::time::Duration;
-use std::{env, sync::Arc};
-use tracing::Level;
+use fx_durable_ga::{configuration, infrastructure::di::Container, services::evaluation};
+use rand::{Rng, RngCore};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::sync::Arc;
 use uuid::Uuid;
 
-const WORKERS: usize = 5;
 const FITNESS_TARGET: f64 = 1.0;
+const TYPE_NAME: &str = "feature_engineering";
 
 /// Available source columns for features
 const SOURCE_COLUMNS: &[&str] = &[
     "TEMP", "PRES", "DEWP", "RAIN", "WSPM", "PM2.5", "PM10", "SO2", "NO2", "CO", "O3",
 ];
 
+#[tokio::main]
+async fn main() -> Result<()> {
+    tracing_subscriber::fmt()
+        .pretty()
+        .with_thread_ids(true)
+        .with_max_level(tracing::Level::INFO)
+        .init();
+
+    dotenvy::from_filename(".env.local").ok();
+
+    // Create a DI container
+    let mut c = Container::new();
+
+    // Invoke optimizer registration
+    c.invokable(|c| {
+        Box::pin(async move {
+            let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
+            let mut lock = provided.lock().await;
+            lock.register("feature_engineering", FeatureManager);
+            Ok(())
+        })
+    });
+
+    c.invokable(|c| {
+        Box::pin(async move {
+            let provided = c.get::<Arc<evaluation::Service>>().await?;
+            provided.register(TYPE_NAME, FeatureManager).await;
+            Ok(())
+        })
+    });
+
+    // Register fx-durable-ga with the DI container
+    //
+    // NOTE!
+    // Any provider overwrites must happen after registration!
+    fx_durable_ga::register(&mut c);
+
+    // Overwrite the job worker count configuration provider
+    c.provide(|_| Box::pin(async { Ok(configuration::JobWorkerCount { value: 8 }) }));
+
+    // Invoke all invokables
+    c.invoke().await?;
+
+    // Get an app instance from the container
+    let app = c.get::<Arc<fx_durable_ga::bootstrap::App>>().await?;
+
+    // Get a timestamp just before we start the optimization
+    let started = Utc::now();
+
+    // Create the optimization request
+    let request_id = app
+        .services()
+        .optimization()
+        .request_new(
+            String::from("feature_engineering"),
+            FitnessGoal::minimize(FITNESS_TARGET)?,
+            Schedule::generational(40, 10),
+            Selector::tournament(5),
+            Some(serde_json::json!({
+                "mutation_rate": 0.35,
+                "temperature": 0.7,
+            })),
+            None::<()>,
+        )
+        .await?;
+
+    println!("Optimization request submitted: {}", request_id);
+
+    app.services()
+        .synchronization()
+        .wait_for(&request_id.to_string(), &started)
+        .await?;
+
+    let (genotype, fitness) = app
+        .services()
+        .optimization()
+        .get_best_genotype(request_id)
+        .await?
+        .expect("evaluations should exist");
+
+    if fitness >= FITNESS_TARGET {
+        println!("Exhausted the optimization budget without reaching the optimization goal")
+    }
+
+    let config = FeatureConfig::from_value(&genotype.genome());
+
+    println!("\n=== Best Configuration ===");
+    println!("Fitness (MSE): {:.6}", fitness);
+    println!("RMSE: {:.6}°C", fitness.sqrt());
+    println!("\nHyperparameters:");
+    println!("  Hidden Size: {}", config.hidden_size);
+    println!("  Learning Rate: {}", config.learning_rate);
+    println!("  Sequence Length: {}", config.sequence_length);
+    println!("\nFeatures:");
+
+    for (i, feature) in config.features.iter().enumerate() {
+        let pipeline = feature
+            .transforms
+            .iter()
+            .map(|t| t.to_string())
+            .collect::<Vec<_>>()
+            .join(" → ");
+        if pipeline.is_empty() {
+            println!("  feat_{}: {}", i, feature.source);
+        } else {
+            println!("  feat_{}: {} → {}", i, feature.source, pipeline);
+        }
+    }
+
+    Ok(())
+}
+
 /// Transform types with their parameters
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 enum Transform {
     ZScore10,
     ZScore24,
@@ -78,23 +168,6 @@ impl Transform {
         }
     }
 
-    fn to_gene(self) -> i64 {
-        match self {
-            Self::ZScore10 => 0,
-            Self::ZScore24 => 1,
-            Self::ZScore48 => 2,
-            Self::ZScore96 => 3,
-            Self::Roc1 => 4,
-            Self::Roc4 => 5,
-            Self::Roc8 => 6,
-            Self::Roc12 => 7,
-            Self::Std10 => 8,
-            Self::Std24 => 9,
-            Self::Std48 => 10,
-            Self::Std96 => 11,
-        }
-    }
-
     fn to_string(self) -> String {
         match self {
             Self::ZScore10 => "ZSCORE(10)".to_string(),
@@ -114,7 +187,7 @@ impl Transform {
 }
 
 /// A single feature with its source and preprocessing pipeline
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct Feature {
     source: String,
     transforms: Vec<Transform>,
@@ -138,7 +211,7 @@ impl Feature {
 }
 
 /// Configuration for feature engineering optimization
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct FeatureConfig {
     features: Vec<Feature>,
     hidden_size: usize,
@@ -146,162 +219,182 @@ struct FeatureConfig {
     sequence_length: usize,
 }
 
-impl Encodeable for FeatureConfig {
-    const NAME: &'static str = "feature_engineering";
-
-    type Phenotype = FeatureConfig;
-
-    fn morphology() -> Vec<GeneBounds> {
-        let mut bounds = Vec::new();
-
-        // 7 features, each with:
-        // - source column (0-10)
-        // - pipeline_length (0-2)
-        // - transform_1 (0-11)
-        // - transform_2 (0-11)
-        for _ in 0..7 {
-            bounds.push(GeneBounds::integer(0, 10, 11).unwrap()); // source
-            bounds.push(GeneBounds::integer(0, 2, 3).unwrap()); // pipeline_length (max 2)
-            bounds.push(GeneBounds::integer(0, 11, 12).unwrap()); // transform_1
-            bounds.push(GeneBounds::integer(0, 11, 12).unwrap()); // transform_2
-        }
-
-        // Hyperparameters
-        bounds.push(GeneBounds::integer(0, 5, 6).unwrap()); // hidden_size: [4, 8, 16, 32, 64, 128]
-        bounds.push(GeneBounds::integer(0, 2, 3).unwrap()); // learning_rate: [1e-4, 5e-4, 1e-3]
-        bounds.push(GeneBounds::integer(0, 9, 10).unwrap()); // sequence_length: [10..100 step 10]
-
-        bounds
-    }
-
-    fn encode(&self) -> Vec<i64> {
-        let mut genes = Vec::new();
-
-        // Encode 7 features
-        for feature in &self.features {
-            // Source column
-            let source_idx = SOURCE_COLUMNS
-                .iter()
-                .position(|&col| col == feature.source)
-                .unwrap_or(0) as i64;
-            genes.push(source_idx);
-
-            // Pipeline length (max 2)
-            genes.push(feature.transforms.len().min(2) as i64);
-
-            // Transforms (pad with 0 if fewer than 2)
-            for i in 0..2 {
-                if i < feature.transforms.len() {
-                    genes.push(feature.transforms[i].to_gene());
-                } else {
-                    genes.push(0);
-                }
-            }
-        }
-
-        // Encode hyperparameters
-        let hidden_size_idx = match self.hidden_size {
-            4 => 0,
-            8 => 1,
-            16 => 2,
-            32 => 3,
-            64 => 4,
-            128 => 5,
-            _ => 2, // default to 16
-        };
-        genes.push(hidden_size_idx);
-
-        let lr_idx = if self.learning_rate <= 1e-4 {
-            0
-        } else if self.learning_rate <= 5e-4 {
-            1
-        } else {
-            2
-        };
-        genes.push(lr_idx);
-
-        let seq_len_idx = ((self.sequence_length / 10).saturating_sub(1)).min(9) as i64;
-        genes.push(seq_len_idx);
-
-        genes
-    }
-
-    fn decode(genes: &[i64]) -> Self::Phenotype {
+impl FeatureConfig {
+    fn random(rng: &mut dyn RngCore) -> Self {
         let mut features = Vec::new();
-
-        // Decode 7 features (4 genes per feature now: source, length, t1, t2)
-        for i in 0..7 {
-            let base_idx = i * 4;
-
-            let source_idx = genes[base_idx].clamp(0, 10) as usize;
-            let source = SOURCE_COLUMNS[source_idx].to_string();
-
-            let pipeline_length = genes[base_idx + 1].clamp(0, 2) as usize;
-
+        for _ in 0..7 {
+            let source = SOURCE_COLUMNS[rng.random_range(0..SOURCE_COLUMNS.len())].to_string();
+            let pipeline_length = rng.random_range(0..3); // 0,1,2
             let mut transforms = Vec::new();
-            for j in 0..pipeline_length {
-                if let Some(transform) = Transform::from_gene(genes[base_idx + 2 + j]) {
-                    transforms.push(transform);
+            for _ in 0..pipeline_length {
+                let gene = rng.random_range(0..12) as i64;
+                if let Some(t) = Transform::from_gene(gene) {
+                    transforms.push(t);
                 }
             }
-
             features.push(Feature { source, transforms });
         }
 
-        // Decode hyperparameters (genes are now at index 28, 29, 30)
-        let hidden_size = match genes[28] {
-            0 => 4,
-            1 => 8,
-            2 => 16,
-            3 => 32,
-            4 => 64,
-            5 => 128,
-            _ => 32,
-        };
-
-        let learning_rate = match genes[29] {
-            0 => 1e-4,
-            1 => 5e-4,
-            2 => 1e-3,
-            _ => 5e-4,
-        };
-
-        let sequence_length = ((genes[30].clamp(0, 9) + 1) * 10) as usize;
+        let hidden_choices = [4usize, 8, 16, 32, 64, 128];
+        let lr_choices = [1e-4f64, 5e-4, 1e-3];
+        let seq_choices = [10usize, 20, 30, 40, 50, 60, 70, 80, 90, 100];
 
         FeatureConfig {
             features,
-            hidden_size,
-            learning_rate,
-            sequence_length,
+            hidden_size: hidden_choices[rng.random_range(0..hidden_choices.len())],
+            learning_rate: lr_choices[rng.random_range(0..lr_choices.len())],
+            sequence_length: seq_choices[rng.random_range(0..seq_choices.len())],
         }
+    }
+
+    fn from_value(value: &Value) -> Self {
+        serde_json::from_value(value.clone())
+            .unwrap_or_else(|_| FeatureConfig::random(&mut rand::rng()))
     }
 }
 
-struct FeatureEvaluator;
+struct FeatureManager;
 
 #[derive(Deserialize)]
 struct ResultOutput {
     validation_loss: f64,
 }
 
-impl Evaluator<FeatureConfig> for FeatureEvaluator {
-    fn fitness<'a>(
+impl TypeName for FeatureManager {
+    fn type_name(&self) -> &'static str {
+        TYPE_NAME
+    }
+}
+
+impl foreign_service::Optimizer for FeatureManager {
+    type Type = FeatureConfig;
+
+    fn random(&self, _user_defined: &Value) -> anyhow::Result<Self::Type> {
+        let mut rng = rand::rng();
+        Ok(FeatureConfig::random(&mut rng))
+    }
+
+    fn crossover(
         &self,
-        genotype_id: Uuid,
-        phenotype: FeatureConfig,
-        _: &Request,
-        _: &'a Box<dyn Terminated>,
-    ) -> futures::future::BoxFuture<'a, Result<f64, anyhow::Error>> {
+        parent1: Self::Type,
+        parent2: Self::Type,
+        _user_defined: &Value,
+    ) -> anyhow::Result<Self::Type> {
+        let mut rng = rand::rng();
+        let mut features = Vec::new();
+
+        for i in 0..7 {
+            let chosen = if rng.random_range(0..2) == 0 {
+                parent1.features.get(i)
+            } else {
+                parent2.features.get(i)
+            };
+            let feature = chosen.cloned().unwrap_or_else(|| {
+                let source = SOURCE_COLUMNS[rng.random_range(0..SOURCE_COLUMNS.len())].to_string();
+                let len = rng.random_range(0..3);
+                let mut transforms = Vec::new();
+                for _ in 0..len {
+                    let gene = rng.random_range(0..12) as i64;
+                    if let Some(t) = Transform::from_gene(gene) {
+                        transforms.push(t);
+                    }
+                }
+                Feature { source, transforms }
+            });
+            features.push(feature);
+        }
+
+        let mut pick = || rng.random_range(0..2) == 0;
+
+        Ok(FeatureConfig {
+            features,
+            hidden_size: if pick() {
+                parent1.hidden_size
+            } else {
+                parent2.hidden_size
+            },
+            learning_rate: if pick() {
+                parent1.learning_rate
+            } else {
+                parent2.learning_rate
+            },
+            sequence_length: if pick() {
+                parent1.sequence_length
+            } else {
+                parent2.sequence_length
+            },
+        })
+    }
+
+    fn mutate(&self, genome: &mut Self::Type, user_defined: &Value) -> anyhow::Result<()> {
+        let mut rng = rand::rng();
+        // Reads mutation parameters from flat user_defined payload.
+        let mutation_rate = user_defined
+            .get("mutation_rate")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.35)
+            .clamp(0.0, 1.0);
+        let temperature = user_defined
+            .get("temperature")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.7);
+        let disruptive_rate = (mutation_rate * temperature.max(0.1)).min(1.0);
+        // Temperature scales how disruptive mutations are.
+
+        let maybe = |rng: &mut dyn RngCore, rate: f64| rng.random_range(0.0..1.0) < rate;
+
+        if maybe(&mut rng, mutation_rate) {
+            genome.hidden_size = [4usize, 8, 16, 32, 64, 128][rng.random_range(0..6)];
+        }
+        if maybe(&mut rng, mutation_rate) {
+            genome.learning_rate = [1e-4f64, 5e-4, 1e-3][rng.random_range(0..3)];
+        }
+        if maybe(&mut rng, mutation_rate) {
+            genome.sequence_length =
+                [10usize, 20, 30, 40, 50, 60, 70, 80, 90, 100][rng.random_range(0..10)];
+        }
+
+        for feat in genome.features.iter_mut() {
+            if maybe(&mut rng, mutation_rate) {
+                feat.source = SOURCE_COLUMNS[rng.random_range(0..SOURCE_COLUMNS.len())].to_string();
+            }
+            if maybe(&mut rng, disruptive_rate) {
+                let len = rng.random_range(0..3);
+                feat.transforms.clear();
+                for _ in 0..len {
+                    let gene = rng.random_range(0..12) as i64;
+                    if let Some(t) = Transform::from_gene(gene) {
+                        feat.transforms.push(t);
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl fx_durable_ga::services::evaluation::Evaluator for FeatureManager {
+    type Type = FeatureConfig;
+
+    fn evaluate<'a>(
+        &'a self,
+        genome: &'a Self::Type,
+    ) -> futures::future::BoxFuture<
+        'a,
+        std::result::Result<f64, Box<dyn std::error::Error + Send + Sync>>,
+    > {
         Box::pin(async move {
+            let genotype_id = Uuid::now_v7();
             let model_save_path = format!("./model_storage/{}", genotype_id);
             let mut args = vec![
                 "train".to_string(),
                 "--hidden-size".to_string(),
-                phenotype.hidden_size.to_string(),
+                genome.hidden_size.to_string(),
                 "--learning-rate".to_string(),
-                phenotype.learning_rate.to_string(),
+                genome.learning_rate.to_string(),
                 "--sequence-length".to_string(),
-                phenotype.sequence_length.to_string(),
+                genome.sequence_length.to_string(),
                 "--prediction-horizon".to_string(),
                 "1".to_string(),
                 "--batch-size".to_string(),
@@ -323,7 +416,7 @@ impl Evaluator<FeatureConfig> for FeatureEvaluator {
             args.push("month_cos=month:COS(12)".to_string());
 
             // Add optimized features
-            for (i, feature) in phenotype.features.iter().enumerate() {
+            for (i, feature) in genome.features.iter().enumerate() {
                 let feature_name = format!("feat_{}", i);
                 args.push("--feature".to_string());
                 args.push(feature.to_cli_arg(&feature_name));
@@ -349,136 +442,21 @@ impl Evaluator<FeatureConfig> for FeatureEvaluator {
             // Check exit code
             if !output.status.success() {
                 let stdout = String::from_utf8_lossy(&output.stdout);
-                return Err(anyhow::anyhow!(
-                    "feng failed with exit code {:?}. stdout: {}, stderr: {}",
-                    output.status.code(),
-                    stdout,
-                    stderr
-                ));
+                return Err(format!(
+                    "feng failed with exit code {:?}. stdout: {stdout}, stderr: {stderr}",
+                    output.status.code()
+                )
+                .into());
             }
 
             // Parse stdout as JSON (only the last line contains the JSON result)
             let stdout = String::from_utf8_lossy(&output.stdout);
             let last_line = stdout.lines().last().unwrap_or("");
             let result: ResultOutput = serde_json::from_str(last_line).map_err(|e| {
-                anyhow::anyhow!(
-                    "Failed to parse JSON from feng: {}. Last line was: {}",
-                    e,
-                    last_line
-                )
+                format!("Failed to parse JSON from feng: {e}. Last line was: {last_line}")
             })?;
 
             Ok(result.validation_loss)
         })
     }
-}
-
-#[tokio::main]
-async fn main() -> Result<()> {
-    dotenv::from_filename(".env.local").ok();
-    tracing_subscriber::fmt()
-        .pretty()
-        .with_thread_ids(true)
-        .with_max_level(Level::INFO)
-        .init();
-
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-    let pool = PgPoolOptions::new()
-        .max_connections(10)
-        .connect(&database_url)
-        .await?;
-
-    // Run all default migrations
-    fx_durable_ga::migrations::run_default_migrations(&pool).await?;
-
-    let service = Arc::new(
-        bootstrap(pool.clone())
-            .await?
-            .register::<FeatureConfig, _>(FeatureEvaluator)
-            .await?
-            .build(),
-    );
-
-    let mut registry = fx_event_bus::EventHandlerRegistry::new();
-    register_event_handlers(
-        Arc::new(Queries::new(FX_MQ_JOBS_SCHEMA_NAME)),
-        service.clone(),
-        &mut registry,
-    );
-    let mut listener = fx_event_bus::Listener::new(pool.clone(), registry);
-    tokio::spawn(async move { listener.listen(None).await });
-
-    let host_id = Uuid::parse_str("00000000-0000-0000-0000-123456789abc")?;
-    let mut jobs_listener = fx_mq_jobs::Listener::new(
-        pool.clone(),
-        register_job_handlers(&service, fx_mq_jobs::RegistryBuilder::new()),
-        WORKERS,
-        host_id,
-        Duration::from_secs(600),
-    )
-    .await?;
-    tokio::spawn(async move { jobs_listener.listen().await });
-
-    let request_id = service
-        .new_optimization_request(
-            FeatureConfig::NAME,
-            FeatureConfig::HASH,
-            FitnessGoal::minimize(FITNESS_TARGET)?,
-            Schedule::generational(40, 10),
-            Selector::tournament(5, 45)?,
-            Mutagen::new(Temperature::constant(0.7)?, MutationRate::constant(0.35)?),
-            Crossover::uniform(0.5)?,
-            Distribution::latin_hypercube(40),
-            None::<()>,
-        )
-        .await?;
-
-    // Poll for completion every 15 seconds (timeout after 1 hour)
-    let timeout = Duration::from_secs(7200);
-    let poll_interval = Duration::from_secs(15);
-    let start = std::time::Instant::now();
-
-    loop {
-        if service.is_request_concluded(request_id).await? {
-            println!("\nOptimization completed!");
-            break;
-        }
-
-        if start.elapsed() > timeout {
-            println!("\nOptimization timed out after 1 hour.");
-            break;
-        }
-
-        tokio::time::sleep(poll_interval).await;
-    }
-
-    // Get and print the best configuration
-    if let Some((genotype, fitness)) = service.get_best_genotype(request_id).await? {
-        let config = FeatureConfig::decode(&genotype.genome());
-        println!("\n=== Best Configuration ===");
-        println!("Fitness (MSE): {:.6}", fitness);
-        println!("RMSE: {:.6}°C", fitness.sqrt());
-        println!("\nHyperparameters:");
-        println!("  Hidden Size: {}", config.hidden_size);
-        println!("  Learning Rate: {}", config.learning_rate);
-        println!("  Sequence Length: {}", config.sequence_length);
-        println!("\nFeatures:");
-        for (i, feature) in config.features.iter().enumerate() {
-            let pipeline = feature
-                .transforms
-                .iter()
-                .map(|t| t.to_string())
-                .collect::<Vec<_>>()
-                .join(" → ");
-            if pipeline.is_empty() {
-                println!("  feat_{}: {}", i, feature.source);
-            } else {
-                println!("  feat_{}: {} → {}", i, feature.source, pipeline);
-            }
-        }
-    } else {
-        println!("No genotypes were evaluated.");
-    }
-
-    Ok(())
 }

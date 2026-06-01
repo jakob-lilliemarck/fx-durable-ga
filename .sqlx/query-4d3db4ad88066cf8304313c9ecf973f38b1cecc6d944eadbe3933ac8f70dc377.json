@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            WITH filtered AS (\n                SELECT fitness\n                FROM evaluation.evaluations e\n                WHERE ($1::uuid IS NULL OR e.request_id = $1)\n                  AND ($2::uuid IS NULL OR e.genotype_id = $2)\n                  AND ($3::timestamptz IS NULL OR e.generated_at >= $3)\n                  AND ($4::timestamptz IS NULL OR e.generated_at <= $4)\n                  AND ($5::uuid IS NULL OR e.evaluated_by = $5)\n                  AND ($6::uuid IS NULL OR (e.generated_at, e.id) < (\n                      SELECT cp.generated_at, cp.id\n                      FROM evaluation.evaluations cp\n                      WHERE cp.id = $6\n                  ))\n                ORDER BY e.generated_at DESC, e.id DESC\n                LIMIT $7\n            )\n            SELECT\n                COUNT(*) AS \"count!:i64\",\n                MIN(fitness) AS \"min?\",\n                MAX(fitness) AS \"max?\"\n            FROM filtered\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!:i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "min?",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 2,
+        "name": "max?",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4d3db4ad88066cf8304313c9ecf973f38b1cecc6d944eadbe3933ac8f70dc377"
+}

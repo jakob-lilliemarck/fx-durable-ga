@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT balance\n        FROM budgeting.transactions\n        WHERE account_id = $1\n        ORDER BY timestamp DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "balance",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2b24ca38df81d6b7d72acf95a44d2ab86f80d4f34c5cd72210e0adf6ef59849e"
+}

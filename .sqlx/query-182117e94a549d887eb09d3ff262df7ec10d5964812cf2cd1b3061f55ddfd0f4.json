@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO synchronization.semaphores (name, raised_at)\n        VALUES ($1, $2)\n        RETURNING\n            name,\n            raised_at;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "raised_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "182117e94a549d887eb09d3ff262df7ec10d5964812cf2cd1b3061f55ddfd0f4"
+}

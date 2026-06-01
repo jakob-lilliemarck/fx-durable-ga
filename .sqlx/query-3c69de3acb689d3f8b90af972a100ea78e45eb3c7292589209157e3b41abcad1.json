@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE fx_durable_ga.requested_embeddings re\n        SET handled_at = $1\n        FROM UNNEST($2::UUID[], $3::CHAR(64)[]) AS ids(entity_id, indexer_digest)\n        WHERE re.handled_at IS NULL\n          AND re.entity_id = ids.entity_id\n          AND re.indexer_digest = ids.indexer_digest;\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "UuidArray",
+        "BpcharArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3c69de3acb689d3f8b90af972a100ea78e45eb3c7292589209157e3b41abcad1"
+}

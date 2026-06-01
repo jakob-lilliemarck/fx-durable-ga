@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            te.id AS \"embedding_id!: Uuid\",\n            ARRAY_AGG(tag_name ORDER BY te.tag_name asc) AS \"tags!: Vec<String>\"\n        FROM fx_durable_ga.tagged_embeddings te\n        WHERE\n            ($1::CHAR(64) IS NULL OR te.encoder_digest = $1::CHAR(64))\n            AND ($2::BIGINT[] IS NULL OR te.tag_hash = ANY($2::BIGINT[]))\n            AND ($3::UUID[] IS NULL OR te.id = ANY($3::UUID[]))\n            AND ($4::UUID IS NULL OR te.id > $4::UUID)\n        GROUP BY te.id\n        ORDER BY te.id\n        LIMIT $5;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "embedding_id!: Uuid",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tags!: Vec<String>",
+        "type_info": "TextArray"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bpchar",
+        "Int8Array",
+        "UuidArray",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      null
+    ]
+  },
+  "hash": "4bfe9980040ea7fc5989146a99332b63a102b1da312e45760978204ecd224832"
+}

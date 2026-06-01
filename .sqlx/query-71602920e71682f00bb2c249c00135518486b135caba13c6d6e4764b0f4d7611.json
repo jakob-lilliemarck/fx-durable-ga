@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH last_state AS (\n            SELECT DISTINCT ON (digest) is_available\n            FROM encoder_availability\n            WHERE digest = $1::CHAR(64)\n            ORDER BY digest, revised_at DESC\n        ),\n        inserted AS (\n            INSERT INTO encoder_availability (digest, is_available, revised_at)\n            SELECT $1, $2, $3\n            WHERE NOT EXISTS (\n                SELECT 1 FROM last_state WHERE is_available = $2\n            )\n            RETURNING is_available\n        )\n        SELECT\n            is_available AS \"is_available!:bool\",\n            TRUE AS \"was_changed!:bool\"\n        FROM inserted\n        UNION ALL\n        SELECT\n            is_available AS \"is_available!:bool\",\n            FALSE AS \"was_changed!:bool\"\n        FROM last_state\n        WHERE NOT EXISTS (SELECT 1 FROM inserted);\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "is_available!:bool",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "was_changed!:bool",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Bpchar",
+        "Bool",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "71602920e71682f00bb2c249c00135518486b135caba13c6d6e4764b0f4d7611"
+}

@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH binned_embeddings_input AS (\n            SELECT bin_index, embedding_id\n            FROM UNNEST($1::BIGINT[], $2::UUID[]) AS t(bin_index, embedding_id)\n        ),\n        binned_embeddings AS (\n            SELECT bei.bin_index, e.id AS embedding_id, e.value\n            FROM binned_embeddings_input bei\n            JOIN fx_durable_ga.embeddings e ON e.id = bei.embedding_id\n        ),\n        bin_counts AS (\n            SELECT bin_index, COUNT(*) AS total\n            FROM binned_embeddings\n            GROUP BY bin_index\n        ),\n        kth_distances AS (\n            SELECT\n                t1.bin_index,\n                t1.embedding_id,\n                (\n                    SELECT t2.value <=> t1.value\n                    FROM binned_embeddings t2\n                    WHERE t2.bin_index = t1.bin_index\n                      AND t2.embedding_id <> t1.embedding_id\n                    ORDER BY t2.value <=> t1.value\n                    LIMIT 1 OFFSET $3::INT - 1\n                ) AS knn_distance\n            FROM binned_embeddings t1\n            WHERE (SELECT bc.total FROM bin_counts bc WHERE bc.bin_index = t1.bin_index) > 1\n        )\n        SELECT\n            bc.bin_index AS \"bin_index!: i64\",\n            bc.total AS \"embedding_count!: i64\",\n            MIN(kd.knn_distance) AS \"min_knn_distance?: f64\",\n            MAX(kd.knn_distance) AS \"max_knn_distance?: f64\",\n            AVG(kd.knn_distance) AS \"avg_knn_distance?: f64\",\n            VAR_SAMP(kd.knn_distance) AS \"sample_variance?: f64\",\n            STDDEV_SAMP(kd.knn_distance) AS \"sample_std?: f64\"\n        FROM bin_counts bc\n        LEFT JOIN kth_distances kd ON kd.bin_index = bc.bin_index\n        GROUP BY bc.bin_index, bc.total\n        ORDER BY bc.bin_index ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "bin_index!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "embedding_count!: i64",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "min_knn_distance?: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 3,
+        "name": "max_knn_distance?: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 4,
+        "name": "avg_knn_distance?: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 5,
+        "name": "sample_variance?: f64",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 6,
+        "name": "sample_std?: f64",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8Array",
+        "UuidArray",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "36a9b77324a4767792cc6fcae55b178130648777f61d76057ebb8095b084fc95"
+}

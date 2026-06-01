@@ -1,98 +1,131 @@
-use super::{Error, TxRepository};
-use crate::models::{Genotype, Population};
-use crate::repositories::chainable::{Chain, ToTx, TxType};
-use futures::{Future, future::BoxFuture};
-use sqlx::{PgPool, PgTransaction};
+use super::errors::Error;
+use crate::infrastructure::db;
+use crate::repositories::genotypes::{Genotype, GenotypePopulation};
+use sqlx::PgTransaction;
 use tracing::instrument;
 use uuid::Uuid;
 
-/// Repository for genotype and fitness data operations.
-pub(crate) struct Repository {
-    pool: PgPool,
+#[derive(Debug, Clone)]
+pub struct Read {
+    ro: db::ReadPool,
 }
 
-impl Repository {
-    /// Creates a new genotypes repository with the given database pool.
-    pub(crate) fn new(pool: PgPool) -> Self {
-        Self { pool }
+#[derive(Debug, Clone)]
+pub struct Write {
+    wr: db::WritePool,
+}
+
+pub struct WriteTx<'tx> {
+    tx: &'tx mut PgTransaction<'static>,
+}
+
+impl db::Tx for Write {
+    type Error = super::Error;
+
+    fn tx(self) -> db::TxFut<Self::Error> {
+        let pool = self.wr.pool.clone();
+        Box::pin(async move {
+            let tx = pool.begin().await?;
+            Ok(tx)
+        })
+    }
+}
+
+impl Read {
+    pub fn new(ro: db::ReadPool) -> Self {
+        Self { ro }
     }
 
     /// Retrieves a genotype by its ID.
     #[instrument(level = "debug", skip(self), fields(genotype_id = %id))]
     pub(crate) async fn get_genotype(&self, id: &Uuid) -> Result<Genotype, Error> {
-        super::queries::get_genotype(&self.pool, id).await
+        let mut genotypes = super::queries::search_genotypes(
+            &self.ro.pool,
+            &super::queries::SearchGenotypesFilter::default().with_genotype_id(*id),
+            1,
+        )
+        .await?;
+
+        if genotypes.is_empty() {
+            return Err(Error::NotFound(*id));
+        }
+
+        let genotype = genotypes.remove(0);
+
+        Ok(genotype)
     }
 
-    /// Gets population statistics for an optimization request.
+    /// Gets population statistics for an optimization request (genotypes only).
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
-    pub(crate) fn get_population(
+    pub(crate) async fn get_population(
         &self,
         request_id: &Uuid,
-    ) -> impl Future<Output = Result<Population, Error>> {
-        super::queries::get_population(&self.pool, request_id)
-    }
-    /// Searches genotypes with filtering and ordering options.
-    #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
-    pub(crate) fn search_genotypes(
-        &self,
-        filter: &super::queries::Filter,
-        limit: i64,
-    ) -> impl Future<Output = Result<Vec<(Genotype, Option<f64>)>, Error>> {
-        super::queries::search_genotypes(&self.pool, filter, limit)
+    ) -> Result<GenotypePopulation, Error> {
+        super::queries::get_population(&self.ro.pool, request_id).await
     }
 
-    /// Finds which genome hashes already exist for deduplication.
-    #[instrument(level = "debug", skip(self), fields(filter = %request_id))]
-    pub(crate) fn get_intersection(
+    /// Searches genotypes with filtering and ordering options.
+    #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
+    pub async fn search_genotypes(
         &self,
-        request_id: Uuid,
-        hashes: &[i64],
-    ) -> impl Future<Output = Result<Vec<i64>, Error>> {
-        super::queries::get_intersection(&self.pool, request_id, hashes)
+        filter: &super::queries::SearchGenotypesFilter,
+        limit: i64,
+    ) -> Result<Vec<Genotype>, Error> {
+        super::queries::search_genotypes(&self.ro.pool, filter, limit).await
     }
 
     /// Checks if any genotypes exist for the given request and generation.
     #[instrument(level = "debug", skip(self), fields(request_id = %request_id, generation_id = generation_id))]
-    pub(crate) fn check_if_generation_exists(
+    pub(crate) async fn check_if_generation_exists(
         &self,
-        request_id: Uuid,
+        request_id: &Uuid,
         generation_id: i32,
-    ) -> impl Future<Output = Result<bool, Error>> {
-        super::queries::check_if_generation_exists(&self.pool, request_id, generation_id)
+    ) -> Result<bool, Error> {
+        super::queries::check_if_generation_exists(&self.ro.pool, &request_id, generation_id).await
+    }
+
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %genotype_id, degree = degree))]
+    pub(crate) async fn get_ancestors(
+        &self,
+        genotype_id: &Uuid,
+        degree: i32,
+    ) -> Result<Vec<Genotype>, Error> {
+        super::queries::get_ancestors(&self.ro.pool, genotype_id, degree).await
+    }
+
+    #[instrument(level = "debug", skip(self), fields(genotype_id = %genotype_id, degree = degree))]
+    pub(crate) async fn get_descendants(
+        &self,
+        genotype_id: &Uuid,
+        degree: i32,
+    ) -> Result<Vec<Genotype>, Error> {
+        super::queries::get_descendants(&self.ro.pool, genotype_id, degree).await
+    }
+
+}
+
+impl Write {
+    pub fn new(wr: db::WritePool) -> Self {
+        Self { wr }
     }
 }
 
-impl<'tx> TxType<'tx> for Repository {
-    type TxType = TxRepository<'tx>;
-    type TxError = Error;
-}
+impl<'tx> WriteTx<'tx> {
+    /// Creates a new transaction repository with the given database transaction.
+    #[instrument(level = "debug", skip(tx))]
+    pub fn new(tx: &'tx mut PgTransaction<'static>) -> Self {
+        Self { tx }
+    }
 
-impl<'tx> Chain<'tx> for Repository {
-    /// Executes a function within a database transaction.
-    #[instrument(level = "debug", skip(self, f))]
-    fn chain<F, R, T>(&'tx self, f: F) -> BoxFuture<'tx, Result<T, Self::TxError>>
+    /// Inserts multiple genotypes within the current transaction.
+    #[instrument(level = "debug", skip(self, genotypes))]
+    pub(crate) async fn store_genotypes<'a, I>(
+        &mut self,
+        genotypes: I,
+    ) -> Result<Vec<Genotype>, Error>
     where
-        R: ToTx<'tx>,
-        F: FnOnce(Self::TxType) -> BoxFuture<'tx, Result<(R, T), anyhow::Error>>
-            + Send
-            + Sync
-            + 'tx,
-        T: Send + Sync + 'tx,
+        I: IntoIterator<Item = &'a Genotype>,
     {
-        Box::pin(async move {
-            let pool = self.pool.clone();
-            let tx = pool.begin().await?;
-
-            let (tx, ret) = f(TxRepository::new(tx))
-                .await
-                .map_err(|err| Error::Tx(err))?;
-
-            let tx: PgTransaction<'_> = tx.tx();
-            tx.commit()
-                .await
-                .map_err(|err| Error::Tx(anyhow::Error::new(err)))?;
-
-            Ok(ret)
-        })
+        super::queries::store_genotypes(&mut **self.tx, genotypes).await
     }
 }

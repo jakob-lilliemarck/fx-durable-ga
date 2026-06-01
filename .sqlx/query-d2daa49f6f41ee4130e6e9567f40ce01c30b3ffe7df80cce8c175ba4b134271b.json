@@ -1,0 +1,63 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO budgeting.transactions (\n            id,\n            account_id,\n            account_type,\n            balance,\n            amount,\n            timestamp,\n            reason\n        )\n        VALUES (\n            $1,\n            $2,\n            $3,\n            COALESCE(\n                (\n                    SELECT balance\n                    FROM budgeting.transactions\n                    WHERE account_id = $2\n                    ORDER BY timestamp DESC\n                    LIMIT 1\n                ),\n                0\n            ) + $4,\n            $4,\n            $5,\n            $6\n        )\n        RETURNING\n            id,\n            account_id,\n            account_type,\n            balance,\n            amount,\n            timestamp,\n            reason;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "account_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "balance",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "amount",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "timestamp",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int8",
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d2daa49f6f41ee4130e6e9567f40ce01c30b3ffe7df80cce8c175ba4b134271b"
+}

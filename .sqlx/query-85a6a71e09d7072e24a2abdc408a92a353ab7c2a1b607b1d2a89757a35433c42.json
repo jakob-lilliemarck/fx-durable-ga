@@ -1,0 +1,61 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id,\n            account_id,\n            account_type,\n            amount,\n            balance,\n            timestamp,\n            reason\n        FROM budgeting.transactions\n        WHERE\n            ($1::UUID IS NULL OR account_id = $1::UUID)\n            AND (\n                $2::TIMESTAMPTZ IS NULL\n                OR $3::UUID IS NULL\n                OR (timestamp, id) < ($2, $3::UUID)\n            )\n            ORDER BY timestamp DESC, id DESC\n        LIMIT $4;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "account_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "amount",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "balance",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "timestamp",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "85a6a71e09d7072e24a2abdc408a92a353ab7c2a1b607b1d2a89757a35433c42"
+}

@@ -3,7 +3,7 @@ set -euo pipefail
 
 # --- Run tests ---
 echo "Running tests..."
-cargo test
+cargo test --features test-tools
 
 # --- Check code formatting ---
 echo "Checking code formatting..."

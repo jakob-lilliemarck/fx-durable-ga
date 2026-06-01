@@ -1,0 +1,1 @@
+DROP INDEX idx_embeddings_encoder_digest;

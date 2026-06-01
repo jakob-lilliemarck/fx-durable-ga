@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT name, raised_at\n        FROM synchronization.semaphores\n        WHERE raised_at > $1::TIMESTAMPTZ\n            AND ($2::TEXT IS NULL OR $2::TEXT = name);\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "raised_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "dc929f14a5931f6dc965fde911959a9e91a3092560be842416ca5a20edc81291"
+}

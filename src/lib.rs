@@ -1,20 +1,30 @@
-#[cfg(not(feature = "migration"))]
-mod bootstrap;
-#[cfg(not(feature = "migration"))]
-mod repositories;
-#[cfg(not(feature = "migration"))]
-mod services;
-
+pub mod configuration;
+pub mod infrastructure;
 pub mod migrations;
-pub mod models;
 
 #[cfg(not(feature = "migration"))]
-pub use bootstrap::bootstrap;
+pub use bootstrap::register;
+
 #[cfg(not(feature = "migration"))]
-pub use repositories::chainable;
+pub mod views;
+
 #[cfg(not(feature = "migration"))]
-pub use repositories::genotypes::Filter as GenotypesFilter;
+pub mod repositories;
+
 #[cfg(not(feature = "migration"))]
-pub use services::optimization;
+pub mod bootstrap;
+
 #[cfg(not(feature = "migration"))]
-pub use services::optimization::{register_event_handlers, register_job_handlers};
+pub use repositories::genotypes::SearchGenotypesFilter;
+
+#[cfg(not(feature = "migration"))]
+pub mod services;
+
+#[cfg(not(feature = "migration"))]
+pub mod controllers;
+
+#[cfg(not(feature = "migration"))]
+pub mod api_client;
+
+#[cfg(all(not(feature = "migration"), any(test, feature = "test-tools")))]
+pub mod test_tools;
