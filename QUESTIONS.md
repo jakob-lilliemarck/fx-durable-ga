@@ -205,6 +205,7 @@ fitness_distance_correlation aggregate   (new, F2a)
 ## Priority Checklist
 
 Prio 1
+- [x] Verify indexer digest is deterministic — `Registry::get_indexer_id` returns the same digest for repeated calls with the same indexer (test passes)
 - [x] Add tests for `budgeting::Service` — `src/services/budgeting/service.rs`
 - [x] Add tests for `locking::Service` — `src/services/locking/service.rs`
 - [ ] Add tests for `evaluation::Service` — `src/services/evaluation/service.rs`

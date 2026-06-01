@@ -231,3 +231,87 @@ impl Registry {
         self.relation.get(encodable_type_name)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::services::indexing::{
+        TrainModelConfig,
+        encoder::dataset::{SequenceDataset, SequenceSample},
+        encoder::train::AutoencoderTrainConfig,
+    };
+
+    fn make_dataset(input_size: usize, num_samples: usize, steps_per_sample: usize) -> SequenceDataset {
+        let samples: Vec<SequenceSample> = (0..num_samples)
+            .map(|s| {
+                let steps: Vec<Vec<f32>> = (0..steps_per_sample)
+                    .map(|t| {
+                        (0..input_size)
+                            .map(|f| (s * steps_per_sample + t * input_size + f) as f32)
+                            .collect()
+                    })
+                    .collect();
+                SequenceSample { steps }
+            })
+            .collect();
+        SequenceDataset::new(samples, input_size)
+    }
+
+    struct DeterministicIndexer {
+        dataset: SequenceDataset,
+        train_config: TrainModelConfig,
+    }
+
+    impl DeterministicIndexer {
+        fn new() -> Self {
+            Self {
+                dataset: make_dataset(16, 5, 20),
+                train_config: TrainModelConfig::Lstm(AutoencoderTrainConfig {
+                    input_size: 16,
+                    hidden_size: 32,
+                    latent_size: 8,
+                    batch_size: 8,
+                    epochs: 50,
+                    learning_rate: 0.001,
+                }),
+            }
+        }
+    }
+
+    impl TypeName for DeterministicIndexer {
+        fn type_name(&self) -> &str {
+            "test::deterministic"
+        }
+    }
+
+    impl Indexer for DeterministicIndexer {
+        type Type = serde_json::Value;
+
+        fn preprocess(&self, _entity: &Self::Type) -> EncodeInput {
+            EncodeInput {
+                values: vec![0.0; 16],
+                dimensions: vec![1, 16],
+            }
+        }
+
+        fn dataset(&self) -> std::sync::Arc<dyn SequenceDataSource> {
+            std::sync::Arc::new(self.dataset.clone())
+        }
+
+        fn training_config(&self) -> &TrainModelConfig {
+            &self.train_config
+        }
+    }
+
+    #[test]
+    fn digest_is_deterministic() {
+        let indexer = DeterministicIndexer::new();
+
+        let digest_a = Registry::get_indexer_id(&indexer).unwrap();
+        let digest_b = Registry::get_indexer_id(&indexer).unwrap();
+        let digest_c = Registry::get_indexer_id(&indexer).unwrap();
+
+        assert_eq!(digest_a, digest_b);
+        assert_eq!(digest_b, digest_c);
+    }
+}
