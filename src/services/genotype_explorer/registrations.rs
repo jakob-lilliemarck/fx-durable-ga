@@ -15,6 +15,7 @@ fn provide_genotype_exploration_service(
     })
 }
 
+/// Registers the genotype explorer service with the DI container.
 pub fn register(c: &mut Container) {
     c.provide(provide_genotype_exploration_service);
 }

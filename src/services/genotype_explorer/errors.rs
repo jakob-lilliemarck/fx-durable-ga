@@ -6,6 +6,7 @@ pub enum Error {
     #[error("GenotypesRepositoryError: {0}")]
     GenotypesRepositoryError(#[from] genotypes::Error),
 
+    /// The supplied degree exceeds the maximum supported value (i32::MAX).
     #[error("Degree must fit within i32, got: {degree}")]
     DegreeOverflow { degree: u32 },
 }
