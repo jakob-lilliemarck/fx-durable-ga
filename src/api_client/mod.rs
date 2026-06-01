@@ -23,8 +23,6 @@
 //!         goal,
 //!         schedule,
 //!         selector,
-//!         Some(serde_json::json!({"param": "value"})),
-//!         None,
 //!     ).await?;
 //!
 //!     println!("Created request: {}", response.request_id);

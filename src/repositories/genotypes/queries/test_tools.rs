@@ -15,20 +15,14 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         FitnessGoal::maximize(0.9).unwrap(),
         Selector::tournament(10),
         Schedule::generational(100, 10),
-        serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-        None::<()>,
-    )
-    .unwrap();
+    );
     let request_2 = Request::new(
         "test",
         1,
         FitnessGoal::maximize(0.9).unwrap(),
         Selector::tournament(10),
         Schedule::generational(100, 10),
-        serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-        None::<()>,
-    )
-    .unwrap();
+    );
 
     let rid_1 = request_1.id;
     let rid_2 = request_2.id;
@@ -135,10 +129,7 @@ pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
         FitnessGoal::maximize(0.9).unwrap(),
         Selector::tournament(10),
         Schedule::generational(100, 10),
-        serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-        None::<()>,
-    )
-    .unwrap();
+    );
     let request_id = request.id;
     store_request(pool, request).await.unwrap();
 

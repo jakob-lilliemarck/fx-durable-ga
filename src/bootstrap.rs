@@ -1,4 +1,4 @@
-use crate::infrastructure::db::ReadPool;
+use crate::infrastructure::db::{ReadPool, WritePool};
 use crate::infrastructure::di::{Container, InvokeError, InvokeResult, ProviderResult};
 use crate::infrastructure::registrations::{
     ProvidedEventHandlerRegistry, ProvidedJobHandlerRegistry, ProvidedPgMux,
@@ -15,6 +15,7 @@ pub struct App {
     pub repositories: repositories::Provider,
     pub services: services::Provider,
     pub mq: Arc<Queries>,
+    wr: WritePool,
 }
 
 impl App {
@@ -27,9 +28,21 @@ impl App {
     }
 
     pub async fn stop(&self) -> anyhow::Result<()> {
-        // FIXME:
-        // Raise a semaphore?
-        // Await shutdown of services?
+        // Raise the shutdown semaphore — in-progress evaluations abort with
+        // Err(Aborted) and their jobs are requeued for retry on restart.
+        let mut tx = self.wr.pool.begin().await?;
+        self.services
+            .synchronization
+            .raise(&mut tx, crate::services::evaluation::SHUTDOWN_SEMAPHORE)
+            .await?;
+        tx.commit().await?;
+
+        // Stop the synchronization agent (closes its broadcast channel).
+        self.services.synchronization.stop().await?;
+
+        // Stop the optimization service (which also stops its sync agent).
+        self.services.optimization.stop().await?;
+
         Ok(())
     }
 
@@ -77,6 +90,7 @@ async fn serve_openapi(
 pub fn provide_app(c: &mut Container) -> BoxFuture<'_, ProviderResult<Arc<App>>> {
     Box::pin(async {
         let mq = c.get::<Arc<fx_mq_jobs::Queries>>().await?;
+        let wr = c.get::<WritePool>().await?;
 
         let genotypes_ro = c.get::<super::repositories::genotypes::Read>().await?;
         let requests_ro = c.get::<crate::services::optimization::Read>().await?;
@@ -123,6 +137,7 @@ pub fn provide_app(c: &mut Container) -> BoxFuture<'_, ProviderResult<Arc<App>>>
             services,
             repositories,
             mq,
+            wr,
         };
 
         Ok(Arc::new(app))

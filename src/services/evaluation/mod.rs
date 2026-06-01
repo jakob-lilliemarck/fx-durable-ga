@@ -15,3 +15,4 @@ pub use repositories::evaluations::GetEvaluationStatsFilter;
 pub use repositories::evaluations::SearchEvaluationsFilter;
 pub use service::Evaluator;
 pub use service::Service;
+pub(crate) use service::SHUTDOWN_SEMAPHORE;

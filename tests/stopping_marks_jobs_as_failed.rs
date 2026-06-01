@@ -95,8 +95,6 @@ async fn test_stopping_marks_jobs_as_failed(
             FitnessGoal::maximize(0.95)?,
             Schedule::generational(1, 1),
             Selector::tournament(3),
-            Some(serde_json::json!({"Uniform":{"probability":0.5}})),
-            None::<()>,
         )
         .await?;
 
@@ -165,7 +163,7 @@ struct TestOptimizer {
 impl foreign_service::Optimizer for TestOptimizer {
     type Type = serde_json::Value;
 
-    fn random(&self, _user_defined: &serde_json::Value) -> anyhow::Result<Self::Type> {
+    fn random(&self) -> anyhow::Result<Self::Type> {
         Ok(serde_json::json!({}))
     }
 
@@ -173,7 +171,6 @@ impl foreign_service::Optimizer for TestOptimizer {
         &self,
         _parent1: Self::Type,
         _parent2: Self::Type,
-        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<Self::Type> {
         Ok(serde_json::json!({}))
     }
@@ -181,7 +178,6 @@ impl foreign_service::Optimizer for TestOptimizer {
     fn mutate(
         &self,
         _instance: &mut Self::Type,
-        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<()> {
         Ok(())
     }

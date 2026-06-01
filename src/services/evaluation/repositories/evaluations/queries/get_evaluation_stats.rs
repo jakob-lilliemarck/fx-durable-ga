@@ -117,9 +117,7 @@ mod tests_get_evaluation_stats {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-            None::<()>,
-        )?;
+        );
         let request_a = store_request(pool, request_a).await?;
 
         let request_b = Request::new(
@@ -128,9 +126,7 @@ mod tests_get_evaluation_stats {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-            None::<()>,
-        )?;
+        );
         let request_b = store_request(pool, request_b).await?;
 
         let make_gen = |req_id, data| {

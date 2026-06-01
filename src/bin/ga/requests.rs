@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use clap::{ArgGroup, Args, Subcommand};
 use fx_durable_ga::services::optimization::{FitnessGoal, Schedule, Selector};
 use uuid::Uuid;
@@ -58,13 +58,6 @@ pub struct NewCommand {
     #[arg(long)]
     maximize: Option<f64>,
 
-    /// User-defined configuration as JSON string
-    #[arg(long)]
-    user_defined: Option<String>,
-
-    /// Optional data payload as JSON string
-    #[arg(long)]
-    data: Option<String>,
 }
 
 impl NewCommand {
@@ -78,8 +71,6 @@ impl NewCommand {
             self.tournament_size,
             self.minimize,
             self.maximize,
-            self.user_defined,
-            self.data,
         )
         .await?;
 
@@ -97,25 +88,13 @@ async fn create_request(
     tournament_size: Option<usize>,
     minimize: Option<f64>,
     maximize: Option<f64>,
-    user_defined: Option<String>,
-    data: Option<String>,
 ) -> Result<uuid::Uuid> {
     let schedule = build_schedule(max_evaluations, population_size, selection_interval)?;
     let selector = build_selector(tournament_size)?;
     let goal = build_fitness_goal(minimize, maximize)?;
 
-    let user_defined: Option<serde_json::Value> = user_defined
-        .map(|value| serde_json::from_str(&value))
-        .transpose()
-        .context("Failed to parse --user-defined as JSON")?;
-
-    let data: Option<serde_json::Value> = data
-        .map(|value| serde_json::from_str(&value))
-        .transpose()
-        .context("Failed to parse --data as JSON")?;
-
     let response = client
-        .requests_new(type_name, goal, schedule, selector, user_defined, data)
+        .requests_new(type_name, goal, schedule, selector)
         .await?;
 
     Ok(response.request_id)

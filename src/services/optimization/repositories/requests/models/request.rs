@@ -1,7 +1,6 @@
 use super::super::Error;
 use super::{FitnessGoal, Schedule, Selector};
 use chrono::{DateTime, Utc};
-use serde::Serialize;
 use tracing::instrument;
 use uuid::Uuid;
 
@@ -16,33 +15,20 @@ pub struct Request {
     pub(crate) goal: FitnessGoal,
     pub(crate) selector: Selector,
     pub(crate) schedule: Schedule,
-    pub(crate) user_defined: serde_json::Value,
-    pub data: Option<serde_json::Value>,
     pub(crate) account_id: Uuid,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum RequestValidationError {
-    #[error("Could not serialize data: {0}")]
-    SerializationError(#[from] serde_json::Error),
 }
 
 impl Request {
     /// Creates a new optimization request with the given parameters.
-    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal), skip(data))]
+    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal))]
     pub(crate) fn new(
         type_name: &str,
         type_hash: i32,
         goal: FitnessGoal,
         selector: Selector,
         schedule: Schedule,
-        user_defined: impl Serialize + std::fmt::Debug,
-        data: Option<impl Serialize>,
-    ) -> Result<Self, RequestValidationError> {
-        let data = data.map(|d| serde_json::to_value(d)).transpose()?;
-        let user_defined = serde_json::to_value(user_defined)?;
-
-        Ok(Self {
+    ) -> Self {
+        Self {
             id: Uuid::now_v7(),
             requested_at: Utc::now(),
             type_name: type_name.to_string(),
@@ -51,9 +37,7 @@ impl Request {
             selector,
             schedule,
             account_id: Uuid::now_v7(),
-            user_defined,
-            data,
-        })
+        }
     }
 
     /// Checks if the optimization request is completed based on the given fitness value.
@@ -74,8 +58,6 @@ pub struct DbRequest {
     pub goal: serde_json::Value,
     pub schedule: serde_json::Value,
     pub selector: serde_json::Value,
-    pub user_defined: serde_json::Value,
-    pub data: Option<serde_json::Value>,
     pub account_id: Uuid,
 }
 
@@ -86,7 +68,6 @@ impl TryFrom<Request> for DbRequest {
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let schedule_json = serde_json::to_value(request.schedule)?;
         let selector_json = serde_json::to_value(request.selector)?;
-        let user_defined_json = request.user_defined;
         let goal_json = serde_json::to_value(request.goal)?;
 
         Ok(DbRequest {
@@ -97,8 +78,6 @@ impl TryFrom<Request> for DbRequest {
             goal: goal_json,
             schedule: schedule_json,
             selector: selector_json,
-            user_defined: user_defined_json,
-            data: request.data,
             account_id: request.account_id,
         })
     }
@@ -111,7 +90,6 @@ impl TryFrom<DbRequest> for Request {
     fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
         let schedule = serde_json::from_value(request.schedule)?;
         let selector = serde_json::from_value(request.selector)?;
-        let user_defined = request.user_defined;
         let goal = serde_json::from_value(request.goal)?;
 
         Ok(Request {
@@ -122,8 +100,6 @@ impl TryFrom<DbRequest> for Request {
             goal,
             schedule,
             selector,
-            user_defined,
-            data: request.data,
             account_id: request.account_id,
         })
     }
@@ -141,10 +117,7 @@ mod tests {
             FitnessGoal::minimize(0.9).unwrap(),
             Selector::tournament(5),
             Schedule::generational(100, 10),
-            json!({"Uniform":{"probability":0.5}}),
-            None::<()>,
         )
-        .unwrap()
     }
 
     #[test]
@@ -156,10 +129,7 @@ mod tests {
             goal,
             Selector::tournament(5),
             Schedule::generational(100, 10),
-            serde_json::json!({"foo":"bar"}),
-            None::<()>,
-        )
-        .unwrap();
+        );
 
         assert_eq!(request.type_name, "TestType");
         assert_eq!(request.type_hash, 123);
@@ -186,10 +156,6 @@ mod tests {
         assert_eq!(
             db_request.selector,
             json!({"method": {"Tournament": {"size": 5}}})
-        );
-        assert_eq!(
-            db_request.user_defined,
-            json!({"Uniform":{"probability":0.5}})
         );
     }
 

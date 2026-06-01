@@ -89,11 +89,6 @@ async fn main() -> Result<()> {
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(200, 30),
             Selector::tournament(7),
-            Some(serde_json::json!({
-                "mutation_rate": 0.3,
-                "temperature": 0.7,
-            })),
-            None::<()>,
         )
         .await?;
 
@@ -145,7 +140,7 @@ impl TypeName for PointManager {
 impl foreign_service::Optimizer for PointManager {
     type Type = Point;
 
-    fn random(&self, _user_defined: &serde_json::Value) -> anyhow::Result<Self::Type> {
+    fn random(&self) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         let x = rng.random_range(0.5..1.75);
         let y = rng.random_range(0.75..2.0);
@@ -157,7 +152,6 @@ impl foreign_service::Optimizer for PointManager {
         &self,
         parent1: Self::Type,
         parent2: Self::Type,
-        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<Self::Type> {
         let x = (parent1.x + parent2.x) / 2.0;
         let y = (parent1.y + parent2.y) / 2.0;
@@ -168,21 +162,13 @@ impl foreign_service::Optimizer for PointManager {
     fn mutate(
         &self,
         genotype: &mut Self::Type,
-        user_defined: &serde_json::Value,
     ) -> anyhow::Result<()> {
         let mut rng = rand::rng();
-        // Reads mutation parameters from flat user_defined payload.
-        let mutation_rate = user_defined
-            .get("mutation_rate")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.3);
-        let temperature = user_defined
-            .get("temperature")
-            .and_then(serde_json::Value::as_f64)
-            .unwrap_or(0.7);
+        const MUTATION_RATE: f64 = 0.3;
+        const TEMPERATURE: f64 = 0.7;
         let maybe_mutate = |value: &mut f64, lo: f64, hi: f64, rng: &mut dyn RngCore| {
-            if rng.random_range(0.0..1.0) < mutation_rate {
-                let span = (hi - lo) * temperature;
+            if rng.random_range(0.0..1.0) < MUTATION_RATE {
+                let span = (hi - lo) * TEMPERATURE;
                 let delta = rng.random_range(-span..span);
                 *value = (*value + delta).clamp(lo, hi);
             }

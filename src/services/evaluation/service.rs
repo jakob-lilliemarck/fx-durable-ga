@@ -18,6 +18,10 @@ use tokio::sync::RwLock;
 use tracing::instrument;
 use uuid::Uuid;
 
+/// Semaphore name used for graceful shutdown. When raised, all in-progress
+/// evaluations abort with `Aborted` and their jobs are requeued for retry.
+pub(crate) const SHUTDOWN_SEMAPHORE: &str = "shutdown";
+
 /// Evaluates genotypes and manages evaluation lifecycle.
 pub struct Service {
     host_id: HostId,

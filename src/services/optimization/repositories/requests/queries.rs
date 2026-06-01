@@ -29,11 +29,9 @@ pub(crate) async fn store_request<'tx, E: PgExecutor<'tx>>(
                 goal,
                 schedule,
                 selector,
-                user_defined,
-                data,
                 account_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             RETURNING
                 id,
                 requested_at,
@@ -42,8 +40,6 @@ pub(crate) async fn store_request<'tx, E: PgExecutor<'tx>>(
                 goal,
                 schedule,
                 selector,
-                user_defined,
-                data,
                 account_id;
             "#,
         db_request.id,
@@ -53,8 +49,6 @@ pub(crate) async fn store_request<'tx, E: PgExecutor<'tx>>(
         db_request.goal,
         db_request.schedule,
         db_request.selector,
-        db_request.user_defined,
-        db_request.data,
         db_request.account_id
     )
     .fetch_one(tx)
@@ -73,7 +67,6 @@ mod tests_store_request {
     #[sqlx::test(migrations = false)]
     async fn it_stores_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        let user_defined = serde_json::json!({ "Uniform": { "probability": 0.5 } });
         let goal = FitnessGoal::maximize(0.9)?;
 
         let request = Request::new(
@@ -82,9 +75,7 @@ mod tests_store_request {
             goal,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            user_defined,
-            None::<()>,
-        )?;
+        );
         let request_clone = request.clone();
 
         let inserted = store_request(&pool, request).await?;
@@ -107,7 +98,6 @@ mod tests_store_request {
     async fn it_errors_on_conflict(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
         let goal = FitnessGoal::maximize(0.9)?;
-        let user_defined = serde_json::json!({ "Uniform": { "probability": 0.5 } });
 
         let request = Request::new(
             "test",
@@ -115,9 +105,7 @@ mod tests_store_request {
             goal,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            user_defined,
-            None::<()>,
-        )?;
+        );
         let request_clone = request.clone();
 
         store_request(&pool, request).await?;
@@ -194,8 +182,6 @@ pub async fn search_requests<'tx, E: PgExecutor<'tx>>(
             goal,
             schedule,
             selector,
-            user_defined,
-            data,
             account_id
         FROM fx_durable_ga.requests
         WHERE (
@@ -381,9 +367,7 @@ mod tests_search_requests {
                 FitnessGoal::maximize(0.9)?,
                 Selector::tournament(10),
                 Schedule::generational(100, 10),
-                serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-                None::<()>,
-            )?;
+            );
             request.requested_at = ts;
             store_request(pool, request.clone()).await?;
             requests.push(request);
@@ -410,8 +394,6 @@ pub async fn get_request<'tx, E: PgExecutor<'tx>>(tx: E, id: &Uuid) -> Result<Re
             goal,
             schedule,
             selector,
-            user_defined,
-            data,
             account_id
         FROM fx_durable_ga.requests
         WHERE id = $1;
@@ -433,7 +415,6 @@ mod tests_get_request {
     #[sqlx::test(migrations = false)]
     async fn it_gets_request(pool: sqlx::PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        let user_defined = serde_json::json!({ "Uniform": { "probability": 0.5 } });
         let goal = FitnessGoal::maximize(0.9)?;
 
         let request = Request::new(
@@ -442,9 +423,7 @@ mod tests_get_request {
             goal,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            user_defined,
-            None::<()>,
-        )?;
+        );
         let request_id = request.id;
 
         store_request(&pool, request).await?;

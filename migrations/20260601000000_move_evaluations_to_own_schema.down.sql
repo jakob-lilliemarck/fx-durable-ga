@@ -15,6 +15,8 @@ FROM evaluation.evaluations;
 
 DROP SCHEMA IF EXISTS evaluation CASCADE;
 
+ALTER TABLE fx_durable_ga.requests ADD COLUMN user_defined JSONB NOT NULL DEFAULT '{}'::jsonb, ADD COLUMN data JSONB;
+
 CREATE VIEW fx_durable_ga.populations AS
 SELECT
     request_id,

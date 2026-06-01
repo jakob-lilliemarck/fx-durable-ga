@@ -26,3 +26,5 @@ CREATE INDEX idx_evaluations_genotype_id ON evaluation.evaluations (genotype_id)
 CREATE INDEX idx_evaluations_request_id ON evaluation.evaluations (request_id);
 CREATE INDEX idx_evaluations_request_id_gen ON evaluation.evaluations (request_id, generated_at, id);
 CREATE INDEX idx_evaluations_fitness ON evaluation.evaluations (fitness);
+
+ALTER TABLE fx_durable_ga.requests DROP COLUMN user_defined, DROP COLUMN data;

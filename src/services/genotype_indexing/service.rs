@@ -932,7 +932,7 @@ mod tests_index_genotypes {
     impl foreign_service::Optimizer for NoOpOptimizer {
         type Type = TestIndexableType;
 
-        fn random(&self, _user_defined: &serde_json::Value) -> anyhow::Result<Self::Type> {
+        fn random(&self) -> anyhow::Result<Self::Type> {
             Ok(TestIndexableType {
                 values: vec![0.0, 0.0],
             })
@@ -942,7 +942,6 @@ mod tests_index_genotypes {
             &self,
             _parent1: Self::Type,
             _parent2: Self::Type,
-            _user_defined: &serde_json::Value,
         ) -> anyhow::Result<Self::Type> {
             Ok(TestIndexableType {
                 values: vec![0.0, 0.0],
@@ -952,7 +951,6 @@ mod tests_index_genotypes {
         fn mutate(
             &self,
             _instance: &mut Self::Type,
-            _user_defined: &serde_json::Value,
         ) -> anyhow::Result<()> {
             Ok(())
         }
@@ -1126,9 +1124,7 @@ mod tests_index_genotypes {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            json!({ "Uniform": { "probability": 0.5 } }),
-            None::<()>,
-        )?;
+        );
         Ok(request)
     }
 

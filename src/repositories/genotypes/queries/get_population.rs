@@ -45,9 +45,7 @@ mod tests_get_population {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-            None::<()>,
-        )?;
+        );
         let request = store_request(&pool, request).await?;
 
         let genotypes = vec![

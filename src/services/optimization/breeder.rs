@@ -30,10 +30,10 @@ impl Breeder {
         let genome_b = parent_b.genome().clone();
 
         // Crossover
-        let genome = optimizer.crossover(genome_a, genome_b, &request.user_defined)?;
+        let genome = optimizer.crossover(genome_a, genome_b)?;
 
         // Mutation
-        let genome = optimizer.mutate(genome, &request.user_defined)?;
+        let genome = optimizer.mutate(genome)?;
 
         let child = Genotype::new(
             &request.type_name,

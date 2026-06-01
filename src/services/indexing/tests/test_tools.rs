@@ -110,7 +110,7 @@ struct NoOpOptimizer;
 impl foreign_service::Optimizer for NoOpOptimizer {
     type Type = TestIndexable;
 
-    fn random(&self, _user_defined: &serde_json::Value) -> anyhow::Result<Self::Type> {
+    fn random(&self) -> anyhow::Result<Self::Type> {
         Ok(TestIndexable::new((0.0, 0.0)))
     }
 
@@ -118,7 +118,6 @@ impl foreign_service::Optimizer for NoOpOptimizer {
         &self,
         _parent1: Self::Type,
         _parent2: Self::Type,
-        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<Self::Type> {
         Ok(TestIndexable::new((0.0, 0.0)))
     }
@@ -126,7 +125,6 @@ impl foreign_service::Optimizer for NoOpOptimizer {
     fn mutate(
         &self,
         _instance: &mut Self::Type,
-        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<()> {
         Ok(())
     }

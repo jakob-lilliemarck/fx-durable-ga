@@ -8,7 +8,6 @@ use fx_durable_ga::services::optimization::{
 use fx_durable_ga::{configuration, infrastructure::di::Container, services::evaluation};
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::sync::Arc;
 
 const FITNESS_TARGET: f64 = 0.1;
@@ -77,11 +76,6 @@ async fn main() -> Result<()> {
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(10, 10),
             Selector::tournament(5),
-            Some(serde_json::json!({
-                "mutation_rate": 0.4,
-                "temperature": 0.8,
-            })),
-            None::<()>,
         )
         .await?;
 
@@ -176,7 +170,7 @@ impl TypeName for ArchitectureManager {
 impl foreign_service::Optimizer for ArchitectureManager {
     type Type = NeuralArchitecture;
 
-    fn random(&self, _user_defined: &Value) -> anyhow::Result<Self::Type> {
+    fn random(&self) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         Ok(Self::random_arch(&mut rng))
     }
@@ -185,7 +179,6 @@ impl foreign_service::Optimizer for ArchitectureManager {
         &self,
         parent1: Self::Type,
         parent2: Self::Type,
-        _user_defined: &Value,
     ) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         let mut pick = || rng.random_range(0..2) == 0;
@@ -219,19 +212,11 @@ impl foreign_service::Optimizer for ArchitectureManager {
         })
     }
 
-    fn mutate(&self, genome: &mut Self::Type, user_defined: &Value) -> anyhow::Result<()> {
+    fn mutate(&self, genome: &mut Self::Type) -> anyhow::Result<()> {
         let mut rng = rand::rng();
-        // Reads mutation parameters from flat user_defined payload.
-        let mutation_rate = user_defined
-            .get("mutation_rate")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.4)
-            .clamp(0.0, 1.0);
-        let temperature = user_defined
-            .get("temperature")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.8);
-        let disruptive_rate = (mutation_rate * temperature.max(0.1)).min(1.0);
+        const MUTATION_RATE: f64 = 0.4;
+        const TEMPERATURE: f64 = 0.8;
+        let disruptive_rate = (MUTATION_RATE * TEMPERATURE.max(0.1)).min(1.0);
         // Temperature scales how disruptive mutations are.
 
         let maybe = |rate: f64, rng: &mut dyn RngCore| rng.random_range(0.0..1.0) < rate;
@@ -245,17 +230,17 @@ impl foreign_service::Optimizer for ArchitectureManager {
         ];
         let lr_choices = [1e-4f64, 1e-3, 1e-2];
 
-        if maybe(mutation_rate, &mut rng) {
+        if maybe(MUTATION_RATE, &mut rng) {
             genome.hidden_size = hidden_choices[rng.random_range(0..hidden_choices.len())];
         }
         if maybe(disruptive_rate, &mut rng) {
             genome.num_hidden_layers = layer_choices[rng.random_range(0..layer_choices.len())];
         }
-        if maybe(mutation_rate, &mut rng) {
+        if maybe(MUTATION_RATE, &mut rng) {
             genome.activation_fn =
                 activation_choices[rng.random_range(0..activation_choices.len())];
         }
-        if maybe(mutation_rate, &mut rng) {
+        if maybe(MUTATION_RATE, &mut rng) {
             genome.use_bias = !genome.use_bias;
         }
         if maybe(disruptive_rate, &mut rng) {

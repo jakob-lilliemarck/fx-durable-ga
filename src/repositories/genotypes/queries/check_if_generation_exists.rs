@@ -44,9 +44,7 @@ mod tests_generation_exists {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-            None::<()>,
-        )?;
+        );
         let request_id = request.id;
         store_request(&pool, request).await?;
 
@@ -78,9 +76,7 @@ mod tests_generation_exists {
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
-            serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-            None::<()>,
-        )?;
+        );
         let request_id = request.id;
         store_request(&pool, request).await?;
 

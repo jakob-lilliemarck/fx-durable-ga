@@ -19,7 +19,7 @@ fn provide_read_pool(
         let database_url = c.get::<DatabaseReadUrl>().await?;
 
         let pool = PgPoolOptions::new()
-            .max_connections(3)
+            .max_connections(5)
             .connect(&database_url.value)
             .await
             .map_err(|err| {
@@ -37,7 +37,7 @@ fn provide_write_pool(
         let database_url = c.get::<DatabaseWriteUrl>().await?;
 
         let pool = PgPoolOptions::new()
-            .max_connections(3)
+            .max_connections(5)
             .connect(&database_url.value)
             .await
             .map_err(|err| {

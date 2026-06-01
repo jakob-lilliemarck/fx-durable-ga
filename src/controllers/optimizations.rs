@@ -178,8 +178,6 @@ async fn post_optimization(
             goal,
             schedule,
             selector,
-            serde_json::Value::Null,
-            None::<serde_json::Value>,
         )
         .await
     {

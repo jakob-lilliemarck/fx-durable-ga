@@ -18,8 +18,6 @@ pub struct CreateRequestPayload {
     pub goal: serde_json::Value,
     pub schedule: serde_json::Value,
     pub selector: serde_json::Value,
-    pub user_defined: Option<serde_json::Value>,
-    pub data: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -78,8 +76,6 @@ async fn create_request(
             goal,
             schedule,
             selector,
-            payload.user_defined.unwrap_or(serde_json::json!({})),
-            payload.data,
         )
         .await
         .map_err(|err| {

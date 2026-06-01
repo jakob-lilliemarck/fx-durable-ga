@@ -174,7 +174,7 @@ impl IndexingOnlyOptimizer {
 impl foreign_service::Optimizer for IndexingOnlyOptimizer {
     type Type = ProgramEncodeInput;
 
-    fn random(&self, _user_defined: &serde_json::Value) -> anyhow::Result<Self::Type> {
+    fn random(&self) -> anyhow::Result<Self::Type> {
         Ok(Self::stub_input())
     }
 
@@ -182,7 +182,6 @@ impl foreign_service::Optimizer for IndexingOnlyOptimizer {
         &self,
         _parent1: Self::Type,
         _parent2: Self::Type,
-        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<Self::Type> {
         Ok(Self::stub_input())
     }
@@ -190,7 +189,6 @@ impl foreign_service::Optimizer for IndexingOnlyOptimizer {
     fn mutate(
         &self,
         _instance: &mut Self::Type,
-        _user_defined: &serde_json::Value,
     ) -> anyhow::Result<()> {
         Ok(())
     }

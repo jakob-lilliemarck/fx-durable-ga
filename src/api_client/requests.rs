@@ -15,8 +15,6 @@ impl Client {
     /// * `goal` - Fitness goal for the optimization
     /// * `schedule` - Breeding schedule configuration
     /// * `selector` - Parent selection strategy
-    /// * `user_defined` - User-defined configuration as JSON
-    /// * `data` - Optional additional data payload
     ///
     /// # Returns
     ///
@@ -34,16 +32,12 @@ impl Client {
         goal: FitnessGoal,
         schedule: Schedule,
         selector: Selector,
-        user_defined: Option<serde_json::Value>,
-        data: Option<serde_json::Value>,
     ) -> Result<CreateRequestResponse> {
         let payload = CreateRequestPayload {
             type_name,
             goal: serde_json::to_value(goal).context("Failed to serialize goal")?,
             schedule: serde_json::to_value(schedule).context("Failed to serialize schedule")?,
             selector: serde_json::to_value(selector).context("Failed to serialize selector")?,
-            user_defined,
-            data,
         };
 
         let url = format!("{}/requests", self.base_url.trim_end_matches('/'));
@@ -131,9 +125,7 @@ mod tests {
                     "population_size": 20,
                     "selection_interval": 20
                 },
-                "selector": {"method": "Roulette"},
-                "user_defined": {"test": "value"},
-                "data": null
+                "selector": {"method": "Roulette"}
             })))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
                 "request_id": expected_request_id
@@ -150,8 +142,6 @@ mod tests {
                 FitnessGoal::minimize(0.05).unwrap(),
                 Schedule::generational(5, 20),
                 Selector::roulette(),
-                Some(serde_json::json!({"test": "value"})),
-                None,
             )
             .await;
 
@@ -182,8 +172,6 @@ mod tests {
                 FitnessGoal::minimize(0.05).unwrap(),
                 Schedule::generational(5, 20),
                 Selector::roulette(),
-                Some(serde_json::json!({})),
-                None,
             )
             .await;
 

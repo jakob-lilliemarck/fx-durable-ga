@@ -8,7 +8,6 @@ use fx_durable_ga::services::optimization::{
 use fx_durable_ga::{infrastructure::di::Container, services::evaluation};
 use rand::{Rng, RngCore};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use std::sync::Arc;
 
 const PROGRAM_OUTPUTS: usize = 3;
@@ -99,11 +98,6 @@ async fn main() -> Result<()> {
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(15, 15),
             Selector::tournament(5),
-            Some(serde_json::json!({
-                "mutation_rate": 0.3,
-                "temperature": 0.7,
-            })),
-            None::<()>,
         )
         .await?;
 
@@ -374,7 +368,7 @@ impl TypeName for GPPointManager {
 impl foreign_service::Optimizer for GPPointManager {
     type Type = Program;
 
-    fn random(&self, _user_defined: &Value) -> anyhow::Result<Self::Type> {
+    fn random(&self) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         Ok(Program::random(&mut rng))
     }
@@ -383,7 +377,6 @@ impl foreign_service::Optimizer for GPPointManager {
         &self,
         parent1: Self::Type,
         parent2: Self::Type,
-        _user_defined: &Value,
     ) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         let mut child = parent1.clone();
@@ -404,26 +397,19 @@ impl foreign_service::Optimizer for GPPointManager {
         Ok(child)
     }
 
-    fn mutate(&self, genotype: &mut Self::Type, user_defined: &Value) -> anyhow::Result<()> {
+    fn mutate(&self, genotype: &mut Self::Type) -> anyhow::Result<()> {
         let mut rng = rand::rng();
-        // Reads mutation parameters from flat user_defined payload.
-        let mutation_rate = user_defined
-            .get("mutation_rate")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.35);
-        let temperature = user_defined
-            .get("temperature")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.7);
+        const MUTATION_RATE: f64 = 0.35;
+        const TEMPERATURE: f64 = 0.7;
 
-        if rng.random_range(0.0..1.0) < mutation_rate {
-            let depth = ((STRUCT_MUTATION_DEPTH as f64) * temperature.max(0.1))
+        if rng.random_range(0.0..1.0) < MUTATION_RATE {
+            let depth = ((STRUCT_MUTATION_DEPTH as f64) * TEMPERATURE.max(0.1))
                 .round()
                 .clamp(1.0, MAX_TREE_DEPTH as f64) as usize;
             genotype.mutate_structure(&mut rng, depth);
         }
-        if rng.random_range(0.0..1.0) < mutation_rate {
-            genotype.mutate_parameter(&mut rng, temperature);
+        if rng.random_range(0.0..1.0) < MUTATION_RATE {
+            genotype.mutate_parameter(&mut rng, TEMPERATURE);
         }
 
         Ok(())

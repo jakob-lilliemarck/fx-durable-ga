@@ -112,9 +112,7 @@ mod tests_search_evaluations {
                 FitnessGoal::maximize(0.9)?,
                 Selector::tournament(10),
                 Schedule::generational(100, 10),
-                serde_json::json!({ "Uniform": { "probability": 0.5 } }),
-                None::<()>,
-            )?)
+            ))
         };
 
         let req_a = store_request(pool, new_request("test_a")?).await?;

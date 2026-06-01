@@ -8,6 +8,7 @@ use crate::services::evaluation::repositories::evaluations;
 use crate::services::evaluation::{
     GetEvaluationStatsFilter, SearchEvaluationsFilter,
 };
+use crate::services::evaluation::SHUTDOWN_SEMAPHORE;
 use crate::services::budgeting::{TransactionsFilter, TransactionsRead};
 use crate::services::optimization::jobs::{
     AddOptimizationBudgetMessage, ChargeOptimizationBudgetMessage, EvaluateGenotypeMessage,
@@ -82,15 +83,13 @@ impl Service {
     }
 
     /// Creates a new optimization request with the given parameters.
-    #[instrument(level = "debug", skip(self, data))]
+    #[instrument(level = "debug", skip(self))]
     pub async fn request_new(
         &self,
         type_name: String,
         goal: FitnessGoal,
         schedule: crate::services::optimization::Schedule,
         selector: Selector,
-        user_defined: impl serde::Serialize + Send + Sync + std::fmt::Debug + 'static,
-        data: Option<impl serde::Serialize + Send + Sync + 'static>,
     ) -> Result<Uuid, Error> {
         let type_hash = fnv1a_hash_str_32(&type_name) as i32;
 
@@ -116,9 +115,7 @@ impl Service {
                         goal,
                         selector,
                         schedule.clone(),
-                        user_defined,
-                        data,
-                    )?)
+                    ))
                     .await?;
 
                 let mut publisher = fx_mq_jobs::Publisher::new_tx(tx, &mq);
@@ -155,7 +152,7 @@ impl Service {
         let genotype = self.genotypes_ro.get_genotype(&genotype_id).await?;
 
         self.evaluation
-            .evaluate_genotype(genotype, vec![&request_id.to_string()], vec![])
+            .evaluate_genotype(genotype, vec![&request_id.to_string()], vec![SHUTDOWN_SEMAPHORE])
             .await?;
 
         Ok(())
@@ -361,7 +358,7 @@ impl Service {
         {
             for _ in 0..population_size {
                 let genome = manager
-                    .random(&request.user_defined)
+                    .random()
                     .map_err(Error::Internal)?;
 
                 let genotype = Genotype::new(

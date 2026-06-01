@@ -78,11 +78,6 @@ async fn main() -> Result<()> {
             FitnessGoal::minimize(FITNESS_TARGET)?,
             Schedule::generational(40, 10),
             Selector::tournament(5),
-            Some(serde_json::json!({
-                "mutation_rate": 0.35,
-                "temperature": 0.7,
-            })),
-            None::<()>,
         )
         .await?;
 
@@ -269,7 +264,7 @@ impl TypeName for FeatureManager {
 impl foreign_service::Optimizer for FeatureManager {
     type Type = FeatureConfig;
 
-    fn random(&self, _user_defined: &Value) -> anyhow::Result<Self::Type> {
+    fn random(&self) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         Ok(FeatureConfig::random(&mut rng))
     }
@@ -278,7 +273,6 @@ impl foreign_service::Optimizer for FeatureManager {
         &self,
         parent1: Self::Type,
         parent2: Self::Type,
-        _user_defined: &Value,
     ) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         let mut features = Vec::new();
@@ -326,36 +320,28 @@ impl foreign_service::Optimizer for FeatureManager {
         })
     }
 
-    fn mutate(&self, genome: &mut Self::Type, user_defined: &Value) -> anyhow::Result<()> {
+    fn mutate(&self, genome: &mut Self::Type) -> anyhow::Result<()> {
         let mut rng = rand::rng();
-        // Reads mutation parameters from flat user_defined payload.
-        let mutation_rate = user_defined
-            .get("mutation_rate")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.35)
-            .clamp(0.0, 1.0);
-        let temperature = user_defined
-            .get("temperature")
-            .and_then(Value::as_f64)
-            .unwrap_or(0.7);
-        let disruptive_rate = (mutation_rate * temperature.max(0.1)).min(1.0);
+        const MUTATION_RATE: f64 = 0.35;
+        const TEMPERATURE: f64 = 0.7;
+        let disruptive_rate = (MUTATION_RATE * TEMPERATURE.max(0.1)).min(1.0);
         // Temperature scales how disruptive mutations are.
 
         let maybe = |rng: &mut dyn RngCore, rate: f64| rng.random_range(0.0..1.0) < rate;
 
-        if maybe(&mut rng, mutation_rate) {
+        if maybe(&mut rng, MUTATION_RATE) {
             genome.hidden_size = [4usize, 8, 16, 32, 64, 128][rng.random_range(0..6)];
         }
-        if maybe(&mut rng, mutation_rate) {
+        if maybe(&mut rng, MUTATION_RATE) {
             genome.learning_rate = [1e-4f64, 5e-4, 1e-3][rng.random_range(0..3)];
         }
-        if maybe(&mut rng, mutation_rate) {
+        if maybe(&mut rng, MUTATION_RATE) {
             genome.sequence_length =
                 [10usize, 20, 30, 40, 50, 60, 70, 80, 90, 100][rng.random_range(0..10)];
         }
 
         for feat in genome.features.iter_mut() {
-            if maybe(&mut rng, mutation_rate) {
+            if maybe(&mut rng, MUTATION_RATE) {
                 feat.source = SOURCE_COLUMNS[rng.random_range(0..SOURCE_COLUMNS.len())].to_string();
             }
             if maybe(&mut rng, disruptive_rate) {

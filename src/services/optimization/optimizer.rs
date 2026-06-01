@@ -38,32 +38,28 @@ where
 pub trait Optimizer: Send + Sync {
     type Type: Serialize + DeserializeOwned + Send + Sync;
 
-    fn random(&self, user_defined: &serde_json::Value) -> anyhow::Result<Self::Type>;
+    fn random(&self) -> anyhow::Result<Self::Type>;
     fn crossover(
         &self,
         parent1: Self::Type,
         parent2: Self::Type,
-        user_defined: &serde_json::Value,
     ) -> anyhow::Result<Self::Type>;
     fn mutate(
         &self,
         instance: &mut Self::Type,
-        user_defined: &serde_json::Value,
     ) -> anyhow::Result<()>;
 }
 
 pub(crate) trait OptimizerErased: Send + Sync {
-    fn random(&self, user_defined: &serde_json::Value) -> anyhow::Result<serde_json::Value>;
+    fn random(&self) -> anyhow::Result<serde_json::Value>;
     fn crossover(
         &self,
         parent1: serde_json::Value,
         parent2: serde_json::Value,
-        user_defined: &serde_json::Value,
     ) -> anyhow::Result<serde_json::Value>;
     fn mutate(
         &self,
         instance: serde_json::Value,
-        user_defined: &serde_json::Value,
     ) -> anyhow::Result<serde_json::Value>;
 }
 
@@ -71,8 +67,8 @@ impl<T> OptimizerErased for T
 where
     T: Optimizer + 'static,
 {
-    fn random(&self, user_defined: &serde_json::Value) -> anyhow::Result<serde_json::Value> {
-        let typed = Optimizer::random(self, user_defined)?;
+    fn random(&self) -> anyhow::Result<serde_json::Value> {
+        let typed = Optimizer::random(self)?;
         let json = serde_json::to_value(&typed)?;
         Ok(json)
     }
@@ -81,11 +77,10 @@ where
         &self,
         parent1: serde_json::Value,
         parent2: serde_json::Value,
-        user_defined: &serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
         let typed_parent1 = serde_json::from_value::<T::Type>(parent1)?;
         let typed_parent2 = serde_json::from_value::<T::Type>(parent2)?;
-        let typed_child = Optimizer::crossover(self, typed_parent1, typed_parent2, user_defined)?;
+        let typed_child = Optimizer::crossover(self, typed_parent1, typed_parent2)?;
         let json = serde_json::to_value(typed_child)?;
         Ok(json)
     }
@@ -93,10 +88,9 @@ where
     fn mutate(
         &self,
         instance: serde_json::Value,
-        user_defined: &serde_json::Value,
     ) -> anyhow::Result<serde_json::Value> {
         let mut typed = serde_json::from_value::<T::Type>(instance)?;
-        Optimizer::mutate(self, &mut typed, user_defined)?;
+        Optimizer::mutate(self, &mut typed)?;
         let json = serde_json::to_value(typed)?;
         Ok(json)
     }
