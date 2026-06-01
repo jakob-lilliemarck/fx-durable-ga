@@ -481,7 +481,7 @@ mod tests_index_genotypes {
     };
     use crate::services::indexing::{Indexer, Registry};
     use crate::services::indexing::{
-        MODEL_FORMAT, ModelConfig, TrainModelConfig,
+        MODEL_FORMAT, TrainModelConfig,
         encoder::{
             dataset::{SequenceDataSource, SequenceDataset, SequenceSample},
             train::AutoencoderTrainConfig,
@@ -1167,7 +1167,7 @@ mod tests_index_genotypes {
         let encoder = Encoder {
             digest: *indexer_id,
             encodable_type_name: TestIndexableType::TYPE_NAME.to_string(),
-            model_config: serde_json::to_value(ModelConfig::Lstm(config))?,
+            model_config: serde_json::to_value(&config)?,
             model_weights: model_bytes,
             model_format: MODEL_FORMAT.to_string(),
             shape_in: vec![TestGenotypeIndexer::INPUT_SIZE as i32],

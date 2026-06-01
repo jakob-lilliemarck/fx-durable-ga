@@ -39,7 +39,7 @@ pub mod embeddings {
 pub use indexable::{EncodeInput, Indexer, IndexerErased, Registry};
 pub use repositories::embeddings::Error as EmbeddingsError;
 pub use repositories::encoders::{Digest, EncoderDigestError};
-pub use service::{ModelConfig, Service, TrainModelConfig};
+pub use service::{Service, TrainModelConfig};
 
 #[cfg(test)]
 pub(crate) use repositories::encoders::Encoder;

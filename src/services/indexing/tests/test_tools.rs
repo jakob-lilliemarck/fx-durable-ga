@@ -7,7 +7,6 @@ use crate::services::indexing::EncodeInput;
 use crate::services::indexing::repositories::encoders;
 use crate::services::indexing::{self as indexable, Registry};
 use crate::services::indexing::{
-    ModelConfig,
     encoder::lstm::{self, AutoencoderConfig, AutoencoderModel},
     service::MODEL_FORMAT,
 };
@@ -235,7 +234,7 @@ pub async fn seed_encoder(ctx: &mut TestContext) -> anyhow::Result<Digest> {
     let encoder = Encoder {
         digest: ctx.indexer_id,
         encodable_type_name: "encodable_type_name".to_string(),
-        model_config: serde_json::to_value(ModelConfig::Lstm(config))?,
+        model_config: serde_json::to_value(&config)?,
         model_weights: model_bytes,
         model_format: MODEL_FORMAT.to_string(),
         shape_in: vec![2],

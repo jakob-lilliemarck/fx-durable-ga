@@ -47,24 +47,10 @@ pub struct Service {
     pub(super) mq: Arc<Queries>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub enum ModelConfig {
-    Lstm(lstm::AutoencoderConfig),
-}
-
 // Improve construction of these - make constructors accessible on the service?
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub enum TrainModelConfig {
     Lstm(AutoencoderTrainConfig),
-}
-
-impl ModelConfig {
-    #[instrument(level = "debug", skip(self))]
-    pub fn model_type<'a>(&self) -> &'a str {
-        match self {
-            Self::Lstm(_) => "lstm",
-        }
-    }
 }
 
 impl Service {
@@ -357,15 +343,7 @@ impl Service {
         input: &EncodeInput,
         encoder: &Arc<Encoder>,
     ) -> Result<embeddings::EmbeddingValue, super::Error> {
-        // FIXME!
-        //
-        // It should not be needed to wrap config in ModelConfig.
-        // Just store ModelConfig to begin with, and directly deserialize!
-        //
-        let config = serde_json::from_value(encoder.model_config.clone())?;
-        let model_cfg = match config {
-            ModelConfig::Lstm(model_cfg) => model_cfg,
-        };
+        let model_cfg: lstm::AutoencoderConfig = serde_json::from_value(encoder.model_config.clone())?;
 
         let seq_len = input.dimensions.get(0).copied().unwrap_or(0);
         let input_size = input
@@ -480,16 +458,14 @@ impl Service {
 
         let train_config = indexer.train_config();
 
-        let (weights, model_config) = self.train_model(&train_config, &dataset)?;
+        let (weights, autoencoder_cfg) = self.train_model(&train_config, &dataset)?;
 
-        let (shape_in, shape_out) = match model_config {
-            ModelConfig::Lstm(cfg) => (vec![cfg.input_size as i32], cfg.latent_size as i32),
-        };
+        let (shape_in, shape_out) = (vec![autoencoder_cfg.input_size as i32], autoencoder_cfg.latent_size as i32);
 
         let encoder = encoders::Encoder {
             digest: *indexer_id,
             encodable_type_name: indexer.encodable_type_name().to_string(),
-            model_config: serde_json::to_value(model_config)?,
+            model_config: serde_json::to_value(&autoencoder_cfg)?,
             model_weights: weights,
             model_format: MODEL_FORMAT.to_string(),
             shape_in,
@@ -517,7 +493,7 @@ impl Service {
         &self,
         train_config: &TrainModelConfig,
         dataset: &D,
-    ) -> Result<(Vec<u8>, ModelConfig), super::Error>
+    ) -> Result<(Vec<u8>, lstm::AutoencoderConfig), super::Error>
     where
         D: SequenceDataSource,
     {
@@ -533,9 +509,7 @@ impl Service {
                 let bytes =
                     Recorder::<InferenceBackend>::record(&recorder, model.into_record(), ())?;
 
-                let model_config = ModelConfig::Lstm(cfg.autoencoder_config());
-
-                Ok((bytes, model_config))
+                Ok((bytes, cfg.autoencoder_config()))
             }
         }
     }
