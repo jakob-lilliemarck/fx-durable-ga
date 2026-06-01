@@ -3,8 +3,8 @@ use super::encoder::lstm::{self, AutoencoderModel};
 use super::encoder::train::{AutoencoderTrainConfig, train_autoencoder};
 use super::repositories::embeddings;
 use super::repositories::embeddings::{
-    Embedding, EmbeddingNew, RequestedEmbedding, SearchAssociatedTagsFilter,
-    SearchEmbeddingsFilter, SearchRequestedEmbeddingsFilter, SearchSimilarEmbeddingsFilter, TagNew,
+    EmbeddingNew, RequestedEmbedding, SearchAssociatedTagsFilter, SearchRequestedEmbeddingsFilter,
+    TagNew,
 };
 use super::{
     Digest,
@@ -473,35 +473,6 @@ impl Service {
         Ok(is_enabled)
     }
 
-    /// Searches embeddings with optional filtering.
-    #[instrument(level = "debug", skip(self))]
-    pub async fn search_embeddings<'a>(
-        &self,
-        filter: &SearchEmbeddingsFilter,
-        limit: i64,
-    ) -> Result<Vec<Embedding>, super::Error> {
-        let tagged_embedding = self.embeddings_ro.search_embeddings(filter, limit).await?;
-
-        Ok(tagged_embedding)
-    }
-
-    /// Finds embeddings similar to the given encoder's embedding space.
-    #[instrument(level = "debug", skip(self))]
-    pub async fn find_similar(
-        &self,
-        encoder_digest: &Digest,
-        filter: &SearchSimilarEmbeddingsFilter,
-        limit: i64,
-    ) -> Result<Vec<(Embedding, f64)>, super::Error> {
-        let similar = self
-            .embeddings_ro
-            .find_similar(encoder_digest, filter, limit)
-            .await?;
-
-        Ok(similar)
-    }
-
-    /// Trains an encoder for the given indexer and stores it.
     #[instrument(level = "info", skip(self))]
     pub(crate) async fn train_encoder(&self, indexer_id: &Digest) -> Result<Digest, super::Error> {
         let indexer = self.get_indexer(indexer_id).await?;
@@ -586,32 +557,6 @@ impl Service {
         let lock = self.registry.lock().await;
         let indexer = lock.get_indexer(indexer_id)?;
         Ok(indexer.clone())
-    }
-
-    /// Returns tag pairs for the given left and right tag lists.
-    pub(crate) async fn get_tag_pairs_for_embeddings(
-        &self,
-        tags_lhs: &[String],
-        tags_rhs: &[String],
-    ) -> Result<Vec<(Uuid, String, String)>, super::Error> {
-        let result = self
-            .embeddings_ro
-            .get_tag_pairs_for_embeddings(tags_lhs, tags_rhs)
-            .await?;
-        Ok(result)
-    }
-
-    /// Returns distinct tags associated with a given tag, with cursor-based pagination.
-    pub(crate) async fn get_distinct_associated_tags(
-        &self,
-        filter: &SearchAssociatedTagsFilter,
-        limit: i64,
-    ) -> Result<(Vec<String>, Option<String>), super::Error> {
-        let result = self
-            .embeddings_ro
-            .get_distinct_associated_tags(filter, limit)
-            .await?;
-        Ok(result)
     }
 }
 

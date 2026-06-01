@@ -68,8 +68,8 @@ async fn it_indexes_many(pool: sqlx::PgPool) -> anyhow::Result<()> {
 
     let found = ctx
         .app
-        .services()
-        .indexing()
+        .repositories()
+        .embeddings()
         .search_embeddings(
             &SearchEmbeddingsFilter::default().with_encoder_id(&encoder_id),
             10,

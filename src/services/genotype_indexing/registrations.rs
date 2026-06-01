@@ -12,12 +12,13 @@ fn provide_indexing_service(
     c: &mut Container,
 ) -> BoxFuture<'_, ProviderResult<Arc<super::Service>>> {
     Box::pin(async {
+        let embeddings_ro = c.get::<indexing::embeddings::Read>().await?;
         let genotypes_ro = c.get::<genotypes::Read>().await?;
         let genotypes_wr = c.get::<genotypes::Write>().await?;
         let indexing = c.get::<Arc<indexing::Service>>().await?;
         let mq = c.get::<Arc<Queries>>().await?;
 
-        let indexing = super::Service::new(genotypes_ro, genotypes_wr, indexing, mq);
+        let indexing = super::Service::new(embeddings_ro, genotypes_ro, genotypes_wr, indexing, mq);
 
         Ok(Arc::new(indexing))
     })

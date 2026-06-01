@@ -145,8 +145,8 @@ async fn main() -> Result<()> {
         .with_search_tag(&tag);
 
     let similar = app
-        .services()
-        .indexing()
+        .repositories()
+        .embeddings()
         .find_similar(&indexer_id, &filter, 10)
         .await?;
 

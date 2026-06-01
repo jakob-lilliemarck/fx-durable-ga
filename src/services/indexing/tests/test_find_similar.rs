@@ -19,8 +19,8 @@ async fn it_finds_similar(pool: sqlx::PgPool) -> anyhow::Result<()> {
 
     let similar = ctx
         .app
-        .services()
-        .indexing()
+        .repositories()
+        .embeddings()
         .find_similar(
             &encoder_digest,
             &SearchSimilarEmbeddingsFilter::default()

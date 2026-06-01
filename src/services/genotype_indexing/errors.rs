@@ -1,3 +1,5 @@
+use crate::repositories::genotypes;
+
 /// Errors that can occur during genotype indexing operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -5,7 +7,10 @@ pub enum Error {
     Indexing(#[from] crate::services::indexing::Error),
 
     #[error("Genotypes repository error: {0}")]
-    GenotypesRepository(#[from] crate::repositories::genotypes::Error),
+    GenotypesRepository(#[from] genotypes::Error),
+
+    #[error("Embeddings repository error: {0}")]
+    EmbeddingsRepository(#[from] crate::services::indexing::EmbeddingsError),
 
     #[error("Invalid genotype tag: {tag}")]
     InvalidGenotypeTag {

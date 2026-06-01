@@ -37,6 +37,7 @@ pub mod embeddings {
     pub use super::repositories::embeddings::search_requested_embeddings;
 }
 pub use indexable::{EncodeInput, Indexer, IndexerErased, Registry};
+pub use repositories::embeddings::Error as EmbeddingsError;
 pub use repositories::encoders::{Digest, EncoderDigestError};
 pub use service::{ModelConfig, Service, TrainModelConfig};
 

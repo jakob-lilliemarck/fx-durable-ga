@@ -27,8 +27,8 @@ async fn it_tags_embeddings(pool: sqlx::PgPool) -> anyhow::Result<()> {
 
     let found = ctx
         .app
-        .services()
-        .indexing()
+        .repositories()
+        .embeddings()
         .search_embeddings(&SearchEmbeddingsFilter::default().with_tag(tag), 10)
         .await?;
 

@@ -20,6 +20,7 @@ use uuid::Uuid;
 
 /// Manages indexing of genotypes into embedding representations.
 pub struct Service {
+    pub(super) embeddings_ro: indexing::embeddings::Read,
     pub(super) indexing: Arc<indexing::Service>,
     pub(super) genotypes_ro: genotypes::Read,
     // FIXME: genotypes_wr is only used for message queue operations
@@ -91,12 +92,14 @@ impl TypeName for IndexableGenotype {
 impl Service {
     /// Creates a new genotype indexing service with the given dependencies.
     pub fn new(
+        embeddings_ro: indexing::embeddings::Read,
         genotypes_ro: genotypes::Read,
         genotypes_wr: genotypes::Write,
         indexing: Arc<indexing::Service>,
         mq: Arc<Queries>,
     ) -> Self {
         Self {
+            embeddings_ro,
             genotypes_ro,
             genotypes_wr,
             indexing,
@@ -201,7 +204,7 @@ impl Service {
                 let rhs_tags = vec![Self::fmt_tag_indexer_id(&indexer_id)];
 
                 let pairs = self
-                    .indexing
+                    .embeddings_ro
                     .get_tag_pairs_for_embeddings(&lhs_tags, &rhs_tags)
                     .await?;
 
@@ -360,7 +363,7 @@ impl Service {
             }
 
             let (page, next_cursor) = self
-                .indexing
+                .embeddings_ro
                 .get_distinct_associated_tags(&filter, PAGE_SIZE)
                 .await?;
 
@@ -535,8 +538,8 @@ mod tests_index_genotypes {
         assert_eq!(embedding_ids.len(), genotype_ids.len());
 
         let embeddings = app
-            .services()
-            .indexing()
+            .repositories()
+            .embeddings()
             .search_embeddings(
                 &SearchEmbeddingsFilter::default().with_encoder_id(&indexer_id),
                 genotype_ids.len() as i64,
@@ -579,8 +582,8 @@ mod tests_index_genotypes {
         assert_eq!(embedding_ids.len(), genotype_ids.len());
 
         let embeddings = app
-            .services()
-            .indexing()
+            .repositories()
+            .embeddings()
             .search_embeddings(
                 &SearchEmbeddingsFilter::default().with_encoder_id(&indexer_id),
                 genotype_ids.len() as i64,
