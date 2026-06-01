@@ -3,6 +3,7 @@ use crate::repositories::genotypes;
 /// Errors that can occur during genotype exploration operations.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
+    /// An error from the genotypes repository.
     #[error("GenotypesRepositoryError: {0}")]
     GenotypesRepositoryError(#[from] genotypes::Error),
 
