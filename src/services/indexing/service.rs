@@ -3,8 +3,7 @@ use super::encoder::lstm::{self, AutoencoderModel};
 use super::encoder::train::{AutoencoderTrainConfig, train_autoencoder};
 use super::repositories::embeddings;
 use super::repositories::embeddings::{
-    EmbeddingNew, RequestedEmbedding, SearchAssociatedTagsFilter, SearchRequestedEmbeddingsFilter,
-    TagNew,
+    EmbeddingNew, RequestedEmbedding, SearchRequestedEmbeddingsFilter, TagNew,
 };
 use super::{
     Digest,
