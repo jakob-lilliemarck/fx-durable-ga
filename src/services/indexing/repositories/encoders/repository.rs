@@ -7,6 +7,7 @@ use std::sync::RwLock;
 use std::{sync::Arc, time::Duration};
 use tracing::instrument;
 
+/// In-memory cache for encoder instances.
 pub struct EncoderCache {
     cache: Cache<Digest, Arc<super::Encoder>>,
 }
@@ -84,6 +85,7 @@ impl Read {
         Err(super::Error::NotFound(indexer_id.clone()))
     }
 
+    /// Returns digests of encoders that are available from the given list.
     #[instrument(level = "debug", skip(self))]
     pub async fn get_enabled_encoder_digests(
         &self,
@@ -92,6 +94,7 @@ impl Read {
         super::queries::get_available_encoder_digests(&self.ro.pool, encoder_digests).await
     }
 
+    /// Returns the availability status of the given encoder.
     #[instrument(level = "debug", skip(self))]
     pub(crate) async fn get_encoder_availability(
         &self,
@@ -113,6 +116,7 @@ impl<'tx> WriteTx<'tx> {
         Self { tx }
     }
 
+    /// Stores a trained encoder within the current transaction.
     #[instrument(level = "debug", skip(self))]
     pub(crate) async fn store_encoder(
         &mut self,
@@ -122,6 +126,7 @@ impl<'tx> WriteTx<'tx> {
         super::queries::store_encoder(&mut **self.tx, encoder, trained_at).await
     }
 
+    /// Updates encoder availability within the current transaction.
     #[instrument(level = "debug", skip(self))]
     pub(crate) async fn store_encoder_availability(
         &mut self,

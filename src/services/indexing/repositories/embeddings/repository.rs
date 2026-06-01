@@ -45,6 +45,7 @@ impl Read {
         Self { ro }
     }
 
+    /// Finds embeddings similar to the given encoder's embedding space.
     #[instrument(level = "debug", skip(self))]
     pub async fn find_similar(
         &self,
@@ -56,6 +57,7 @@ impl Read {
             .await
     }
 
+    /// Searches embeddings with optional filtering.
     #[instrument(level = "debug", skip(self))]
     pub async fn search_embeddings(
         &self,
@@ -65,6 +67,7 @@ impl Read {
         super::queries::search_embeddings(&self.ro.pool, filter, limit).await
     }
 
+    /// Searches requested embeddings with optional filtering.
     #[instrument(level = "debug", skip(self))]
     pub(crate) async fn search_requested_embeddings(
         &self,
@@ -74,8 +77,7 @@ impl Read {
         super::queries::search_requested_embeddings(&self.ro.pool, filter, limit).await
     }
 
-    // FIXME!
-    // Rename this function and write some proper docs
+    /// Returns tag pairs for the given left and right tag lists.
     pub async fn get_tag_pairs_for_embeddings(
         &self,
         tags_lhs: &[String],
@@ -84,6 +86,7 @@ impl Read {
         super::queries::get_tag_pairs_for_embeddings(&self.ro.pool, tags_lhs, tags_rhs).await
     }
 
+    /// Returns embedding counts grouped by the given tag groups.
     #[instrument(level = "debug", skip(self))]
     pub(crate) async fn get_embeddings_by_tag_groups(
         &self,
@@ -92,6 +95,7 @@ impl Read {
         super::queries::get_embeddings_by_tag_groups(&self.ro.pool, tag_groups).await
     }
 
+    /// Returns KNN diversity statistics for binned embedding IDs.
     #[instrument(level = "debug", skip(self))]
     pub(crate) async fn get_knn_diversity_stats<'a, I>(
         &self,
@@ -104,6 +108,7 @@ impl Read {
         super::queries::get_knn_diversity_stats(&self.ro.pool, binned_ids, k).await
     }
 
+    /// Returns distinct tags associated with a given tag, with cursor-based pagination.
     #[instrument(level = "debug", skip(self))]
     pub(crate) async fn get_distinct_associated_tags(
         &self,
@@ -126,6 +131,7 @@ impl<'tx> WriteTx<'tx> {
         Self { tx }
     }
 
+    /// Stores embeddings within the current transaction.
     #[instrument(level = "debug", skip(self, embeddings))]
     pub async fn store_embeddings<'a, I>(
         &mut self,
@@ -137,6 +143,7 @@ impl<'tx> WriteTx<'tx> {
         super::queries::store_embeddings(&mut **self.tx, embeddings).await
     }
 
+    /// Stores tags for embeddings within the current transaction.
     #[instrument(level = "debug", skip(self, tags))]
     pub async fn store_tags<'a, I>(&mut self, tags: I) -> Result<Vec<(Uuid, String)>, super::Error>
     where
@@ -145,6 +152,7 @@ impl<'tx> WriteTx<'tx> {
         super::queries::store_tags(&mut **self.tx, tags).await
     }
 
+    /// Stores requested embeddings within the current transaction.
     #[instrument(level = "debug", skip(self, requested_embeddings))]
     pub(crate) async fn store_requested_embeddings<'a, I>(
         &mut self,
@@ -156,6 +164,7 @@ impl<'tx> WriteTx<'tx> {
         super::queries::store_requested_embeddings(&mut **self.tx, requested_embeddings).await
     }
 
+    /// Marks requested embeddings as handled within the current transaction.
     #[instrument(level = "debug", skip(self, requested_embeddings))]
     pub(crate) async fn set_requested_embeddings_handled_at<'a, I>(
         &mut self,

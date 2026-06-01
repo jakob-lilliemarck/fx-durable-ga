@@ -102,6 +102,7 @@ impl Service {
         })
     }
 
+    /// Creates a new indexing service with the given dependencies.
     pub fn new(
         embeddings_ro: embeddings::Read,
         embeddings_wr: embeddings::Write,
@@ -403,6 +404,7 @@ impl Service {
         Ok(embedding)
     }
 
+    /// Tags the given embeddings with the specified tag.
     #[instrument(level = "debug", skip(self))]
     pub async fn tag_embeddings<'a>(
         &self,
@@ -427,12 +429,14 @@ impl Service {
         Ok(())
     }
 
+    /// Enables an encoder, making it available for indexing.
     #[instrument(level = "debug", skip(self))]
     pub async fn enable_encoder(&self, encoder_digest: Digest) -> Result<bool, super::Error> {
         let is_enabled = self.toggle_encoder(encoder_digest, true).await?;
         Ok(is_enabled)
     }
 
+    /// Disables an encoder, preventing it from being used for indexing.
     #[instrument(level = "debug", skip(self))]
     pub async fn disable_encoder(&self, encoder_digest: Digest) -> Result<bool, super::Error> {
         let is_enabled = self.toggle_encoder(encoder_digest, false).await?;
@@ -469,6 +473,7 @@ impl Service {
         Ok(is_enabled)
     }
 
+    /// Searches embeddings with optional filtering.
     #[instrument(level = "debug", skip(self))]
     pub async fn search_embeddings<'a>(
         &self,
@@ -480,6 +485,7 @@ impl Service {
         Ok(tagged_embedding)
     }
 
+    /// Finds embeddings similar to the given encoder's embedding space.
     #[instrument(level = "debug", skip(self))]
     pub async fn find_similar(
         &self,
@@ -495,6 +501,7 @@ impl Service {
         Ok(similar)
     }
 
+    /// Trains an encoder for the given indexer and stores it.
     #[instrument(level = "info", skip(self))]
     pub(crate) async fn train_encoder(&self, indexer_id: &Digest) -> Result<Digest, super::Error> {
         let indexer = self.get_indexer(indexer_id).await?;
@@ -563,6 +570,7 @@ impl Service {
         }
     }
 
+    /// Returns all indexer IDs registered for the given type name.
     #[instrument(level = "debug", skip(self))]
     pub(crate) async fn get_indexer_ids_of_type(&self, encodable_type_name: &str) -> Vec<Digest> {
         let lock = self.registry.lock().await;
@@ -580,6 +588,7 @@ impl Service {
         Ok(indexer.clone())
     }
 
+    /// Returns tag pairs for the given left and right tag lists.
     pub(crate) async fn get_tag_pairs_for_embeddings(
         &self,
         tags_lhs: &[String],
@@ -592,6 +601,7 @@ impl Service {
         Ok(result)
     }
 
+    /// Returns distinct tags associated with a given tag, with cursor-based pagination.
     pub(crate) async fn get_distinct_associated_tags(
         &self,
         filter: &SearchAssociatedTagsFilter,
