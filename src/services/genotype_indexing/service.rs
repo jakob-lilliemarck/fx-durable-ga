@@ -274,11 +274,6 @@ impl Service {
     ) -> Result<(), super::Error> {
         let mut jobs: Vec<IndexGenotypesMessage> = Vec::with_capacity(LIMIT as usize);
 
-        // FIXME!
-        //
-        // This filtering rule may need to be more specific should there be other things than genotypes
-        // that is indexed later on
-        //
         let mut filter = SearchRequestedEmbeddingsFilter::default().with_indexer_id(indexer_id);
         loop {
             let deferred = self.indexing.get_deferred_items(&filter, LIMIT).await?;
@@ -547,8 +542,19 @@ mod tests_index_genotypes {
             .await?;
 
         assert_eq!(embeddings.len(), genotype_ids.len());
-        // FIXME:
-        // Assert tagging behavior!
+
+        let indexer_id_tag = format!("indexer_id:{}", indexer_id);
+        let type_name_tag = format!("type_name:{}", TestIndexableType::TYPE_NAME);
+        for embedding in &embeddings {
+            assert!(embedding.tags.iter().any(|t| t == "type:Genotype"),
+                "missing type:Genotype tag for embedding {}", embedding.embedding_id);
+            assert!(embedding.tags.contains(&type_name_tag),
+                "missing type_name tag for embedding {}", embedding.embedding_id);
+            assert!(embedding.tags.iter().any(|t| t.starts_with("genotype_id:")),
+                "missing genotype_id tag for embedding {}", embedding.embedding_id);
+            assert!(embedding.tags.contains(&indexer_id_tag),
+                "missing indexer_id tag for embedding {}", embedding.embedding_id);
+        }
 
         Ok(())
     }
@@ -591,8 +597,19 @@ mod tests_index_genotypes {
             .await?;
 
         assert_eq!(embeddings.len(), genotype_ids.len());
-        // FIXME!
-        // Assert tagging behavior!
+
+        let indexer_id_tag = format!("indexer_id:{}", indexer_id);
+        let type_name_tag = format!("type_name:{}", TestIndexableType::TYPE_NAME);
+        for embedding in &embeddings {
+            assert!(embedding.tags.iter().any(|t| t == "type:Genotype"),
+                "missing type:Genotype tag for embedding {}", embedding.embedding_id);
+            assert!(embedding.tags.contains(&type_name_tag),
+                "missing type_name tag for embedding {}", embedding.embedding_id);
+            assert!(embedding.tags.iter().any(|t| t.starts_with("genotype_id:")),
+                "missing genotype_id tag for embedding {}", embedding.embedding_id);
+            assert!(embedding.tags.contains(&indexer_id_tag),
+                "missing indexer_id tag for embedding {}", embedding.embedding_id);
+        }
 
         Ok(())
     }
