@@ -63,6 +63,14 @@ Services communicate in exactly two ways:
 
 A repository models an **aggregate** — the tightly coupled set of tables that form a single domain concept. Joins across tables within the same repository are fine. Cross-repository joins are forbidden — never join to tables owned by another repository.
 
+### Service-Repository Boundary
+
+Services orchestrate business logic. A service method that merely delegates to a
+read repository with fixed filter parameters is an anti-pattern — inject the read
+repository directly into the caller instead. Service methods should only exist
+when they coordinate multiple repositories, enforce business rules, publish events,
+dispatch jobs, or manage transactions.
+
 ## Module Structure
 
 Every service follows a consistent file layout:
@@ -144,19 +152,25 @@ pub enum Error {
 
 6. **Human-readable UUIDs** — When writing string UUIDs in tests, keep them readable like `"00000000-0000-0000-0000-000000000001"`, `"00000000-0000-0000-0000-000000000002"`, etc.
 
-7. **Test coverage requirements** — Every public function in a service and every function in a repository's `queries` module must have tests. Repository struct wrappers (Read/Write/WriteTx) are thin wrappers that delegate to `queries` — they do not need separate testing.
+7. **Test placement** — Tests live in the same file as the code they test or in a
+   `tests/` directory within that module:
+
+   | Code in | Tests in |
+   |---|---|
+   | `queries.rs` (or `queries/` file) | same file (`#[cfg(test)]` inline) |
+   | `repository.rs` | same file or `repositories/[name]/tests/` |
+   | `service.rs` | same file or `tests/` directory in the service module |
+
+   A service test must not reach into a child repository to test repository logic;
+   test each layer independently. Repository tests construct the repository struct
+   directly (e.g. `Read::new(db::ReadPool { pool })`) without a DI container.
+
+   Thin pass-through methods on `Read`/`Write`/`WriteTx` that delegate to a single
+   query with no additional logic do not need separate tests (the query is already
+   tested). Composition methods that call other repository methods with specific
+   filter parameters DO need tests.
 
 8. **`#[sqlx::test]` with manual migrations** — Tests use `#[sqlx::test(migrations = false)]` to get a fresh database pool. The first line of the test function calls `crate::migrations::run_default_migrations(&pool).await?` to apply schema.
-
-9. **DI container in tests** — Build a full `Container` by calling `crate::register(&mut c)`, then override pools with the test pool:
-    ```rust
-    let mut c = Container::new();
-    crate::register(&mut c);
-    c.provide(|_| Box::pin(async { Ok(db::WritePool { pool: pool.clone() }) }));
-    c.provide(|_| Box::pin(async { Ok(db::ReadPool { pool: pool.clone() }) }));
-    c.invoke().await?;
-    let app = c.get::<Arc<App>>().await?;
-    ```
 
 ## Repository and Query Patterns
 
