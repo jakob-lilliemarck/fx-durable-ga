@@ -1236,6 +1236,61 @@ mod tests_index_genotypes {
         Ok(())
     }
 
+    #[sqlx::test(migrations = false)]
+    async fn get_indexers_of_request_finds_indexers_from_registry_and_tags(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let indexer = TestGenotypeIndexer::default();
+        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let (request_id, genotype_ids) = seed(&pool, &[indexer], 2).await?;
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        let embeddings_wr = embeddings::Write::new(db::WritePool { pool: pool.clone() });
+        store_indexed(&app, &embeddings_wr, &indexer_id, &genotype_ids).await?;
+
+        let request = app.repositories().requests().get_request(request_id).await?;
+        let indexers = app
+            .services()
+            .genotype_indexing()
+            .get_indexers_of_request(&request)
+            .await?;
+
+        assert!(indexers.contains(&indexer_id));
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn get_indexers_of_request_returns_empty_when_no_indexers(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let (request_id, _) = seed(&pool, &[], 2).await?;
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone()).build().await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        let request = app.repositories().requests().get_request(request_id).await?;
+        let indexers = app
+            .services()
+            .genotype_indexing()
+            .get_indexers_of_request(&request)
+            .await?;
+
+        assert!(indexers.is_empty());
+
+        Ok(())
+    }
+
     fn new_encoder(indexer_id: &Digest) -> anyhow::Result<Encoder> {
         type TestBackend = NdArray<f32>;
 

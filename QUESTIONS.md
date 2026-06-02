@@ -211,8 +211,8 @@ Prio 1 — Test coverage (all `pub` and `pub(crate)` methods on impl Service)
 - [x] `genotype_explorer::Service`
 - [x] `evaluation::Service`
 - [x] `indexing::Service`
-- [x] `optimization::Service` — 4 `pub` methods tested (`request_new`, `get_best_genotype`, `stop`, `get_registered_type_names`). Remaining methods are `pub(super)`, excluded per requirement.
-- [ ] `genotype_indexing::Service` — `get_indexers_of_request` still untested (needs embedding indexing setup)
+- [x] `optimization::Service`
+- [x] `genotype_indexing::Service`
 
 In more detail:
 in the lineage view:
