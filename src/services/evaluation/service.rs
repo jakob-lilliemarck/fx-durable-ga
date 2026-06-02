@@ -242,10 +242,8 @@ where
 #[cfg(test)]
 mod tests_evaluate_genotype {
     use super::*;
-    use crate::configuration::PollIntervalSeconds;
-    use crate::infrastructure::db;
-    use crate::infrastructure::di::Container;
     use crate::services::evaluation;
+    use crate::test_tools::TestConfig;
     use futures::future::BoxFuture;
     use sqlx::PgPool;
     use std::sync::Arc;
@@ -273,31 +271,19 @@ mod tests_evaluate_genotype {
     }
 
     async fn setup(pool: PgPool) -> anyhow::Result<TestContext> {
-        let mut c = Container::new();
-        crate::register(&mut c);
+        let mut c = TestConfig::new(pool).build().await?;
 
-        // Override poll interval and pools with the test database
-        c.provide(|_| Box::pin(async { Ok(PollIntervalSeconds { value: 60 }) }));
-        let ro = pool.clone();
-        c.provide(|_| Box::pin(async { Ok(db::ReadPool { pool: ro }) }));
-        let wr = pool.clone();
-        c.provide(|_| Box::pin(async { Ok(db::WritePool { pool: wr }) }));
+        let synchronization = c.get::<Arc<crate::services::synchronization::Service>>().await?;
+        let evaluation = c.get::<Arc<evaluation::Service>>().await?;
+        evaluation.register("test", SlowEvaluator).await;
 
-        c.invoke().await?;
+        Ok(TestContext { evaluation, synchronization })
+    }
 
-        // The synchronization service is already registered by invoke_mux_listening.
-        // Take the mux from the container and spawn the listener so notifications
-        // are dispatched to the agent.
-        use crate::infrastructure::registrations::ProvidedPgMux;
-        let mux = c.get::<ProvidedPgMux>().await?;
-        let mut mux_lock = mux.lock().await;
-        if let Some(mux) = mux_lock.take() {
-            tokio::spawn(mux.listen());
-        }
+    async fn setup_with_listeners(pool: PgPool) -> anyhow::Result<TestContext> {
+        let mut c = TestConfig::new(pool).with_listeners().build().await?;
 
-        // Get the evaluation service and register a slow evaluator
-        use crate::services::synchronization;
-        let synchronization = c.get::<Arc<synchronization::Service>>().await?;
+        let synchronization = c.get::<Arc<crate::services::synchronization::Service>>().await?;
         let evaluation = c.get::<Arc<evaluation::Service>>().await?;
         evaluation.register("test", SlowEvaluator).await;
 
@@ -321,7 +307,7 @@ mod tests_evaluate_genotype {
     #[sqlx::test(migrations = false)]
     async fn it_returns_ok_on_drop_semaphore(pool: PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        let ctx = setup(pool.clone()).await?;
+        let ctx = setup_with_listeners(pool.clone()).await?;
 
         let genotype = Genotype::new("test", serde_json::json!([1, 2]), None, None, None, None)?;
         let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
@@ -346,7 +332,7 @@ mod tests_evaluate_genotype {
     #[sqlx::test(migrations = false)]
     async fn it_returns_aborted_on_retry_semaphore(pool: PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        let ctx = setup(pool.clone()).await?;
+        let ctx = setup_with_listeners(pool.clone()).await?;
 
         let genotype = Genotype::new("test", serde_json::json!([1, 2]), None, None, None, None)?;
         let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;

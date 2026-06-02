@@ -53,7 +53,7 @@ async fn main() -> Result<()> {
         Box::pin(async move {
             let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
             let mut lock = provided.lock().await;
-            lock.register("examples::gp_function_indexing", IndexingOnlyOptimizer);
+            lock.register(IndexingOnlyOptimizer);
             Ok(())
         })
     });
@@ -164,6 +164,12 @@ async fn main() -> Result<()> {
 // via `with_service`, which is the required app registration entrypoint.
 #[derive(Clone, Copy)]
 struct IndexingOnlyOptimizer;
+
+impl TypeName for IndexingOnlyOptimizer {
+    fn type_name(&self) -> &str {
+        "examples::gp_function_indexing"
+    }
+}
 
 impl IndexingOnlyOptimizer {
     fn stub_input() -> ProgramEncodeInput {

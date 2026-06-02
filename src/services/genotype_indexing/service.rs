@@ -511,7 +511,6 @@ mod tests_index_genotypes {
 
         let app = crate::test_tools::create_test_app_builder(
             pool.clone(),
-            TestIndexableType::TYPE_NAME,
             NoOpOptimizer,
             TestGenotypeIndexer::default(),
         )
@@ -566,7 +565,6 @@ mod tests_index_genotypes {
 
         let app = crate::test_tools::create_test_app_builder(
             pool.clone(),
-            TestIndexableType::TYPE_NAME,
             NoOpOptimizer,
             TestGenotypeIndexer::default(),
         )
@@ -619,7 +617,6 @@ mod tests_index_genotypes {
 
         let app = crate::test_tools::create_test_app_builder(
             pool.clone(),
-            TestIndexableType::TYPE_NAME,
             NoOpOptimizer,
             TestGenotypeIndexer::default(),
         )
@@ -692,7 +689,6 @@ mod tests_index_genotypes {
 
         let app = crate::test_tools::create_test_app_builder(
             pool.clone(),
-            TestIndexableType::TYPE_NAME,
             NoOpOptimizer,
             TestGenotypeIndexer::default(),
         )
@@ -730,7 +726,6 @@ mod tests_index_genotypes {
 
         let app = crate::test_tools::create_test_app_builder(
             pool.clone(),
-            TestIndexableType::TYPE_NAME,
             NoOpOptimizer,
             TestGenotypeIndexer::default(),
         )
@@ -779,7 +774,6 @@ mod tests_index_genotypes {
 
         let app = crate::test_tools::create_test_app_builder(
             pool.clone(),
-            TestIndexableType::TYPE_NAME,
             NoOpOptimizer,
             TestGenotypeIndexer::default(),
         )
@@ -831,7 +825,7 @@ mod tests_index_genotypes {
             Box::pin(async move {
                 let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
                 let mut lock = provided.lock().await;
-                lock.register(TestIndexableType::TYPE_NAME, NoOpOptimizer);
+                lock.register(NoOpOptimizer);
                 Ok(())
             })
         });
@@ -921,6 +915,12 @@ mod tests_index_genotypes {
     }
 
     struct NoOpOptimizer;
+
+    impl TypeName for NoOpOptimizer {
+        fn type_name(&self) -> &str {
+            TestIndexableType::TYPE_NAME
+        }
+    }
 
     impl foreign_service::Optimizer for NoOpOptimizer {
         type Type = TestIndexableType;

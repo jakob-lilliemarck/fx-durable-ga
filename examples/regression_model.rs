@@ -35,7 +35,7 @@ async fn main() -> Result<()> {
             );
             let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
             let mut lock = provided.lock().await;
-            lock.register(svc.type_name, svc.optimizer);
+            lock.register(svc.optimizer);
             Ok(())
         })
     });

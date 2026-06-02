@@ -1,3 +1,4 @@
+use crate::repositories::genotypes::TypeName;
 use crate::services::indexing::{Indexer, IndexerErased};
 use serde::{Serialize, de::DeserializeOwned};
 use std::{collections::HashMap, sync::Arc};
@@ -35,7 +36,7 @@ where
     }
 }
 
-pub trait Optimizer: Send + Sync {
+pub trait Optimizer: TypeName + Send + Sync {
     type Type: Serialize + DeserializeOwned + Send + Sync;
 
     fn random(&self) -> anyhow::Result<Self::Type>;
@@ -51,6 +52,7 @@ pub trait Optimizer: Send + Sync {
 }
 
 pub(crate) trait OptimizerErased: Send + Sync {
+    fn type_name(&self) -> &str;
     fn random(&self) -> anyhow::Result<serde_json::Value>;
     fn crossover(
         &self,
@@ -67,6 +69,10 @@ impl<T> OptimizerErased for T
 where
     T: Optimizer + 'static,
 {
+    fn type_name(&self) -> &str {
+        self.type_name()
+    }
+
     fn random(&self) -> anyhow::Result<serde_json::Value> {
         let typed = Optimizer::random(self)?;
         let json = serde_json::to_value(&typed)?;
@@ -103,7 +109,7 @@ pub(crate) enum Error {
 }
 
 pub struct OptimizerRegistry {
-    optimizers: HashMap<&'static str, Arc<dyn OptimizerErased>>,
+    optimizers: HashMap<String, Arc<dyn OptimizerErased>>,
 }
 
 impl Default for OptimizerRegistry {
@@ -120,10 +126,11 @@ impl OptimizerRegistry {
     }
 
     #[instrument(level = "info", skip(self, optimizer))]
-    pub fn register<T>(&mut self, type_name: &'static str, optimizer: T)
+    pub fn register<T>(&mut self, optimizer: T)
     where
         T: Optimizer + 'static,
     {
+        let type_name = optimizer.type_name().to_string();
         self.optimizers.insert(type_name, Arc::new(optimizer));
         tracing::info!("registered optimizer")
     }

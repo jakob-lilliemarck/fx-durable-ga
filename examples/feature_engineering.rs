@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
         Box::pin(async move {
             let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
             let mut lock = provided.lock().await;
-            lock.register("feature_engineering", FeatureManager);
+            lock.register(FeatureManager);
             Ok(())
         })
     });

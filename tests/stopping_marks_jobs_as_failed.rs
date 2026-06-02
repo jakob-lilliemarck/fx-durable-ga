@@ -3,6 +3,7 @@
 use chrono::Utc;
 use futures::lock::Mutex;
 use fx_durable_ga::infrastructure::di::Container;
+use fx_durable_ga::repositories::genotypes::TypeName;
 use fx_durable_ga::services::evaluation;
 use fx_durable_ga::services::optimization::{self as foreign_service, OptimizerRegistry};
 use fx_durable_ga::services::optimization::{FitnessGoal, Schedule, Selector};
@@ -44,12 +45,9 @@ async fn test_stopping_marks_jobs_as_failed(
         Box::pin(async move {
             let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
             let mut lock = provided.lock().await;
-            lock.register(
-                "TestType",
-                TestOptimizer {
-                    started: started_clone,
-                },
-            );
+            lock.register(TestOptimizer {
+                started: started_clone,
+            });
             Ok(())
         })
     });
@@ -158,6 +156,12 @@ async fn test_stopping_marks_jobs_as_failed(
 #[derive(Clone)]
 struct TestOptimizer {
     started: Arc<Notify>,
+}
+
+impl TypeName for TestOptimizer {
+    fn type_name(&self) -> &str {
+        "TestType"
+    }
 }
 
 impl foreign_service::Optimizer for TestOptimizer {

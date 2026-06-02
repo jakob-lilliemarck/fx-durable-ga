@@ -55,7 +55,7 @@ pub(crate) async fn build_context_di(pool: &PgPool) -> anyhow::Result<TestContex
         Box::pin(async move {
             let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
             let mut lock = provided.lock().await;
-            lock.register(TestIndexable::TYPE_NAME, NoOpOptimizer);
+            lock.register(NoOpOptimizer);
             Ok(())
         })
     });
@@ -106,6 +106,12 @@ pub(crate) struct TestIndexable {
 }
 
 struct NoOpOptimizer;
+
+impl TypeName for NoOpOptimizer {
+    fn type_name(&self) -> &str {
+        TestIndexable::TYPE_NAME
+    }
+}
 
 impl foreign_service::Optimizer for NoOpOptimizer {
     type Type = TestIndexable;
