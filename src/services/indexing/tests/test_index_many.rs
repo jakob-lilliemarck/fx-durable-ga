@@ -1,7 +1,7 @@
 use super::super::{Digest, Registry};
 use crate::infrastructure::db;
 use crate::services::indexing::repositories::embeddings::{
-    self, SearchEmbeddingsFilter, SearchRequestedEmbeddingsFilter,
+    self, RequestedEmbedding, SearchEmbeddingsFilter, SearchRequestedEmbeddingsFilter,
 };
 use crate::services::indexing::tests::test_tools::{
     NoOpOptimizer, TestContext, TestIndexable, TestIndexer,
@@ -11,6 +11,7 @@ use crate::{
     migrations,
     services::indexing::{self, jobs::TrainEncoderMessage, repositories::encoders},
 };
+use chrono::Utc;
 use fx_event_bus::test_tools::get_unacknowledged_events;
 use fx_mq_building_blocks::testing_tools::TestQueries;
 use fx_mq_jobs::{FX_MQ_JOBS_SCHEMA_NAME, Message};
@@ -331,4 +332,92 @@ async fn it_does_not_race_while_dispatching_training_jobs(
     // FIXME!
     // Assert that the training job dispatch can **never** race!
     unimplemented!()
+}
+
+#[sqlx::test(migrations = false)]
+async fn get_indexer_ids_of_type_returns_registered_indexers(
+    pool: sqlx::PgPool,
+) -> anyhow::Result<()> {
+    migrations::run_default_migrations(&pool).await?;
+
+    let expected = Registry::get_indexer_id(&TestIndexer::default())?;
+    let mut ctx = setup(&pool).await?;
+    let indexing = ctx.container.get::<Arc<indexing::Service>>().await?;
+
+    let ids = indexing.get_indexer_ids_of_type("test::indexable").await;
+
+    assert_eq!(ids, vec![expected]);
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn get_indexer_ids_of_type_returns_empty_for_unknown_type(
+    pool: sqlx::PgPool,
+) -> anyhow::Result<()> {
+    migrations::run_default_migrations(&pool).await?;
+
+    let mut ctx = setup(&pool).await?;
+    let indexing = ctx.container.get::<Arc<indexing::Service>>().await?;
+
+    let ids = indexing.get_indexer_ids_of_type("unknown::type").await;
+
+    assert!(ids.is_empty());
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn get_deferred_items_returns_pending_items(pool: sqlx::PgPool) -> anyhow::Result<()> {
+    migrations::run_default_migrations(&pool).await?;
+
+    let mut ctx = setup(&pool).await?;
+    let indexing = ctx.container.get::<Arc<indexing::Service>>().await?;
+    let embeddings_wr = ctx.container.get::<embeddings::Write>().await?;
+
+    let expected_entity_id =
+        Uuid::parse_str("00000000-0000-0000-0000-00000000a101")?;
+    let requests = vec![RequestedEmbedding::new(
+        expected_entity_id,
+        "genotype".to_string(),
+        Digest::from_hex(
+            "0000000000000000000000000000000000000000000000000000000000000010",
+        )?,
+        serde_json::Value::Object(Default::default()),
+        Utc::now(),
+    )];
+
+    db::begin(embeddings_wr.clone(), |tx| {
+        Box::pin(async move {
+            let mut wr = embeddings::WriteTx::new(tx);
+            wr.store_requested_embeddings(&requests).await?;
+            Ok(())
+        })
+    })
+    .await?;
+
+    let filter = SearchRequestedEmbeddingsFilter::default();
+    let deferred = indexing.get_deferred_items(&filter, 10).await?;
+
+    assert_eq!(deferred.len(), 1);
+    assert_eq!(deferred[0].entity_id, expected_entity_id);
+
+    Ok(())
+}
+
+#[sqlx::test(migrations = false)]
+async fn get_deferred_items_returns_empty_when_none_pending(
+    pool: sqlx::PgPool,
+) -> anyhow::Result<()> {
+    migrations::run_default_migrations(&pool).await?;
+
+    let mut ctx = setup(&pool).await?;
+    let indexing = ctx.container.get::<Arc<indexing::Service>>().await?;
+
+    let filter = SearchRequestedEmbeddingsFilter::default();
+    let deferred = indexing.get_deferred_items(&filter, 10).await?;
+
+    assert!(deferred.is_empty());
+
+    Ok(())
 }

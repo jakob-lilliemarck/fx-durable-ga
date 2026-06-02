@@ -563,3 +563,128 @@ impl Service {
         lock.get_registered_type_names()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::repositories::genotypes::TypeName;
+    use crate::services::optimization as foreign_service;
+    use crate::services::optimization::Schedule;
+    use crate::test_tools::TestConfig;
+    use serde::{Deserialize, Serialize};
+    use sqlx::PgPool;
+    use std::sync::Arc;
+
+    const TEST_TYPE_NAME: &str = "test::optimization";
+
+    #[derive(Serialize, Deserialize)]
+    struct TestGenome;
+
+    struct TestOptimizer;
+
+    impl TypeName for TestOptimizer {
+        fn type_name(&self) -> &str {
+            TEST_TYPE_NAME
+        }
+    }
+
+    impl foreign_service::Optimizer for TestOptimizer {
+        type Type = TestGenome;
+
+        fn random(&self) -> anyhow::Result<Self::Type> {
+            Ok(TestGenome)
+        }
+
+        fn crossover(
+            &self,
+            _parent1: Self::Type,
+            _parent2: Self::Type,
+        ) -> anyhow::Result<Self::Type> {
+            Ok(TestGenome)
+        }
+
+        fn mutate(&self, _instance: &mut Self::Type) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    async fn setup(pool: PgPool) -> anyhow::Result<Arc<Service>> {
+        let mut c = TestConfig::new(pool)
+            .with_optimizer(TestOptimizer)
+            .build()
+            .await?;
+        let svc = c.get::<Arc<Service>>().await?;
+        Ok(svc)
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn get_registered_type_names_returns_registered_types(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = setup(pool.clone()).await?;
+        let names = svc.get_registered_type_names().await;
+
+        assert!(names.contains(&TEST_TYPE_NAME.to_string()));
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn get_registered_type_names_returns_empty_when_no_optimizers(
+        pool: PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let mut c = TestConfig::new(pool).build().await?;
+        let svc = c.get::<Arc<Service>>().await?;
+        let names = svc.get_registered_type_names().await;
+
+        assert!(names.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn request_new_returns_error_for_unknown_type(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = setup(pool.clone()).await?;
+
+        let result = svc
+            .request_new(
+                "unknown::type".to_string(),
+                FitnessGoal::maximize(1.0)?,
+                Schedule::generational(10, 2),
+                Selector::tournament(3),
+            )
+            .await;
+
+        assert!(matches!(result, Err(Error::UnknownTypeError { .. })));
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn request_new_creates_request(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = setup(pool.clone()).await?;
+
+        let request_id = svc
+            .request_new(
+                TEST_TYPE_NAME.to_string(),
+                FitnessGoal::maximize(1.0)?,
+                Schedule::generational(10, 2),
+                Selector::tournament(3),
+            )
+            .await?;
+
+        // Verify the request exists via the read repository
+        let request = svc.requests_ro.get_request(request_id).await?;
+        assert_eq!(request.type_name, TEST_TYPE_NAME);
+
+        Ok(())
+    }
+}

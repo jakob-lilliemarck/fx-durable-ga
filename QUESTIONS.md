@@ -204,16 +204,15 @@ fitness_distance_correlation aggregate   (new, F2a)
 
 ## Priority Checklist
 
-Prio 1
-- [x] Verify indexer digest is deterministic — `Registry::get_indexer_id` returns the same digest for repeated calls with the same indexer (test passes)
-- [x] Add tests for `budgeting::Service` — `src/services/budgeting/service.rs`
-- [x] Add tests for `locking::Service` — `src/services/locking/service.rs`
-- [ ] Add tests for `evaluation::Service` — `src/services/evaluation/service.rs`
-- [ ] Add tests for `genotype_explorer::Service` — `src/services/genotype_explorer/service.rs`
-- [ ] Fill missing tests for `indexing::Service` — `src/services/indexing/service.rs`
-- [ ] Add tests for `optimization::Service` — `src/services/optimization/service.rs`
-- [ ] Fill missing tests for `genotype_indexing::Service` — `src/services/genotype_indexing/service.rs`
-- [ ] Add visualization of indexes to the app at "src/bin/lineage/main.rs". I am unsure exactly how as of now, but we should be able to visualize k-nearest neighbours for a particular indexer id and request. We should also display the genome as json. It does not have to fit into the same view as lineage - the app may have more than one page.
+Prio 1 — Test coverage (all `pub` and `pub(crate)` methods on impl Service)
+- [x] Verify indexer digest is deterministic
+- [x] `budgeting::Service`
+- [x] `locking::Service`
+- [x] `genotype_explorer::Service`
+- [x] `evaluation::Service`
+- [x] `indexing::Service`
+- [x] `optimization::Service` — 4 `pub` methods tested (`request_new`, `get_best_genotype`, `stop`, `get_registered_type_names`). Remaining methods are `pub(super)`, excluded per requirement.
+- [ ] `genotype_indexing::Service` — `get_indexers_of_request` still untested (needs embedding indexing setup)
 
 In more detail:
 in the lineage view:

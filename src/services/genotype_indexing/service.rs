@@ -1114,6 +1114,128 @@ mod tests_index_genotypes {
         Ok(genotypes)
     }
 
+    #[sqlx::test(migrations = false)]
+    async fn get_registered_indexers_of_type_returns_indexers(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let expected = Registry::get_indexer_id(&TestGenotypeIndexer::default())?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        let ids = app
+            .services()
+            .genotype_indexing()
+            .get_registered_indexers_of_type(TestIndexableType::TYPE_NAME)
+            .await;
+
+        assert_eq!(ids, vec![expected]);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn get_registered_indexers_of_type_returns_empty_for_unknown_type(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        let ids = app
+            .services()
+            .genotype_indexing()
+            .get_registered_indexers_of_type("unknown::type")
+            .await;
+
+        assert!(ids.is_empty());
+
+        Ok(())
+    }
+
+    async fn seed_request(pool: &sqlx::PgPool) -> anyhow::Result<Uuid> {
+        let request = new_request()?;
+        let id = request.id;
+        store_request(pool, request).await?;
+        Ok(id)
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn is_indexing_pending_returns_true_when_jobs_exist(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let indexer = TestGenotypeIndexer::default();
+        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let request_id = seed_request(&pool).await?;
+        let genotypes = new_genotypes(request_id, 2)?;
+        let stored = store_genotypes(&pool, &genotypes).await?;
+        let _genotype_ids: Vec<Uuid> = stored.iter().map(|g| g.id()).collect();
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(indexer)
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        app.services()
+            .genotype_indexing()
+            .backfill_missing_genotypes(
+                crate::SearchGenotypesFilter::default().with_request_id(request_id),
+            )
+            .await?;
+
+        let pending = app
+            .services()
+            .genotype_indexing()
+            .is_indexing_pending(&indexer_id, request_id)
+            .await?;
+
+        assert!(pending);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn is_indexing_pending_returns_false_when_no_jobs(
+        pool: sqlx::PgPool,
+    ) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let indexer = TestGenotypeIndexer::default();
+        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let request_id = Uuid::now_v7();
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(indexer)
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        let pending = app
+            .services()
+            .genotype_indexing()
+            .is_indexing_pending(&indexer_id, request_id)
+            .await?;
+
+        assert!(!pending);
+
+        Ok(())
+    }
+
     fn new_encoder(indexer_id: &Digest) -> anyhow::Result<Encoder> {
         type TestBackend = NdArray<f32>;
 

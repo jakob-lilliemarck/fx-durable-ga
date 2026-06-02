@@ -3,7 +3,7 @@ use crate::{
     configuration::HostId, infrastructure::db, repositories::genotypes, services::synchronization,
 };
 use chrono::{DateTime, Utc};
-use evaluations::{Evaluation, SearchEvaluationsFilter};
+use evaluations::Evaluation;
 use futures::{
     FutureExt,
     future::{self, BoxFuture},
@@ -45,36 +45,6 @@ impl Service {
             evaluations_ro,
             evaluations_wr,
         }
-    }
-
-    /// Returns the minimum fitness for a given optimization request.
-    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
-    pub async fn get_min_fitness(&self, request_id: Uuid) -> Result<Option<f64>, super::Error> {
-        let mut evals = self
-            .evaluations_ro
-            .search_evaluations(
-                &SearchEvaluationsFilter::default()
-                    .with_request_ids(vec![request_id])
-                    .with_order_fitness_asc()
-                    .with_limit(1),
-            )
-            .await?;
-        Ok(evals.pop().map(|e| e.fitness()))
-    }
-
-    /// Returns the maximum fitness for a given optimization request.
-    #[instrument(level = "debug", skip(self), fields(request_id = %request_id))]
-    pub async fn get_max_fitness(&self, request_id: Uuid) -> Result<Option<f64>, super::Error> {
-        let mut evals = self
-            .evaluations_ro
-            .search_evaluations(
-                &SearchEvaluationsFilter::default()
-                    .with_request_ids(vec![request_id])
-                    .with_order_fitness_desc()
-                    .with_limit(1),
-            )
-            .await?;
-        Ok(evals.pop().map(|e| e.fitness()))
     }
 
     /// Registers an evaluator for a genotype type.
