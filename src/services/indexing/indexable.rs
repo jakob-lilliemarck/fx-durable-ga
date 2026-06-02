@@ -241,7 +241,11 @@ mod tests {
         encoder::train::AutoencoderTrainConfig,
     };
 
-    fn make_dataset(input_size: usize, num_samples: usize, steps_per_sample: usize) -> SequenceDataset {
+    fn make_dataset(
+        input_size: usize,
+        num_samples: usize,
+        steps_per_sample: usize,
+    ) -> SequenceDataset {
         let samples: Vec<SequenceSample> = (0..num_samples)
             .map(|s| {
                 let steps: Vec<Vec<f32>> = (0..steps_per_sample)

@@ -463,7 +463,6 @@ mod tests_index_genotypes {
     use crate::SearchGenotypesFilter;
     use crate::bootstrap::App;
     use crate::infrastructure::db;
-    use crate::infrastructure::di::{Container, InvokeError};
     use crate::repositories::genotypes::{Genotype, TypeName, store_genotypes};
     use crate::services::indexing::EncodeInput;
     use crate::services::indexing::SearchEmbeddingsFilter;
@@ -481,14 +480,13 @@ mod tests_index_genotypes {
             train::AutoencoderTrainConfig,
         },
     };
+    use crate::services::optimization as foreign_service;
     use crate::services::optimization::store_request;
-    use crate::services::optimization::{self as foreign_service, OptimizerRegistry};
     use crate::services::optimization::{FitnessGoal, Request, Schedule, Selector};
     use burn::prelude::*;
     use burn::record::{BinBytesRecorder, FullPrecisionSettings, Recorder};
     use burn_ndarray::NdArray;
     use chrono::Utc;
-    use futures::lock::Mutex;
     use fx_mq_building_blocks::testing_tools::TestQueries;
     use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
     use fx_mq_jobs::Message;
@@ -509,12 +507,12 @@ mod tests_index_genotypes {
         let indexer_id = Registry::get_indexer_id(&indexer)?;
         let (_request_id, genotype_ids) = seed(&pool, &[indexer], 2).await?;
 
-        let app = crate::test_tools::create_test_app_builder(
-            pool.clone(),
-            NoOpOptimizer,
-            TestGenotypeIndexer::default(),
-        )
-        .await?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
 
         let embedding_ids = app
             .services()
@@ -539,14 +537,26 @@ mod tests_index_genotypes {
         let indexer_id_tag = format!("indexer_id:{}", indexer_id);
         let type_name_tag = format!("type_name:{}", TestIndexableType::TYPE_NAME);
         for embedding in &embeddings {
-            assert!(embedding.tags.iter().any(|t| t == "type:Genotype"),
-                "missing type:Genotype tag for embedding {}", embedding.embedding_id);
-            assert!(embedding.tags.contains(&type_name_tag),
-                "missing type_name tag for embedding {}", embedding.embedding_id);
-            assert!(embedding.tags.iter().any(|t| t.starts_with("genotype_id:")),
-                "missing genotype_id tag for embedding {}", embedding.embedding_id);
-            assert!(embedding.tags.contains(&indexer_id_tag),
-                "missing indexer_id tag for embedding {}", embedding.embedding_id);
+            assert!(
+                embedding.tags.iter().any(|t| t == "type:Genotype"),
+                "missing type:Genotype tag for embedding {}",
+                embedding.embedding_id
+            );
+            assert!(
+                embedding.tags.contains(&type_name_tag),
+                "missing type_name tag for embedding {}",
+                embedding.embedding_id
+            );
+            assert!(
+                embedding.tags.iter().any(|t| t.starts_with("genotype_id:")),
+                "missing genotype_id tag for embedding {}",
+                embedding.embedding_id
+            );
+            assert!(
+                embedding.tags.contains(&indexer_id_tag),
+                "missing indexer_id tag for embedding {}",
+                embedding.embedding_id
+            );
         }
 
         Ok(())
@@ -563,12 +573,12 @@ mod tests_index_genotypes {
         let (_request_id, genotype_ids) =
             seed(&pool, &[indexer], super::LIMIT as usize + 5).await?;
 
-        let app = crate::test_tools::create_test_app_builder(
-            pool.clone(),
-            NoOpOptimizer,
-            TestGenotypeIndexer::default(),
-        )
-        .await?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
 
         let embedding_ids = app
             .services()
@@ -593,14 +603,26 @@ mod tests_index_genotypes {
         let indexer_id_tag = format!("indexer_id:{}", indexer_id);
         let type_name_tag = format!("type_name:{}", TestIndexableType::TYPE_NAME);
         for embedding in &embeddings {
-            assert!(embedding.tags.iter().any(|t| t == "type:Genotype"),
-                "missing type:Genotype tag for embedding {}", embedding.embedding_id);
-            assert!(embedding.tags.contains(&type_name_tag),
-                "missing type_name tag for embedding {}", embedding.embedding_id);
-            assert!(embedding.tags.iter().any(|t| t.starts_with("genotype_id:")),
-                "missing genotype_id tag for embedding {}", embedding.embedding_id);
-            assert!(embedding.tags.contains(&indexer_id_tag),
-                "missing indexer_id tag for embedding {}", embedding.embedding_id);
+            assert!(
+                embedding.tags.iter().any(|t| t == "type:Genotype"),
+                "missing type:Genotype tag for embedding {}",
+                embedding.embedding_id
+            );
+            assert!(
+                embedding.tags.contains(&type_name_tag),
+                "missing type_name tag for embedding {}",
+                embedding.embedding_id
+            );
+            assert!(
+                embedding.tags.iter().any(|t| t.starts_with("genotype_id:")),
+                "missing genotype_id tag for embedding {}",
+                embedding.embedding_id
+            );
+            assert!(
+                embedding.tags.contains(&indexer_id_tag),
+                "missing indexer_id tag for embedding {}",
+                embedding.embedding_id
+            );
         }
 
         Ok(())
@@ -615,12 +637,12 @@ mod tests_index_genotypes {
         let indexer_id = Registry::get_indexer_id(&indexer)?;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], 3).await?;
 
-        let app = crate::test_tools::create_test_app_builder(
-            pool.clone(),
-            NoOpOptimizer,
-            TestGenotypeIndexer::default(),
-        )
-        .await?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
         let first_id = genotype_ids[0];
 
         let now = Utc::now();
@@ -687,12 +709,12 @@ mod tests_index_genotypes {
         let indexer_id = Registry::get_indexer_id(&indexer)?;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], 3).await?;
 
-        let app = crate::test_tools::create_test_app_builder(
-            pool.clone(),
-            NoOpOptimizer,
-            TestGenotypeIndexer::default(),
-        )
-        .await?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
 
         let embeddings_wr = embeddings::Write::new(db::WritePool { pool: pool.clone() });
         store_indexed(&app, &embeddings_wr, &indexer_id, &genotype_ids).await?;
@@ -724,12 +746,12 @@ mod tests_index_genotypes {
         let total = super::INDEX_BATCH_SIZE + 5;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], total).await?;
 
-        let app = crate::test_tools::create_test_app_builder(
-            pool.clone(),
-            NoOpOptimizer,
-            TestGenotypeIndexer::default(),
-        )
-        .await?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
 
         app.services()
             .genotype_indexing()
@@ -772,12 +794,12 @@ mod tests_index_genotypes {
         let total = super::DB_PAGE_SIZE + 5;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], total).await?;
 
-        let app = crate::test_tools::create_test_app_builder(
-            pool.clone(),
-            NoOpOptimizer,
-            TestGenotypeIndexer::default(),
-        )
-        .await?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
 
         app.services()
             .genotype_indexing()
@@ -817,46 +839,12 @@ mod tests_index_genotypes {
         let indexer_id_b = Registry::get_indexer_id(&indexer_b)?;
         let (request_id, genotype_ids) = seed(&pool, &[indexer_a, indexer_b], 4).await?;
 
-        // Create a DI container
-        let mut c = Container::new();
-
-        // Invoke optimizer registration
-        c.invokable(move |c| {
-            Box::pin(async move {
-                let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
-                let mut lock = provided.lock().await;
-                lock.register(NoOpOptimizer);
-                Ok(())
-            })
-        });
-
-        // Invoke indexer registration
-        c.invokable(|c| {
-            Box::pin(async move {
-                let provided = c.get::<Arc<Mutex<Registry>>>().await?;
-                let mut lock = provided.lock().await;
-
-                lock.register(Arc::new(TestGenotypeIndexer::default()))
-                    .map_err(|err| InvokeError::new(err))?;
-
-                lock.register(Arc::new(test_indexer_with_epochs(2)))
-                    .map_err(|err| InvokeError::new(err))?;
-
-                Ok(())
-            })
-        });
-
-        // Register fx-durable-ga with the DI container
-        crate::register(&mut c);
-
-        // Overwrite with the provided pool
-        let wr = pool.clone();
-        c.provide(|_| Box::pin(async { Ok(db::WritePool { pool: wr }) }));
-        let ro = pool.clone();
-        c.provide(|_| Box::pin(async { Ok(db::ReadPool { pool: ro }) }));
-
-        // Invoke all
-        c.invoke().await?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .with_indexer(test_indexer_with_epochs(2))
+            .build()
+            .await?;
 
         let app = c.get::<Arc<App>>().await?;
 
@@ -941,10 +929,7 @@ mod tests_index_genotypes {
             })
         }
 
-        fn mutate(
-            &self,
-            _instance: &mut Self::Type,
-        ) -> anyhow::Result<()> {
+        fn mutate(&self, _instance: &mut Self::Type) -> anyhow::Result<()> {
             Ok(())
         }
     }

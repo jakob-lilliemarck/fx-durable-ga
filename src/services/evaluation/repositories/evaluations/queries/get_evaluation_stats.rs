@@ -1,5 +1,5 @@
-use super::super::models::EvaluationPopulation;
 use super::super::Error as RepositoryError;
+use super::super::models::EvaluationPopulation;
 use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use tracing::instrument;
@@ -98,12 +98,12 @@ pub async fn get_evaluation_stats<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod tests_get_evaluation_stats {
     use super::{GetEvaluationStatsFilter, get_evaluation_stats};
-    use crate::services::evaluation::repositories::evaluations::Evaluation;
-    use crate::services::evaluation::repositories::evaluations::queries::store_evaluations;
-    use crate::services::evaluation::repositories::evaluations::queries::search_evaluations;
-    use crate::services::evaluation::repositories::evaluations::SearchEvaluationsFilter;
     use crate::repositories::genotypes::Genotype;
     use crate::repositories::genotypes::store_genotypes;
+    use crate::services::evaluation::repositories::evaluations::Evaluation;
+    use crate::services::evaluation::repositories::evaluations::SearchEvaluationsFilter;
+    use crate::services::evaluation::repositories::evaluations::queries::search_evaluations;
+    use crate::services::evaluation::repositories::evaluations::queries::store_evaluations;
     use crate::services::optimization::store_request;
     use crate::services::optimization::{FitnessGoal, Request, Schedule, Selector};
     use chrono::{Duration, Utc};
@@ -129,7 +129,12 @@ mod tests_get_evaluation_stats {
 
         let make_gen = |req_id, data| {
             Genotype::new(
-                "test", serde_json::json!(data), Some(req_id), Some(1), None, None,
+                "test",
+                serde_json::json!(data),
+                Some(req_id),
+                Some(1),
+                None,
+                None,
             )
         };
 

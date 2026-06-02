@@ -57,7 +57,6 @@ pub struct NewCommand {
     /// Maximize fitness until this threshold (mutually exclusive with minimize)
     #[arg(long)]
     maximize: Option<f64>,
-
 }
 
 impl NewCommand {

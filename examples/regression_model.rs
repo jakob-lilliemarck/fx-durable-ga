@@ -175,11 +175,7 @@ impl foreign_service::Optimizer for ArchitectureManager {
         Ok(Self::random_arch(&mut rng))
     }
 
-    fn crossover(
-        &self,
-        parent1: Self::Type,
-        parent2: Self::Type,
-    ) -> anyhow::Result<Self::Type> {
+    fn crossover(&self, parent1: Self::Type, parent2: Self::Type) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         let mut pick = || rng.random_range(0..2) == 0;
 

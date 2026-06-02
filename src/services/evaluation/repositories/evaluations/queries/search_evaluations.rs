@@ -94,10 +94,10 @@ pub async fn search_evaluations<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod tests_search_evaluations {
     use super::{SearchEvaluationsFilter, search_evaluations};
-    use crate::services::evaluation::repositories::evaluations::Evaluation;
-    use crate::services::evaluation::repositories::evaluations::queries::store_evaluations;
     use crate::repositories::genotypes::Genotype;
     use crate::repositories::genotypes::store_genotypes;
+    use crate::services::evaluation::repositories::evaluations::Evaluation;
+    use crate::services::evaluation::repositories::evaluations::queries::store_evaluations;
     use crate::services::optimization::store_request;
     use crate::services::optimization::{FitnessGoal, Request, Schedule, Selector};
     use chrono::Utc;
@@ -118,14 +118,7 @@ mod tests_search_evaluations {
         let req_b = store_request(pool, new_request("test_b")?).await?;
 
         let make_genotype = |req_id: Uuid, data: serde_json::Value| {
-            Genotype::new(
-                "test",
-                data,
-                Some(req_id),
-                Some(1),
-                None,
-                None,
-            )
+            Genotype::new("test", data, Some(req_id), Some(1), None, None)
         };
 
         let a_genotypes = vec![
@@ -261,11 +254,8 @@ mod tests_search_evaluations {
         crate::migrations::run_default_migrations(&pool).await?;
         seed(&pool).await?;
 
-        let results = search_evaluations(
-            &pool,
-            &SearchEvaluationsFilter::default().with_limit(2),
-        )
-        .await?;
+        let results =
+            search_evaluations(&pool, &SearchEvaluationsFilter::default().with_limit(2)).await?;
 
         assert_eq!(results.len(), 2);
         Ok(())
@@ -277,8 +267,7 @@ mod tests_search_evaluations {
 
         let results = search_evaluations(
             &pool,
-            &SearchEvaluationsFilter::default()
-                .with_request_ids(vec![Uuid::nil()]),
+            &SearchEvaluationsFilter::default().with_request_ids(vec![Uuid::nil()]),
         )
         .await?;
 
@@ -291,11 +280,7 @@ mod tests_search_evaluations {
         crate::migrations::run_default_migrations(&pool).await?;
         seed(&pool).await?;
 
-        let results = search_evaluations(
-            &pool,
-            &SearchEvaluationsFilter::default(),
-        )
-        .await?;
+        let results = search_evaluations(&pool, &SearchEvaluationsFilter::default()).await?;
 
         assert_eq!(results.len(), 6);
         Ok(())

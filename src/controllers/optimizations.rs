@@ -173,12 +173,7 @@ async fn post_optimization(
     let optimization_id = match app
         .services()
         .optimization()
-        .request_new(
-            input.type_name,
-            goal,
-            schedule,
-            selector,
-        )
+        .request_new(input.type_name, goal, schedule, selector)
         .await
     {
         Ok(optimization_id) => optimization_id,

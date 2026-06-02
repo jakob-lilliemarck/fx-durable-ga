@@ -148,21 +148,14 @@ impl foreign_service::Optimizer for PointManager {
         Ok(Point { x, y, z })
     }
 
-    fn crossover(
-        &self,
-        parent1: Self::Type,
-        parent2: Self::Type,
-    ) -> anyhow::Result<Self::Type> {
+    fn crossover(&self, parent1: Self::Type, parent2: Self::Type) -> anyhow::Result<Self::Type> {
         let x = (parent1.x + parent2.x) / 2.0;
         let y = (parent1.y + parent2.y) / 2.0;
         let z = (parent1.z + parent2.z) / 2.0;
         Ok(Point { x, y, z })
     }
 
-    fn mutate(
-        &self,
-        genotype: &mut Self::Type,
-    ) -> anyhow::Result<()> {
+    fn mutate(&self, genotype: &mut Self::Type) -> anyhow::Result<()> {
         let mut rng = rand::rng();
         const MUTATION_RATE: f64 = 0.3;
         const TEMPERATURE: f64 = 0.7;

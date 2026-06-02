@@ -1,27 +1,48 @@
-use super::super::Digest;
-use super::*;
+use super::super::{Digest, Registry};
 use crate::infrastructure::db;
 use crate::services::indexing::repositories::embeddings::{
     self, SearchEmbeddingsFilter, SearchRequestedEmbeddingsFilter,
 };
+use crate::services::indexing::tests::test_tools::{
+    NoOpOptimizer, TestContext, TestIndexable, TestIndexer,
+};
+use crate::test_tools::TestConfig;
 use crate::{
     migrations,
-    services::indexing::{
-        self, jobs::TrainEncoderMessage, repositories::encoders, tests::test_tools::TestIndexable,
-    },
+    services::indexing::{self, jobs::TrainEncoderMessage, repositories::encoders},
 };
 use fx_event_bus::test_tools::get_unacknowledged_events;
-use fx_mq_jobs::Message;
+use fx_mq_building_blocks::testing_tools::TestQueries;
+use fx_mq_jobs::{FX_MQ_JOBS_SCHEMA_NAME, Message};
+use sqlx::PgPool;
 use std::{collections::HashSet, sync::Arc};
 use uuid::Uuid;
+
+async fn setup(pool: &PgPool) -> anyhow::Result<TestContext> {
+    let indexer = TestIndexer::default();
+    let indexer_id = Registry::get_indexer_id(&indexer)?;
+    let mut c = TestConfig::new(pool.clone())
+        .with_optimizer(NoOpOptimizer)
+        .with_indexer(indexer)
+        .build()
+        .await?;
+    let app = c.get::<Arc<crate::bootstrap::App>>().await?;
+    let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+    Ok(TestContext {
+        app,
+        indexer_id,
+        mq,
+        container: c,
+    })
+}
 
 #[sqlx::test(migrations = false)]
 async fn it_indexes_many(pool: sqlx::PgPool) -> anyhow::Result<()> {
     migrations::run_default_migrations(&pool).await?;
 
-    let mut ctx = test_tools::build_context_di(&pool).await?;
+    let mut ctx = setup(&pool).await?;
 
-    let encoder_id = test_tools::seed_encoder(&mut ctx).await?;
+    let encoder_id = super::test_tools::seed_encoder(&mut ctx).await?;
 
     let encodable = vec![
         (
@@ -132,7 +153,7 @@ async fn it_indexes_many(pool: sqlx::PgPool) -> anyhow::Result<()> {
 async fn it_returns_none_if_no_indexer_is_registered(pool: sqlx::PgPool) -> anyhow::Result<()> {
     migrations::run_default_migrations(&pool).await?;
 
-    let ctx = test_tools::build_context_di(&pool).await?;
+    let ctx = setup(&pool).await?;
 
     let missing_encoder_digest =
         Digest::from_hex("0000000000000000000000000000000000000000000000000000000000000001")
@@ -190,7 +211,7 @@ async fn it_defers_work_on_unavailable_encoder_and_dispatches_a_training_job(
 ) -> anyhow::Result<()> {
     migrations::run_default_migrations(&pool).await?;
 
-    let mut ctx = test_tools::build_context_di(&pool).await?;
+    let mut ctx = setup(&pool).await?;
     let indexing = ctx.container.get::<Arc<indexing::Service>>().await?;
     let embeddings = ctx.container.get::<embeddings::Read>().await?;
 
@@ -251,7 +272,7 @@ async fn it_does_not_dispatch_training_jobs_if_there_is_an_availability_record(
 ) -> anyhow::Result<()> {
     migrations::run_default_migrations(&pool).await?;
 
-    let mut ctx = test_tools::build_context_di(&pool).await?;
+    let mut ctx = setup(&pool).await?;
     let indexing = ctx.container.get::<Arc<indexing::Service>>().await?;
     let encoders_wr = ctx.container.get::<encoders::Write>().await?;
     let embeddings = ctx.container.get::<embeddings::Read>().await?;

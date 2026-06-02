@@ -22,7 +22,9 @@ fn provide_optimization_service(
         let requests_wr = c.get::<requests::Write>().await?;
         let genotypes_ro = c.get::<repositories::genotypes::Read>().await?;
         let genotypes_wr = c.get::<repositories::genotypes::Write>().await?;
-        let evaluations_ro = c.get::<crate::services::evaluation::repositories::evaluations::Read>().await?;
+        let evaluations_ro = c
+            .get::<crate::services::evaluation::repositories::evaluations::Read>()
+            .await?;
         let optimizers = c.get::<Arc<Mutex<optimizer::OptimizerRegistry>>>().await?;
         let locking = c.get::<Arc<services::locking::Service>>().await?;
 

@@ -20,9 +20,7 @@ pub fn router(app: Arc<App>) -> ApiRouter {
         .with_state(app)
 }
 
-fn build_descendant_lookup(
-    nodes: &HashMap<Uuid, Genotype>,
-) -> HashMap<Uuid, Vec<Uuid>> {
+fn build_descendant_lookup(nodes: &HashMap<Uuid, Genotype>) -> HashMap<Uuid, Vec<Uuid>> {
     let mut descendants: HashMap<Uuid, Vec<Uuid>> = HashMap::new();
 
     for genotype in nodes.values() {
@@ -114,7 +112,14 @@ fn build_lineage_json(
         }
         Direction::Descendants => {
             let descendants = build_descendant_lookup(&nodes);
-            build_descendant_tree(root_id, &nodes, evaluations, &descendants, degree, direction)
+            build_descendant_tree(
+                root_id,
+                &nodes,
+                evaluations,
+                &descendants,
+                degree,
+                direction,
+            )
         }
     };
 
@@ -156,8 +161,14 @@ fn build_ancestor_tree(
         }
     }
     parent_ids.sort_by_key(|id| id.to_string());
-        for parent_id in parent_ids {
-        children.push(build_ancestor_tree(&parent_id, nodes, evaluations, degree, direction));
+    for parent_id in parent_ids {
+        children.push(build_ancestor_tree(
+            &parent_id,
+            nodes,
+            evaluations,
+            degree,
+            direction,
+        ));
     }
 
     let href = LineageQuery::new(genotype_id, degree, direction).url();
@@ -292,8 +303,10 @@ async fn lineage_get(
                         )
                         .await
                         .unwrap_or_default();
-                    let evaluations: HashMap<Uuid, f64> =
-                        evals.into_iter().map(|e| (*e.genotype_id(), e.fitness())).collect();
+                    let evaluations: HashMap<Uuid, f64> = evals
+                        .into_iter()
+                        .map(|e| (*e.genotype_id(), e.fitness()))
+                        .collect();
                     (records, evaluations)
                 }
                 Err(err) => {

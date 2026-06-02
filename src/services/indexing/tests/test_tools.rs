@@ -1,37 +1,31 @@
 use super::super::Digest;
 use super::super::repositories::encoders::Encoder;
+use crate::bootstrap;
 use crate::infrastructure::db;
-use crate::infrastructure::di::{Container, InvokeError};
+use crate::infrastructure::di::Container;
 use crate::repositories::genotypes::{Identifiable, TypeName};
 use crate::services::indexing::EncodeInput;
 use crate::services::indexing::repositories::encoders;
-use crate::services::indexing::{self as indexable, Registry};
+use crate::services::indexing::{self as indexable};
+use crate::services::indexing::{
+    TrainModelConfig,
+    encoder::{
+        dataset::{SequenceDataSource, SequenceDataset, SequenceSample},
+        train::AutoencoderTrainConfig,
+    },
+};
 use crate::services::indexing::{
     encoder::lstm::{self, AutoencoderConfig, AutoencoderModel},
     service::MODEL_FORMAT,
 };
-use crate::services::optimization::{self as foreign_service, OptimizerRegistry};
-use crate::{
-    bootstrap::{self, App},
-    configuration,
-    services::indexing::{
-        TrainModelConfig,
-        encoder::{
-            dataset::{SequenceDataSource, SequenceDataset, SequenceSample},
-            train::AutoencoderTrainConfig,
-        },
-    },
-};
+use crate::services::optimization as foreign_service;
 use burn::prelude::Backend;
 use burn::prelude::*;
 use burn::record::{BinBytesRecorder, FullPrecisionSettings, Recorder};
 use burn_ndarray::NdArray;
 use chrono::Utc;
-use futures::lock::Mutex;
 use fx_mq_building_blocks::testing_tools::TestQueries;
-use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
 use serde::{Deserialize, Serialize};
-use sqlx::PgPool;
 use std::sync::Arc;
 use uuid::Uuid;
 
@@ -42,61 +36,6 @@ pub(crate) struct TestContext {
     pub(crate) container: Container,
 }
 
-pub(crate) async fn build_context_di(pool: &PgPool) -> anyhow::Result<TestContext> {
-    let pool = pool.clone();
-    let indexer = TestIndexer::default();
-    let indexer_id = Registry::get_indexer_id(&indexer)?;
-
-    // Create a DI container
-    let mut c = Container::new();
-
-    // Invoke optimizer registration
-    c.invokable(move |c| {
-        Box::pin(async move {
-            let provided = c.get::<Arc<Mutex<OptimizerRegistry>>>().await?;
-            let mut lock = provided.lock().await;
-            lock.register(NoOpOptimizer);
-            Ok(())
-        })
-    });
-
-    // Invoke indexer registration
-    c.invokable(|c| {
-        Box::pin(async move {
-            let provided = c.get::<Arc<Mutex<indexable::Registry>>>().await?;
-            let mut lock = provided.lock().await;
-            lock.register(Arc::new(indexer))
-                .map_err(|err| InvokeError::new(err))?;
-            Ok(())
-        })
-    });
-
-    // Register fx-durable-ga with the DI container
-    crate::register(&mut c);
-
-    c.provide(|_| Box::pin(async { Ok(configuration::EnableListening { value: false }) }));
-
-    // Overwrite with the provided pool
-    let wr = pool.clone();
-    c.provide(|_| Box::pin(async { Ok(db::WritePool { pool: wr }) }));
-    let ro = pool.clone();
-    c.provide(|_| Box::pin(async { Ok(db::ReadPool { pool: ro }) }));
-
-    // Invoke all
-    c.invoke().await?;
-
-    let app = c.get::<Arc<App>>().await?;
-
-    let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
-
-    Ok(TestContext {
-        app,
-        mq,
-        indexer_id,
-        container: c,
-    })
-}
-
 // The indexable type
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct TestIndexable {
@@ -105,7 +44,7 @@ pub(crate) struct TestIndexable {
     dimensions: Vec<usize>,
 }
 
-struct NoOpOptimizer;
+pub(crate) struct NoOpOptimizer;
 
 impl TypeName for NoOpOptimizer {
     fn type_name(&self) -> &str {
@@ -120,18 +59,11 @@ impl foreign_service::Optimizer for NoOpOptimizer {
         Ok(TestIndexable::new((0.0, 0.0)))
     }
 
-    fn crossover(
-        &self,
-        _parent1: Self::Type,
-        _parent2: Self::Type,
-    ) -> anyhow::Result<Self::Type> {
+    fn crossover(&self, _parent1: Self::Type, _parent2: Self::Type) -> anyhow::Result<Self::Type> {
         Ok(TestIndexable::new((0.0, 0.0)))
     }
 
-    fn mutate(
-        &self,
-        _instance: &mut Self::Type,
-    ) -> anyhow::Result<()> {
+    fn mutate(&self, _instance: &mut Self::Type) -> anyhow::Result<()> {
         Ok(())
     }
 }

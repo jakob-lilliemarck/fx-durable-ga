@@ -267,9 +267,6 @@ fn run_agent(mut agent: Agent) -> JoinHandle<Result<(), super::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::configuration::PollIntervalSeconds;
-    use crate::infrastructure::db;
-    use futures::lock::Mutex;
     use sqlx::PgPool;
     use std::collections::HashSet;
     use std::sync::Arc;
@@ -277,23 +274,15 @@ mod tests {
     use tokio::task::JoinHandle;
 
     async fn setup(pool: PgPool) -> anyhow::Result<Arc<crate::services::synchronization::Service>> {
-        let mut c = crate::infrastructure::di::Container::new();
-
-        // Registrations
-        crate::register(&mut c);
-
-        // Overwrites
-        c.provide(|_| Box::pin(async { Ok(PollIntervalSeconds { value: 60 }) }));
-        let ro = pool.clone();
-        c.provide(|_| Box::pin(async { Ok(db::ReadPool { pool: ro }) }));
-        let wr = pool.clone();
-        c.provide(|_| Box::pin(async { Ok(db::WritePool { pool: wr }) }));
+        let mut c = crate::test_tools::TestConfig::new(pool).build().await?;
 
         let svc = c
             .get::<Arc<crate::services::synchronization::Service>>()
             .await?;
 
-        let mux = c.get::<Arc<Mutex<Option<Multiplexer>>>>().await?;
+        let mux = c
+            .get::<crate::infrastructure::registrations::ProvidedPgMux>()
+            .await?;
 
         let mut mux = mux.lock().await.take().expect("Could not take mux");
 

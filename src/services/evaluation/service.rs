@@ -1,10 +1,7 @@
-use crate::{
-    configuration::HostId,
-    infrastructure::db,
-    repositories::genotypes,
-    services::synchronization,
-};
 use crate::services::evaluation::repositories::evaluations;
+use crate::{
+    configuration::HostId, infrastructure::db, repositories::genotypes, services::synchronization,
+};
 use chrono::{DateTime, Utc};
 use evaluations::{Evaluation, SearchEvaluationsFilter};
 use futures::{
@@ -143,10 +140,7 @@ impl Service {
         } else {
             // Merge both lists into one, tracking the boundary for dispatch
             let drop_count = drop_on.len();
-            let all_names: Vec<&str> = drop_on
-                .into_iter()
-                .chain(retry_on)
-                .collect();
+            let all_names: Vec<&str> = drop_on.into_iter().chain(retry_on).collect();
 
             let futures: Vec<_> = all_names
                 .iter()
@@ -273,21 +267,31 @@ mod tests_evaluate_genotype {
     async fn setup(pool: PgPool) -> anyhow::Result<TestContext> {
         let mut c = TestConfig::new(pool).build().await?;
 
-        let synchronization = c.get::<Arc<crate::services::synchronization::Service>>().await?;
+        let synchronization = c
+            .get::<Arc<crate::services::synchronization::Service>>()
+            .await?;
         let evaluation = c.get::<Arc<evaluation::Service>>().await?;
         evaluation.register("test", SlowEvaluator).await;
 
-        Ok(TestContext { evaluation, synchronization })
+        Ok(TestContext {
+            evaluation,
+            synchronization,
+        })
     }
 
     async fn setup_with_listeners(pool: PgPool) -> anyhow::Result<TestContext> {
         let mut c = TestConfig::new(pool).with_listeners().build().await?;
 
-        let synchronization = c.get::<Arc<crate::services::synchronization::Service>>().await?;
+        let synchronization = c
+            .get::<Arc<crate::services::synchronization::Service>>()
+            .await?;
         let evaluation = c.get::<Arc<evaluation::Service>>().await?;
         evaluation.register("test", SlowEvaluator).await;
 
-        Ok(TestContext { evaluation, synchronization })
+        Ok(TestContext {
+            evaluation,
+            synchronization,
+        })
     }
 
     #[sqlx::test(migrations = false)]
@@ -299,7 +303,10 @@ mod tests_evaluate_genotype {
         let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
         let genotype = stored.into_iter().next().unwrap();
 
-        ctx.evaluation.evaluate_genotype(genotype, vec![], vec![]).await.unwrap();
+        ctx.evaluation
+            .evaluate_genotype(genotype, vec![], vec![])
+            .await
+            .unwrap();
 
         Ok(())
     }
@@ -323,7 +330,10 @@ mod tests_evaluate_genotype {
             tx.commit().await.unwrap();
         });
 
-        let result = ctx.evaluation.evaluate_genotype(genotype, vec!["test-drop"], vec![]).await;
+        let result = ctx
+            .evaluation
+            .evaluate_genotype(genotype, vec!["test-drop"], vec![])
+            .await;
         assert!(result.is_ok());
 
         Ok(())
@@ -348,9 +358,15 @@ mod tests_evaluate_genotype {
             tx.commit().await.unwrap();
         });
 
-        let result = ctx.evaluation.evaluate_genotype(genotype, vec![], vec!["test-retry"]).await;
+        let result = ctx
+            .evaluation
+            .evaluate_genotype(genotype, vec![], vec!["test-retry"])
+            .await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), crate::services::evaluation::Error::Aborted(_)));
+        assert!(matches!(
+            result.unwrap_err(),
+            crate::services::evaluation::Error::Aborted(_)
+        ));
 
         Ok(())
     }

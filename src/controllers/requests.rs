@@ -71,12 +71,7 @@ async fn create_request(
     let request_id = app
         .services()
         .optimization()
-        .request_new(
-            payload.type_name,
-            goal,
-            schedule,
-            selector,
-        )
+        .request_new(payload.type_name, goal, schedule, selector)
         .await
         .map_err(|err| {
             error!(error = %err, "failed to create request");

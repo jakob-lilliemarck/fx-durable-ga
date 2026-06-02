@@ -171,18 +171,11 @@ impl foreign_service::Optimizer for TestOptimizer {
         Ok(serde_json::json!({}))
     }
 
-    fn crossover(
-        &self,
-        _parent1: Self::Type,
-        _parent2: Self::Type,
-    ) -> anyhow::Result<Self::Type> {
+    fn crossover(&self, _parent1: Self::Type, _parent2: Self::Type) -> anyhow::Result<Self::Type> {
         Ok(serde_json::json!({}))
     }
 
-    fn mutate(
-        &self,
-        _instance: &mut Self::Type,
-    ) -> anyhow::Result<()> {
+    fn mutate(&self, _instance: &mut Self::Type) -> anyhow::Result<()> {
         Ok(())
     }
 }

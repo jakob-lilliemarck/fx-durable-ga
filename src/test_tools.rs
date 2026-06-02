@@ -1,4 +1,3 @@
-use crate::bootstrap::App;
 use crate::configuration::EnableListening;
 use crate::infrastructure::db;
 use crate::infrastructure::di::{Container, InvokeError, InvokeResult};
@@ -7,8 +6,6 @@ use crate::services::optimization::Optimizer;
 use crate::services::optimization::OptimizerRegistry;
 use futures::future::BoxFuture;
 use futures::lock::Mutex;
-use serde::Serialize;
-use serde::de::DeserializeOwned;
 use sqlx::PgPool;
 use std::sync::{Arc, Once};
 use tracing::Level;
@@ -19,11 +16,7 @@ pub struct TestConfig {
     pool: PgPool,
     listeners: bool,
     invokables: Vec<
-        Box<
-            dyn for<'a> FnOnce(&'a mut Container) -> BoxFuture<'a, InvokeResult>
-                + Send
-                + Sync,
-        >,
+        Box<dyn for<'a> FnOnce(&'a mut Container) -> BoxFuture<'a, InvokeResult> + Send + Sync>,
     >,
 }
 
@@ -93,31 +86,6 @@ impl TestConfig {
 
         Ok(c)
     }
-}
-
-pub async fn create_test_app_builder<T, O, I>(
-    pool: PgPool,
-    opt: O,
-    ind: I,
-) -> anyhow::Result<Arc<App>>
-where
-    T: Serialize + DeserializeOwned + Send + Sync + 'static,
-    O: Optimizer<Type = T> + 'static,
-    I: Indexer<Type = T> + 'static,
-{
-    let mut c = TestConfig::new(pool)
-        .with_optimizer(opt)
-        .with_indexer(ind)
-        .build()
-        .await?;
-
-    let app = c.get::<Arc<App>>().await?;
-
-    Ok(app)
-}
-
-pub async fn create_test_container(pool: PgPool) -> anyhow::Result<Container> {
-    TestConfig::new(pool).build().await
 }
 
 static TEST_TRACING_SUBSCRIBER: Once = Once::new();

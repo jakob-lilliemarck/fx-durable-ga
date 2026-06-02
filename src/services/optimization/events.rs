@@ -124,10 +124,11 @@ impl Handler<budgeting::TransactionCreatedEvent> for TransactionCreatedHandler {
                     .with_account_id(request.account_id)
                     .with_reason(REASON_OPTIMIZATION_CHARGED);
 
-                let last_charge_id = match self.optimizations.transactions_ro.history(&filter, 1).await {
-                    Err(err) => return (publisher.into(), Err(err.into())),
-                    Ok(transactions) => transactions.into_iter().next().map(|t| t.id),
-                };
+                let last_charge_id =
+                    match self.optimizations.transactions_ro.history(&filter, 1).await {
+                        Err(err) => return (publisher.into(), Err(err.into())),
+                        Ok(transactions) => transactions.into_iter().next().map(|t| t.id),
+                    };
 
                 if let Err(err) = publisher
                     .publish(&super::jobs::ChargeOptimizationBudgetMessage::new(

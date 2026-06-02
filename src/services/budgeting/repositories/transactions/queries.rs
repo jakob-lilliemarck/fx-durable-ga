@@ -287,9 +287,7 @@ mod tests_history {
         append(pool, &account_id, "test", 50, "second").await?;
         append(pool, &account_id, "test", 25, "third").await?;
 
-        Ok(TestData {
-            account_id,
-        })
+        Ok(TestData { account_id })
     }
 
     #[sqlx::test(migrations = false)]

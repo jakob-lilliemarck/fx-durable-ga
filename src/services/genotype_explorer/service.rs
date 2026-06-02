@@ -59,8 +59,8 @@ mod tests {
     use super::Service;
     use crate::infrastructure::db;
     use crate::repositories::genotypes;
-    use crate::repositories::genotypes::store_genotypes;
     use crate::repositories::genotypes::Genotype;
+    use crate::repositories::genotypes::store_genotypes;
     use uuid::Uuid;
 
     /// Seeds a simple lineage: root → child → grandchild
@@ -68,10 +68,24 @@ mod tests {
         let root = Genotype::new("test", serde_json::json!([0]), None, Some(1), None, None)?;
         let root_id = root.id();
 
-        let child = Genotype::new("test", serde_json::json!([1]), None, Some(2), Some(&root_id), None)?;
+        let child = Genotype::new(
+            "test",
+            serde_json::json!([1]),
+            None,
+            Some(2),
+            Some(&root_id),
+            None,
+        )?;
         let child_id = child.id();
 
-        let grandchild = Genotype::new("test", serde_json::json!([2]), None, Some(3), Some(&child_id), None)?;
+        let grandchild = Genotype::new(
+            "test",
+            serde_json::json!([2]),
+            None,
+            Some(3),
+            Some(&child_id),
+            None,
+        )?;
         let grandchild_id = grandchild.id();
 
         store_genotypes(pool, &[root, child, grandchild]).await?;
@@ -121,7 +135,9 @@ mod tests {
         let overflow = i32::MAX as u32 + 1;
         let result = svc.get_ancestors(&root_id, overflow).await;
         assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), super::Error::DegreeOverflow { degree } if degree == overflow));
+        assert!(
+            matches!(result.unwrap_err(), super::Error::DegreeOverflow { degree } if degree == overflow)
+        );
 
         Ok(())
     }

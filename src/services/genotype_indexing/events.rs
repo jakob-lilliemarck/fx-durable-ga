@@ -1,6 +1,5 @@
 use crate::services::{
-    genotype_indexing::jobs::RetryDeferredIndexationMessage,
-    indexing::EncoderAvailableEvent,
+    genotype_indexing::jobs::RetryDeferredIndexationMessage, indexing::EncoderAvailableEvent,
 };
 use fx_event_bus::Handler;
 use fx_mq_jobs::Queries;

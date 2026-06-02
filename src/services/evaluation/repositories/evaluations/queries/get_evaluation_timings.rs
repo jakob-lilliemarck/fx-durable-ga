@@ -1,5 +1,5 @@
-use super::super::models::TimingsSummary;
 use super::super::Error as RepositoryError;
+use super::super::models::TimingsSummary;
 use sqlx::PgExecutor;
 use tracing::instrument;
 use uuid::Uuid;
@@ -40,12 +40,21 @@ impl From<DbTimingsSummary> for TimingsSummary {
     fn from(value: DbTimingsSummary) -> Self {
         TimingsSummary {
             records: value.total,
-            min: value.min_duration_micros
-                .map_or(std::time::Duration::ZERO, |m| std::time::Duration::from_micros(m as u64)),
-            max: value.max_duration_micros
-                .map_or(std::time::Duration::ZERO, |m| std::time::Duration::from_micros(m as u64)),
-            avg: value.avg_duration_micros
-                .map_or(std::time::Duration::ZERO, |m| std::time::Duration::from_micros(m as u64)),
+            min: value
+                .min_duration_micros
+                .map_or(std::time::Duration::ZERO, |m| {
+                    std::time::Duration::from_micros(m as u64)
+                }),
+            max: value
+                .max_duration_micros
+                .map_or(std::time::Duration::ZERO, |m| {
+                    std::time::Duration::from_micros(m as u64)
+                }),
+            avg: value
+                .avg_duration_micros
+                .map_or(std::time::Duration::ZERO, |m| {
+                    std::time::Duration::from_micros(m as u64)
+                }),
             percentiles: value.percentile_durations.map_or(vec![], |values| {
                 values
                     .iter()
@@ -100,15 +109,15 @@ pub async fn get_evaluation_timings<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod tests_get_evaluation_timings {
     use super::{GetEvaluationTimingsFilter, get_evaluation_timings};
-    use crate::services::evaluation::repositories::evaluations::Evaluation;
-    use crate::services::evaluation::repositories::evaluations::queries::store_evaluations;
     use crate::repositories::genotypes::Genotype;
     use crate::repositories::genotypes::store_genotypes;
+    use crate::services::evaluation::repositories::evaluations::Evaluation;
+    use crate::services::evaluation::repositories::evaluations::queries::store_evaluations;
     use crate::services::optimization::store_request;
     use crate::services::optimization::{FitnessGoal, Request, Schedule, Selector};
     use chrono::{Duration as ChronoDuration, TimeZone, Utc};
-    use std::time::Duration;
     use sqlx::PgPool;
+    use std::time::Duration;
     use uuid::Uuid;
 
     async fn seed(pool: &PgPool) -> anyhow::Result<(Uuid, Vec<Uuid>, Uuid, Uuid)> {
@@ -122,9 +131,30 @@ mod tests_get_evaluation_timings {
         store_request(pool, request).await?;
 
         let genotypes = vec![
-            Genotype::new("timings", serde_json::json!([1]), Some(request_id), Some(1), None, None)?,
-            Genotype::new("timings", serde_json::json!([2]), Some(request_id), Some(1), None, None)?,
-            Genotype::new("timings", serde_json::json!([3]), Some(request_id), Some(1), None, None)?,
+            Genotype::new(
+                "timings",
+                serde_json::json!([1]),
+                Some(request_id),
+                Some(1),
+                None,
+                None,
+            )?,
+            Genotype::new(
+                "timings",
+                serde_json::json!([2]),
+                Some(request_id),
+                Some(1),
+                None,
+                None,
+            )?,
+            Genotype::new(
+                "timings",
+                serde_json::json!([3]),
+                Some(request_id),
+                Some(1),
+                None,
+                None,
+            )?,
         ];
         let ids: Vec<Uuid> = genotypes.iter().map(|g| g.id).collect();
         store_genotypes(pool, &genotypes).await?;

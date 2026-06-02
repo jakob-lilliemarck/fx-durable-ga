@@ -40,15 +40,8 @@ pub trait Optimizer: TypeName + Send + Sync {
     type Type: Serialize + DeserializeOwned + Send + Sync;
 
     fn random(&self) -> anyhow::Result<Self::Type>;
-    fn crossover(
-        &self,
-        parent1: Self::Type,
-        parent2: Self::Type,
-    ) -> anyhow::Result<Self::Type>;
-    fn mutate(
-        &self,
-        instance: &mut Self::Type,
-    ) -> anyhow::Result<()>;
+    fn crossover(&self, parent1: Self::Type, parent2: Self::Type) -> anyhow::Result<Self::Type>;
+    fn mutate(&self, instance: &mut Self::Type) -> anyhow::Result<()>;
 }
 
 pub(crate) trait OptimizerErased: Send + Sync {
@@ -59,10 +52,7 @@ pub(crate) trait OptimizerErased: Send + Sync {
         parent1: serde_json::Value,
         parent2: serde_json::Value,
     ) -> anyhow::Result<serde_json::Value>;
-    fn mutate(
-        &self,
-        instance: serde_json::Value,
-    ) -> anyhow::Result<serde_json::Value>;
+    fn mutate(&self, instance: serde_json::Value) -> anyhow::Result<serde_json::Value>;
 }
 
 impl<T> OptimizerErased for T
@@ -91,10 +81,7 @@ where
         Ok(json)
     }
 
-    fn mutate(
-        &self,
-        instance: serde_json::Value,
-    ) -> anyhow::Result<serde_json::Value> {
+    fn mutate(&self, instance: serde_json::Value) -> anyhow::Result<serde_json::Value> {
         let mut typed = serde_json::from_value::<T::Type>(instance)?;
         Optimizer::mutate(self, &mut typed)?;
         let json = serde_json::to_value(typed)?;

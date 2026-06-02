@@ -184,18 +184,11 @@ impl foreign_service::Optimizer for IndexingOnlyOptimizer {
         Ok(Self::stub_input())
     }
 
-    fn crossover(
-        &self,
-        _parent1: Self::Type,
-        _parent2: Self::Type,
-    ) -> anyhow::Result<Self::Type> {
+    fn crossover(&self, _parent1: Self::Type, _parent2: Self::Type) -> anyhow::Result<Self::Type> {
         Ok(Self::stub_input())
     }
 
-    fn mutate(
-        &self,
-        _instance: &mut Self::Type,
-    ) -> anyhow::Result<()> {
+    fn mutate(&self, _instance: &mut Self::Type) -> anyhow::Result<()> {
         Ok(())
     }
 }

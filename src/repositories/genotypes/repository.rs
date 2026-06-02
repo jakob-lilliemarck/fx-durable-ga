@@ -101,7 +101,6 @@ impl Read {
     ) -> Result<Vec<Genotype>, Error> {
         super::queries::get_descendants(&self.ro.pool, genotype_id, degree).await
     }
-
 }
 
 impl Write {

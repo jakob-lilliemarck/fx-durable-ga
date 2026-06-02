@@ -373,11 +373,7 @@ impl foreign_service::Optimizer for GPPointManager {
         Ok(Program::random(&mut rng))
     }
 
-    fn crossover(
-        &self,
-        parent1: Self::Type,
-        parent2: Self::Type,
-    ) -> anyhow::Result<Self::Type> {
+    fn crossover(&self, parent1: Self::Type, parent2: Self::Type) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         let mut child = parent1.clone();
 

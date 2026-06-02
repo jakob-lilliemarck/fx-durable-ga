@@ -94,7 +94,9 @@ pub fn provide_app(c: &mut Container) -> BoxFuture<'_, ProviderResult<Arc<App>>>
 
         let genotypes_ro = c.get::<super::repositories::genotypes::Read>().await?;
         let requests_ro = c.get::<crate::services::optimization::Read>().await?;
-        let evaluations_ro = c.get::<crate::services::evaluation::repositories::evaluations::Read>().await?;
+        let evaluations_ro = c
+            .get::<crate::services::evaluation::repositories::evaluations::Read>()
+            .await?;
         let embeddings_ro = c
             .get::<super::services::indexing::embeddings::Read>()
             .await?;

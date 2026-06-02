@@ -343,7 +343,8 @@ impl Service {
         input: &EncodeInput,
         encoder: &Arc<Encoder>,
     ) -> Result<embeddings::EmbeddingValue, super::Error> {
-        let model_cfg: lstm::AutoencoderConfig = serde_json::from_value(encoder.model_config.clone())?;
+        let model_cfg: lstm::AutoencoderConfig =
+            serde_json::from_value(encoder.model_config.clone())?;
 
         let seq_len = input.dimensions.get(0).copied().unwrap_or(0);
         let input_size = input
@@ -460,7 +461,10 @@ impl Service {
 
         let (weights, autoencoder_cfg) = self.train_model(&train_config, &dataset)?;
 
-        let (shape_in, shape_out) = (vec![autoencoder_cfg.input_size as i32], autoencoder_cfg.latent_size as i32);
+        let (shape_in, shape_out) = (
+            vec![autoencoder_cfg.input_size as i32],
+            autoencoder_cfg.latent_size as i32,
+        );
 
         let encoder = encoders::Encoder {
             digest: *indexer_id,

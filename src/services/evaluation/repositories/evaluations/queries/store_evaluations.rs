@@ -83,9 +83,9 @@ where
 #[cfg(test)]
 mod tests_store_evaluations {
     use super::store_evaluations;
-    use crate::services::evaluation::repositories::evaluations::Evaluation;
     use crate::repositories::genotypes::Genotype;
     use crate::repositories::genotypes::store_genotypes;
+    use crate::services::evaluation::repositories::evaluations::Evaluation;
     use crate::services::optimization::store_request;
     use crate::services::optimization::{FitnessGoal, Request, Schedule, Selector};
     use chrono::Utc;

@@ -269,11 +269,7 @@ impl foreign_service::Optimizer for FeatureManager {
         Ok(FeatureConfig::random(&mut rng))
     }
 
-    fn crossover(
-        &self,
-        parent1: Self::Type,
-        parent2: Self::Type,
-    ) -> anyhow::Result<Self::Type> {
+    fn crossover(&self, parent1: Self::Type, parent2: Self::Type) -> anyhow::Result<Self::Type> {
         let mut rng = rand::rng();
         let mut features = Vec::new();
 

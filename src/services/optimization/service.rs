@@ -4,12 +4,10 @@ use super::optimizer::{self, OptimizerErased};
 use crate::infrastructure::db;
 use crate::repositories::genotypes;
 use crate::repositories::genotypes::Genotype;
-use crate::services::evaluation::repositories::evaluations;
-use crate::services::evaluation::{
-    GetEvaluationStatsFilter, SearchEvaluationsFilter,
-};
-use crate::services::evaluation::SHUTDOWN_SEMAPHORE;
 use crate::services::budgeting::{TransactionsFilter, TransactionsRead};
+use crate::services::evaluation::SHUTDOWN_SEMAPHORE;
+use crate::services::evaluation::repositories::evaluations;
+use crate::services::evaluation::{GetEvaluationStatsFilter, SearchEvaluationsFilter};
 use crate::services::optimization::jobs::{
     AddOptimizationBudgetMessage, ChargeOptimizationBudgetMessage, EvaluateGenotypeMessage,
 };
@@ -103,12 +101,7 @@ impl Service {
         let request = db::begin(self.requests_wr.clone(), |tx| {
             Box::pin(async move {
                 let request = requests::WriteTx::new(tx)
-                    .new_request(Request::new(
-                        &type_name,
-                        goal,
-                        selector,
-                        schedule.clone(),
-                    ))
+                    .new_request(Request::new(&type_name, goal, selector, schedule.clone()))
                     .await?;
 
                 let mut publisher = fx_mq_jobs::Publisher::new_tx(tx, &mq);
@@ -145,7 +138,11 @@ impl Service {
         let genotype = self.genotypes_ro.get_genotype(&genotype_id).await?;
 
         self.evaluation
-            .evaluate_genotype(genotype, vec![&request_id.to_string()], vec![SHUTDOWN_SEMAPHORE])
+            .evaluate_genotype(
+                genotype,
+                vec![&request_id.to_string()],
+                vec![SHUTDOWN_SEMAPHORE],
+            )
             .await?;
 
         Ok(())
@@ -193,7 +190,7 @@ impl Service {
             return Ok(());
         }
 
-                let balance = self.transactions_ro.balance(&request.account_id).await?;
+        let balance = self.transactions_ro.balance(&request.account_id).await?;
 
         let is_exhausted = balance <= 0 && live_genotypes == 0;
 
@@ -294,7 +291,7 @@ impl Service {
                     return Ok::<_, Error>(());
                 };
 
-        let balance = self.transactions_ro.balance(&request.account_id).await?;
+                let balance = self.transactions_ro.balance(&request.account_id).await?;
 
                 let num_offspring = balance.max(0).min(amount);
 
@@ -350,9 +347,7 @@ impl Service {
         let mut jobs = Vec::with_capacity(population_size);
         {
             for _ in 0..population_size {
-                let genome = manager
-                    .random()
-                    .map_err(Error::Internal)?;
+                let genome = manager.random().map_err(Error::Internal)?;
 
                 let genotype = Genotype::new(
                     &request.type_name,
@@ -429,12 +424,12 @@ impl Service {
             let ids: Vec<Uuid> = genotypes.iter().map(|g| g.id()).collect();
             let evals = self
                 .evaluations_ro
-                .search_evaluations(
-                    &SearchEvaluationsFilter::default().with_genotype_ids(ids),
-                )
+                .search_evaluations(&SearchEvaluationsFilter::default().with_genotype_ids(ids))
                 .await?;
-            let fitness_map: HashMap<Uuid, f64> =
-                evals.into_iter().map(|e| (*e.genotype_id(), e.fitness())).collect();
+            let fitness_map: HashMap<Uuid, f64> = evals
+                .into_iter()
+                .map(|e| (*e.genotype_id(), e.fitness()))
+                .collect();
 
             (genotypes, fitness_map)
         } else {
@@ -453,14 +448,15 @@ impl Service {
             let genotypes = self
                 .genotypes_ro
                 .search_genotypes(
-                    &genotypes::SearchGenotypesFilter::default()
-                        .with_genotype_ids(ids.clone()),
+                    &genotypes::SearchGenotypesFilter::default().with_genotype_ids(ids.clone()),
                     population_size,
                 )
                 .await?;
 
-            let fitness_map: HashMap<Uuid, f64> =
-                evals.into_iter().map(|e| (*e.genotype_id(), e.fitness())).collect();
+            let fitness_map: HashMap<Uuid, f64> = evals
+                .into_iter()
+                .map(|e| (*e.genotype_id(), e.fitness()))
+                .collect();
 
             (genotypes, fitness_map)
         };
@@ -469,10 +465,9 @@ impl Service {
         let candidates_with_fitness: Vec<(Genotype, f64)> = candidates
             .into_iter()
             .map(|g| {
-                let fitness = fitness_map
-                    .get(&g.id())
-                    .copied()
-                    .ok_or(Error::NoFitness { genotype_id: g.id() })?;
+                let fitness = fitness_map.get(&g.id()).copied().ok_or(Error::NoFitness {
+                    genotype_id: g.id(),
+                })?;
                 Ok((g, fitness))
             })
             .collect::<Result<Vec<_>, Error>>()?;
@@ -484,12 +479,8 @@ impl Service {
             &request.goal,
         )?;
 
-        let genotypes = Breeder::breed_batch(
-            request,
-            manager.as_ref(),
-            &pairs,
-            next_generation_id,
-        )?;
+        let genotypes =
+            Breeder::breed_batch(request, manager.as_ref(), &pairs, next_generation_id)?;
 
         let jobs: Vec<EvaluateGenotypeMessage> = genotypes
             .iter()
@@ -523,8 +514,12 @@ impl Service {
         let request = self.requests_ro.get_request(request_id).await?;
 
         let order_filter = match request.goal {
-            FitnessGoal::Minimize { .. } => SearchEvaluationsFilter::default().with_order_fitness_asc(),
-            FitnessGoal::Maximize { .. } => SearchEvaluationsFilter::default().with_order_fitness_desc(),
+            FitnessGoal::Minimize { .. } => {
+                SearchEvaluationsFilter::default().with_order_fitness_asc()
+            }
+            FitnessGoal::Maximize { .. } => {
+                SearchEvaluationsFilter::default().with_order_fitness_desc()
+            }
         };
 
         let mut best_evals = self

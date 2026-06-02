@@ -102,9 +102,9 @@ pub async fn get_aggregated_fitness<'tx, E: PgExecutor<'tx>>(
 #[cfg(test)]
 mod tests_get_aggregated_fitness {
     use super::{GetAggregatedFitnessFilter, get_aggregated_fitness};
-    use crate::services::evaluation::repositories::evaluations::Evaluation;
     use crate::repositories::genotypes::Genotype;
     use crate::repositories::genotypes::store_genotypes;
+    use crate::services::evaluation::repositories::evaluations::Evaluation;
     use crate::services::evaluation::repositories::evaluations::queries::store_evaluations;
     use crate::services::optimization::store_request;
     use crate::services::optimization::{FitnessGoal, Request, Schedule, Selector};
