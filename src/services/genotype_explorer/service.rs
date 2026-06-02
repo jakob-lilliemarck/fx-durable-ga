@@ -65,13 +65,13 @@ mod tests {
 
     /// Seeds a simple lineage: root → child → grandchild
     async fn seed(pool: &sqlx::PgPool) -> anyhow::Result<(Uuid, Uuid, Uuid)> {
-        let root = Genotype::new("test", 1, serde_json::json!([0]), None, Some(1), None, None)?;
+        let root = Genotype::new("test", serde_json::json!([0]), None, Some(1), None, None)?;
         let root_id = root.id();
 
-        let child = Genotype::new("test", 1, serde_json::json!([1]), None, Some(2), Some(&root_id), None)?;
+        let child = Genotype::new("test", serde_json::json!([1]), None, Some(2), Some(&root_id), None)?;
         let child_id = child.id();
 
-        let grandchild = Genotype::new("test", 1, serde_json::json!([2]), None, Some(3), Some(&child_id), None)?;
+        let grandchild = Genotype::new("test", serde_json::json!([2]), None, Some(3), Some(&child_id), None)?;
         let grandchild_id = grandchild.id();
 
         store_genotypes(pool, &[root, child, grandchild]).await?;

@@ -114,7 +114,6 @@ mod tests_get_evaluation_timings {
     async fn seed(pool: &PgPool) -> anyhow::Result<(Uuid, Vec<Uuid>, Uuid, Uuid)> {
         let request = Request::new(
             "timings",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -123,9 +122,9 @@ mod tests_get_evaluation_timings {
         store_request(pool, request).await?;
 
         let genotypes = vec![
-            Genotype::new("timings", 1, serde_json::json!([1]), Some(request_id), Some(1), None, None)?,
-            Genotype::new("timings", 1, serde_json::json!([2]), Some(request_id), Some(1), None, None)?,
-            Genotype::new("timings", 1, serde_json::json!([3]), Some(request_id), Some(1), None, None)?,
+            Genotype::new("timings", serde_json::json!([1]), Some(request_id), Some(1), None, None)?,
+            Genotype::new("timings", serde_json::json!([2]), Some(request_id), Some(1), None, None)?,
+            Genotype::new("timings", serde_json::json!([3]), Some(request_id), Some(1), None, None)?,
         ];
         let ids: Vec<Uuid> = genotypes.iter().map(|g| g.id).collect();
         store_genotypes(pool, &genotypes).await?;

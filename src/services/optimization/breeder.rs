@@ -17,7 +17,6 @@ impl Breeder {
         parent_a_id = %parent_a.id(),
         parent_b_id = %parent_b.id(),
         generation_id = next_generation_id,
-        type_hash = request.type_hash
     ))]
     fn breed_child(
         request: &Request,
@@ -37,7 +36,6 @@ impl Breeder {
 
         let child = Genotype::new(
             &request.type_name,
-            request.type_hash,
             genome,
             Some(request.id),
             Some(next_generation_id),
@@ -57,7 +55,6 @@ impl Breeder {
     fields(
         num_offspring = pairs.len(),
         generation_id = next_generation_id,
-        type_hash = request.type_hash
     ))]
     pub(crate) fn breed_batch<'a>(
         request: &Request,

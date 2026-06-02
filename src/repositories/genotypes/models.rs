@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use const_fnv1a_hash::fnv1a_hash_str_32;
 use serde::Serialize;
 use serde_json::{Map, Value};
 use sqlx::prelude::FromRow;
@@ -14,10 +13,6 @@ pub trait Identifiable {
 
 pub trait TypeName {
     fn type_name(&self) -> &str;
-
-    fn type_hash(&self) -> i32 {
-        fnv1a_hash_str_32(self.type_name()) as i32
-    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -33,7 +28,6 @@ pub struct Genotype {
     pub(crate) id: Uuid,
     pub(crate) generated_at: DateTime<Utc>,
     pub(crate) type_name: String,
-    pub(crate) type_hash: i32,
     pub(crate) genome: Value,
     pub(crate) genome_hash: i64,
     #[allow(dead_code)]
@@ -51,10 +45,6 @@ impl Identifiable for Genotype {
 }
 
 impl TypeName for Genotype {
-    fn type_hash(&self) -> i32 {
-        self.type_hash
-    }
-
     fn type_name(&self) -> &str {
         &self.type_name
     }
@@ -62,10 +52,9 @@ impl TypeName for Genotype {
 
 impl Genotype {
     /// Creates a new genotype with the given genome and metadata.
-    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash))]
+    #[instrument(level = "debug", fields(type_name = type_name))]
     pub(crate) fn new<G: serde::Serialize + std::fmt::Debug>(
         type_name: &str,
-        type_hash: i32,
         genome: G,
         request_id: Option<Uuid>,
         generation_id: Option<i32>,
@@ -79,7 +68,6 @@ impl Genotype {
             id: Uuid::now_v7(),
             generated_at: Utc::now(),
             type_name: type_name.to_string(),
-            type_hash,
             genome: genome_value,
             genome_hash,
             request_id,
@@ -104,10 +92,6 @@ impl Genotype {
 
     pub fn genome(&self) -> Value {
         self.genome.clone()
-    }
-
-    pub fn type_hash(&self) -> i32 {
-        self.type_hash
     }
 
     pub fn type_name(&self) -> &str {

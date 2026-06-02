@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                g.id,\n                g.generated_at,\n                g.type_name,\n                g.genome,\n                g.genome_hash,\n                g.request_id,\n                g.generation_id,\n                g.parent_a,\n                g.parent_b\n            FROM fx_durable_ga.genotypes g\n            WHERE (\n                $1::UUID[] IS NULL OR g.request_id = ANY($1)\n            )\n            AND (\n                $2::INTEGER[] IS NULL OR g.generation_id = ANY($2)\n            )\n            AND (\n                $3::UUID[] IS NULL OR g.id = ANY($3)\n            )\n            AND (\n                $4::UUID IS NULL OR g.id > $4::UUID\n            )\n            AND ($5::TEXT IS NULL OR g.id::TEXT ILIKE $5)\n            ORDER BY\n                CASE WHEN $6 THEN RANDOM() ELSE NULL END NULLS LAST,\n                g.id ASC\n            LIMIT $7;\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "generated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "genome",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "genome_hash",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "request_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "generation_id",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "parent_a",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "parent_b",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray",
+        "Int4Array",
+        "UuidArray",
+        "Uuid",
+        "Text",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "796aac500514a9e5caabb3d540747ea321327445e4072f0f821624458e15c74d"
+}

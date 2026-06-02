@@ -10,7 +10,6 @@ use uuid::Uuid;
 #[instrument(level = "debug", skip(tx), fields(
     request_id = %request.id,
     type_name = %request.type_name,
-    type_hash = request.type_hash,
     goal = ?request.goal
 ))]
 pub(crate) async fn store_request<'tx, E: PgExecutor<'tx>>(
@@ -25,18 +24,16 @@ pub(crate) async fn store_request<'tx, E: PgExecutor<'tx>>(
                 id,
                 requested_at,
                 type_name,
-                type_hash,
                 goal,
                 schedule,
                 selector,
                 account_id
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
             RETURNING
                 id,
                 requested_at,
                 type_name,
-                type_hash,
                 goal,
                 schedule,
                 selector,
@@ -45,7 +42,6 @@ pub(crate) async fn store_request<'tx, E: PgExecutor<'tx>>(
         db_request.id,
         db_request.requested_at,
         db_request.type_name,
-        db_request.type_hash,
         db_request.goal,
         db_request.schedule,
         db_request.selector,
@@ -71,7 +67,6 @@ mod tests_store_request {
 
         let request = Request::new(
             "test",
-            1,
             goal,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -86,7 +81,6 @@ mod tests_store_request {
             inserted.requested_at
         );
         assert_eq!(request_clone.type_name, inserted.type_name);
-        assert_eq!(request_clone.type_hash, inserted.type_hash);
         assert_eq!(request_clone.goal, inserted.goal);
         assert_eq!(request_clone.schedule, inserted.schedule);
         assert_eq!(request_clone.selector, inserted.selector);
@@ -101,7 +95,6 @@ mod tests_store_request {
 
         let request = Request::new(
             "test",
-            1,
             goal,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -178,7 +171,6 @@ pub async fn search_requests<'tx, E: PgExecutor<'tx>>(
             id,
             requested_at,
             type_name,
-            type_hash,
             goal,
             schedule,
             selector,
@@ -363,7 +355,6 @@ mod tests_search_requests {
             let type_name = format!("type_{}", (b'a' + i as u8) as char);
             let mut request = Request::new(
                 &type_name,
-                1,
                 FitnessGoal::maximize(0.9)?,
                 Selector::tournament(10),
                 Schedule::generational(100, 10),
@@ -390,7 +381,6 @@ pub async fn get_request<'tx, E: PgExecutor<'tx>>(tx: E, id: &Uuid) -> Result<Re
             id,
             requested_at,
             type_name,
-            type_hash,
             goal,
             schedule,
             selector,
@@ -419,7 +409,6 @@ mod tests_get_request {
 
         let request = Request::new(
             "test",
-            1,
             goal,
             Selector::tournament(10),
             Schedule::generational(100, 10),

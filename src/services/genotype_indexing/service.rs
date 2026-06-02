@@ -51,7 +51,6 @@ struct IndexableGenotype {
     id: Uuid,
     genome: serde_json::Value,
     type_name: String,
-    type_hash: i32,
 }
 
 impl Serialize for IndexableGenotype {
@@ -74,7 +73,6 @@ impl From<Genotype> for IndexableGenotype {
             id: value.id,
             genome: value.genome,
             type_name: value.type_name,
-            type_hash: value.type_hash,
         }
     }
 }
@@ -82,10 +80,6 @@ impl From<Genotype> for IndexableGenotype {
 impl TypeName for IndexableGenotype {
     fn type_name(&self) -> &str {
         &self.type_name
-    }
-
-    fn type_hash(&self) -> i32 {
-        self.type_hash
     }
 }
 
@@ -924,7 +918,6 @@ mod tests_index_genotypes {
 
     impl TestIndexableType {
         const TYPE_NAME: &'static str = "test::indexable_type";
-        const TYPE_HASH: i32 = 4242;
     }
 
     struct NoOpOptimizer;
@@ -959,10 +952,6 @@ mod tests_index_genotypes {
     impl TypeName for TestIndexableType {
         fn type_name(&self) -> &str {
             Self::TYPE_NAME
-        }
-
-        fn type_hash(&self) -> i32 {
-            Self::TYPE_HASH
         }
     }
 
@@ -1007,10 +996,6 @@ mod tests_index_genotypes {
     impl TypeName for TestGenotypeIndexer {
         fn type_name(&self) -> &'static str {
             TestIndexableType::TYPE_NAME
-        }
-
-        fn type_hash(&self) -> i32 {
-            TestIndexableType::TYPE_HASH
         }
     }
 
@@ -1120,7 +1105,6 @@ mod tests_index_genotypes {
     fn new_request() -> anyhow::Result<Request> {
         let request = Request::new(
             "genotype-indexing-test",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -1133,7 +1117,6 @@ mod tests_index_genotypes {
             .map(|i| {
                 Genotype::new(
                     TestIndexableType::TYPE_NAME,
-                    TestIndexableType::TYPE_HASH,
                     json!({ "values": [i as i32, (i + 1) as i32] }),
                     Some(request_id),
                     Some((i + 1) as i32),

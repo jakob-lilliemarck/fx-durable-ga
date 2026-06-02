@@ -18,8 +18,8 @@ pub enum Error {
     #[error("GenotypesRepositoryError: {0}")]
     GenotypesRepositoryError(#[from] genotypes::Error),
 
-    #[error("UnknownType: type_name={type_name}, type_hash={type_hash}")]
-    UnknownTypeError { type_hash: i32, type_name: String },
+    #[error("UnknownType: type_name={type_name}")]
+    UnknownTypeError { type_name: String },
 
     #[error("Selection error: {0}")]
     SelectionError(#[from] SelectionError),

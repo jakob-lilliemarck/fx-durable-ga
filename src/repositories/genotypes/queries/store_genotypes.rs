@@ -19,7 +19,6 @@ where
             id,
             generated_at,
             type_name,
-            type_hash,
             genome,
             genome_hash,
             request_id,
@@ -47,8 +46,6 @@ where
             .push(", ")
             .push_bind(g.type_name().to_string())
             .push(", ")
-            .push_bind(g.type_hash())
-            .push(", ")
             .push_bind(g.genome())
             .push(", ")
             .push_bind(g.genome_hash())
@@ -63,7 +60,7 @@ where
             .push(")");
     }
     query_builder.push(
-        " RETURNING id, generated_at, type_name, type_hash, genome, genome_hash, request_id, generation_id, parent_a, parent_b",
+        " RETURNING id, generated_at, type_name, genome, genome_hash, request_id, generation_id, parent_a, parent_b",
     );
 
     let genotypes = query_builder
@@ -88,7 +85,6 @@ mod tests_store_genotypes {
         // Create a request first
         let request = Request::new(
             "test",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -98,7 +94,6 @@ mod tests_store_genotypes {
 
         let genotypes = vec![Genotype::new(
             "test",
-            1,
             serde_json::json!([1, 2, 3]),
             Some(request_id),
             Some(1),
@@ -115,7 +110,6 @@ mod tests_store_genotypes {
             inserted[0].generated_at()
         );
         assert_eq!(genotypes_clone[0].type_name(), inserted[0].type_name());
-        assert_eq!(genotypes_clone[0].type_hash(), inserted[0].type_hash());
         assert_eq!(genotypes_clone[0].genome(), inserted[0].genome());
 
         Ok(())
@@ -128,7 +122,6 @@ mod tests_store_genotypes {
         // Create a request first
         let request = Request::new(
             "test",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -138,7 +131,6 @@ mod tests_store_genotypes {
 
         let genotype = Genotype::new(
             "test",
-            1,
             serde_json::json!([1, 2, 3]),
             Some(request_id),
             Some(1),

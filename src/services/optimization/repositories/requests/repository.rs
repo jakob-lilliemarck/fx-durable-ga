@@ -64,7 +64,7 @@ impl<'tx> WriteTx<'tx> {
         Self { tx }
     }
 
-    #[instrument(level = "debug", skip(self), fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash, goal = ?request.goal))]
+    #[instrument(level = "debug", skip(self), fields(request_id = %request.id, type_name = %request.type_name, goal = ?request.goal))]
     pub(crate) async fn new_request(&mut self, request: Request) -> Result<Request, Error> {
         super::queries::store_request(&mut **self.tx, request).await
     }

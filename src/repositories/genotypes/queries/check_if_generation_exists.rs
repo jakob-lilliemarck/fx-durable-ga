@@ -40,7 +40,6 @@ mod tests_generation_exists {
 
         let request = Request::new(
             "test",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -50,7 +49,6 @@ mod tests_generation_exists {
 
         let genotype = Genotype::new(
             "test",
-            1,
             serde_json::json!([1, 2, 3]),
             Some(request_id),
             Some(1),
@@ -72,7 +70,6 @@ mod tests_generation_exists {
 
         let request = Request::new(
             "test",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),

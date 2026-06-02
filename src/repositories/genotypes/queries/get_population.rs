@@ -41,7 +41,6 @@ mod tests_get_population {
     async fn seed(pool: PgPool) -> anyhow::Result<Uuid> {
         let request = Request::new(
             "test",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -51,7 +50,6 @@ mod tests_get_population {
         let genotypes = vec![
             Genotype::new(
                 "test",
-                1,
                 serde_json::json!([1, 2, 3]),
                 Some(request.id),
                 Some(1),
@@ -60,7 +58,6 @@ mod tests_get_population {
             )?,
             Genotype::new(
                 "test",
-                1,
                 serde_json::json!([4, 5, 6]),
                 Some(request.id),
                 Some(1),
@@ -69,7 +66,6 @@ mod tests_get_population {
             )?,
             Genotype::new(
                 "test",
-                1,
                 serde_json::json!([7, 8, 9]),
                 Some(request.id),
                 Some(1),

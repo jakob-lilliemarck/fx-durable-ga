@@ -309,7 +309,7 @@ mod tests_evaluate_genotype {
         crate::migrations::run_default_migrations(&pool).await?;
         let ctx = setup(pool.clone()).await?;
 
-        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2]), None, None, None, None)?;
+        let genotype = Genotype::new("test", serde_json::json!([1, 2]), None, None, None, None)?;
         let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
         let genotype = stored.into_iter().next().unwrap();
 
@@ -323,7 +323,7 @@ mod tests_evaluate_genotype {
         crate::migrations::run_default_migrations(&pool).await?;
         let ctx = setup(pool.clone()).await?;
 
-        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2]), None, None, None, None)?;
+        let genotype = Genotype::new("test", serde_json::json!([1, 2]), None, None, None, None)?;
         let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
         let genotype = stored.into_iter().next().unwrap();
 
@@ -348,7 +348,7 @@ mod tests_evaluate_genotype {
         crate::migrations::run_default_migrations(&pool).await?;
         let ctx = setup(pool.clone()).await?;
 
-        let genotype = Genotype::new("test", 1, serde_json::json!([1, 2]), None, None, None, None)?;
+        let genotype = Genotype::new("test", serde_json::json!([1, 2]), None, None, None, None)?;
         let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
         let genotype = stored.into_iter().next().unwrap();
 

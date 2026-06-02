@@ -1,0 +1,63 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id,\n            requested_at,\n            type_name,\n            goal,\n            schedule,\n            selector,\n            account_id\n        FROM fx_durable_ga.requests\n        WHERE (\n            $1::UUID IS NULL\n            OR (requested_at, id) < (\n                SELECT requested_at, id\n                FROM fx_durable_ga.requests\n                WHERE id = $1\n            )\n        )\n        AND ($2::TEXT IS NULL OR type_name ILIKE $2 OR id::TEXT ILIKE $2)\n        AND ($3::TIMESTAMPTZ IS NULL OR requested_at >= $3)\n        AND ($4::TIMESTAMPTZ IS NULL OR requested_at <= $4)\n        AND ($5::UUID IS NULL OR account_id = $5)\n        ORDER BY requested_at DESC, id DESC\n        LIMIT $6\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "goal",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "schedule",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "selector",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "account_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4247a8b4cf63ce2b918b77e460362eea76678fa4f68ed85042f04a2ac543ce78"
+}

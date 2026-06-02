@@ -113,7 +113,6 @@ mod tests_get_evaluation_stats {
     async fn seed(pool: &PgPool) -> anyhow::Result<(Uuid, Uuid, Vec<Uuid>)> {
         let request_a = Request::new(
             "test_a",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -122,7 +121,6 @@ mod tests_get_evaluation_stats {
 
         let request_b = Request::new(
             "test_b",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -131,7 +129,7 @@ mod tests_get_evaluation_stats {
 
         let make_gen = |req_id, data| {
             Genotype::new(
-                "test", 1, serde_json::json!(data), Some(req_id), Some(1), None, None,
+                "test", serde_json::json!(data), Some(req_id), Some(1), None, None,
             )
         };
 

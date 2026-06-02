@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO fx_durable_ga.requests (\n                id,\n                requested_at,\n                type_name,\n                goal,\n                schedule,\n                selector,\n                account_id\n            )\n            VALUES ($1, $2, $3, $4, $5, $6, $7)\n            RETURNING\n                id,\n                requested_at,\n                type_name,\n                goal,\n                schedule,\n                selector,\n                account_id;\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "requested_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "type_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "goal",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "schedule",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "selector",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "account_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Jsonb",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "8c4f4b0d37b81b66c794cd7cc533c261af091401b9b787f4b88227aced272085"
+}

@@ -11,14 +11,12 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
     // Create requests first
     let request_1 = Request::new(
         "test",
-        1,
         FitnessGoal::maximize(0.9).unwrap(),
         Selector::tournament(10),
         Schedule::generational(100, 10),
     );
     let request_2 = Request::new(
         "test",
-        1,
         FitnessGoal::maximize(0.9).unwrap(),
         Selector::tournament(10),
         Schedule::generational(100, 10),
@@ -33,7 +31,6 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
     let genotypes = vec![
         Genotype::new(
             "test",
-            1,
             serde_json::json!([1, 2, 3]),
             Some(rid_1),
             Some(1),
@@ -43,7 +40,6 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         .unwrap(),
         Genotype::new(
             "test",
-            1,
             serde_json::json!([4, 5, 6]),
             Some(rid_1),
             Some(2),
@@ -53,7 +49,6 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         .unwrap(),
         Genotype::new(
             "test",
-            1,
             serde_json::json!([7, 8, 9]),
             Some(rid_2),
             Some(1),
@@ -63,7 +58,6 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         .unwrap(),
         Genotype::new(
             "test",
-            1,
             serde_json::json!([10, 11, 12]),
             Some(rid_2),
             Some(1),
@@ -73,7 +67,6 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         .unwrap(),
         Genotype::new(
             "test",
-            1,
             serde_json::json!([13, 14, 15]),
             Some(rid_2),
             Some(2),
@@ -125,7 +118,6 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
 pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
     let request = Request::new(
         "lineage",
-        1,
         FitnessGoal::maximize(0.9).unwrap(),
         Selector::tournament(10),
         Schedule::generational(100, 10),
@@ -135,7 +127,6 @@ pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
 
     let root = Genotype::new(
         "lineage",
-        1,
         serde_json::json!([0]),
         Some(request_id),
         Some(1),
@@ -147,7 +138,6 @@ pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
 
     let child = Genotype::new(
         "lineage",
-        1,
         serde_json::json!([1]),
         Some(request_id),
         Some(2),
@@ -159,7 +149,6 @@ pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
 
     let grandchild = Genotype::new(
         "lineage",
-        1,
         serde_json::json!([2]),
         Some(request_id),
         Some(3),

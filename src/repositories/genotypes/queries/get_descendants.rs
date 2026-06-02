@@ -16,7 +16,7 @@ pub async fn get_descendants<'tx, E: PgExecutor<'tx>>(
         r#"
             WITH RECURSIVE descendant_tree AS (
                 SELECT
-                    g.id, g.generated_at, g.type_name, g.type_hash,
+                    g.id, g.generated_at, g.type_name,
                     g.genome, g.genome_hash, g.request_id, g.generation_id,
                     g.parent_a, g.parent_b,
                     0 AS degree
@@ -24,7 +24,7 @@ pub async fn get_descendants<'tx, E: PgExecutor<'tx>>(
                 WHERE g.id = $1
                 UNION
                 SELECT
-                    child.id, child.generated_at, child.type_name, child.type_hash,
+                    child.id, child.generated_at, child.type_name,
                     child.genome, child.genome_hash, child.request_id, child.generation_id,
                     child.parent_a, child.parent_b,
                     parent.degree + 1
@@ -35,7 +35,7 @@ pub async fn get_descendants<'tx, E: PgExecutor<'tx>>(
                 WHERE parent.degree + 1 <= $2::INTEGER
             )
             SELECT
-                id, generated_at, type_name, type_hash,
+                id, generated_at, type_name,
                 genome, genome_hash, request_id, generation_id,
                 parent_a, parent_b
             FROM descendant_tree

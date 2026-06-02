@@ -16,7 +16,7 @@ pub async fn get_ancestors<'tx, E: PgExecutor<'tx>>(
         r#"
             WITH RECURSIVE ancestor_tree AS (
                 SELECT
-                    g.id, g.generated_at, g.type_name, g.type_hash,
+                    g.id, g.generated_at, g.type_name,
                     g.genome, g.genome_hash, g.request_id, g.generation_id,
                     g.parent_a, g.parent_b,
                     0 AS degree
@@ -24,7 +24,7 @@ pub async fn get_ancestors<'tx, E: PgExecutor<'tx>>(
                 WHERE g.id = $1
                 UNION
                 SELECT
-                    parent.id, parent.generated_at, parent.type_name, parent.type_hash,
+                    parent.id, parent.generated_at, parent.type_name,
                     parent.genome, parent.genome_hash, parent.request_id, parent.generation_id,
                     parent.parent_a, parent.parent_b,
                     child.degree + 1
@@ -35,7 +35,7 @@ pub async fn get_ancestors<'tx, E: PgExecutor<'tx>>(
                 WHERE child.degree + 1 <= $2::INTEGER
             )
             SELECT
-                id, generated_at, type_name, type_hash,
+                id, generated_at, type_name,
                 genome, genome_hash, request_id, generation_id,
                 parent_a, parent_b
             FROM ancestor_tree

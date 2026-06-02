@@ -470,7 +470,6 @@ mod test_utilities {
     pub(super) fn create_test_genotype(id: &str) -> Genotype {
         Genotype::new(
             "test",
-            123,
             serde_json::json!([1, 2, 3]),
             Some(Uuid::parse_str(id).unwrap()),
             Some(1),

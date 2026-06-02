@@ -108,7 +108,6 @@ mod tests_search_evaluations {
         let new_request = |name: &str| -> anyhow::Result<Request> {
             Ok(Request::new(
                 name,
-                1,
                 FitnessGoal::maximize(0.9)?,
                 Selector::tournament(10),
                 Schedule::generational(100, 10),
@@ -121,7 +120,6 @@ mod tests_search_evaluations {
         let make_genotype = |req_id: Uuid, data: serde_json::Value| {
             Genotype::new(
                 "test",
-                1,
                 data,
                 Some(req_id),
                 Some(1),

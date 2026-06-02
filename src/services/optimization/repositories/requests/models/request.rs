@@ -11,7 +11,6 @@ pub struct Request {
     pub(crate) id: Uuid,
     pub(crate) requested_at: DateTime<Utc>,
     pub(crate) type_name: String,
-    pub(crate) type_hash: i32,
     pub(crate) goal: FitnessGoal,
     pub(crate) selector: Selector,
     pub(crate) schedule: Schedule,
@@ -20,10 +19,9 @@ pub struct Request {
 
 impl Request {
     /// Creates a new optimization request with the given parameters.
-    #[instrument(level = "debug", fields(type_name = type_name, type_hash = type_hash, goal = ?goal))]
+    #[instrument(level = "debug", fields(type_name = type_name, goal = ?goal))]
     pub(crate) fn new(
         type_name: &str,
-        type_hash: i32,
         goal: FitnessGoal,
         selector: Selector,
         schedule: Schedule,
@@ -32,7 +30,6 @@ impl Request {
             id: Uuid::now_v7(),
             requested_at: Utc::now(),
             type_name: type_name.to_string(),
-            type_hash,
             goal,
             selector,
             schedule,
@@ -54,7 +51,6 @@ pub struct DbRequest {
     pub id: Uuid,
     pub requested_at: DateTime<Utc>,
     pub type_name: String,
-    pub type_hash: i32,
     pub goal: serde_json::Value,
     pub schedule: serde_json::Value,
     pub selector: serde_json::Value,
@@ -64,7 +60,7 @@ pub struct DbRequest {
 impl TryFrom<Request> for DbRequest {
     type Error = Error;
 
-    #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
+    #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name))]
     fn try_from(request: Request) -> Result<Self, Self::Error> {
         let schedule_json = serde_json::to_value(request.schedule)?;
         let selector_json = serde_json::to_value(request.selector)?;
@@ -74,7 +70,6 @@ impl TryFrom<Request> for DbRequest {
             id: request.id,
             requested_at: request.requested_at,
             type_name: request.type_name,
-            type_hash: request.type_hash,
             goal: goal_json,
             schedule: schedule_json,
             selector: selector_json,
@@ -86,7 +81,7 @@ impl TryFrom<Request> for DbRequest {
 impl TryFrom<DbRequest> for Request {
     type Error = Error;
 
-    #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name, type_hash = request.type_hash))]
+    #[instrument(level = "debug", fields(request_id = %request.id, type_name = %request.type_name))]
     fn try_from(request: DbRequest) -> Result<Self, Self::Error> {
         let schedule = serde_json::from_value(request.schedule)?;
         let selector = serde_json::from_value(request.selector)?;
@@ -96,7 +91,6 @@ impl TryFrom<DbRequest> for Request {
             id: request.id,
             requested_at: request.requested_at,
             type_name: request.type_name,
-            type_hash: request.type_hash,
             goal,
             schedule,
             selector,
@@ -113,7 +107,6 @@ mod tests {
     fn create_test_request() -> Request {
         Request::new(
             "TestType",
-            123,
             FitnessGoal::minimize(0.9).unwrap(),
             Selector::tournament(5),
             Schedule::generational(100, 10),
@@ -125,14 +118,12 @@ mod tests {
         let goal = FitnessGoal::minimize(0.9).unwrap();
         let request = Request::new(
             "TestType",
-            123,
             goal,
             Selector::tournament(5),
             Schedule::generational(100, 10),
         );
 
         assert_eq!(request.type_name, "TestType");
-        assert_eq!(request.type_hash, 123);
 
         assert!(!request.id.is_nil());
         assert!(request.requested_at <= Utc::now());
@@ -146,7 +137,6 @@ mod tests {
         assert_eq!(db_request.id, request.id);
         assert_eq!(db_request.requested_at, request.requested_at);
         assert_eq!(db_request.type_name, request.type_name);
-        assert_eq!(db_request.type_hash, request.type_hash);
 
         assert_eq!(db_request.goal, json!({"Minimize": {"threshold": 0.9}}));
         assert_eq!(
@@ -167,7 +157,6 @@ mod tests {
         let request = Request::try_from(db_request).unwrap();
 
         assert_eq!(request.type_name, "TestType");
-        assert_eq!(request.type_hash, 123);
     }
 
     #[test]

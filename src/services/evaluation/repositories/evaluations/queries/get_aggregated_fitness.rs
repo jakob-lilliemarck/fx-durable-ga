@@ -196,7 +196,6 @@ mod tests_get_aggregated_fitness {
     async fn seed(pool: &sqlx::PgPool) -> anyhow::Result<Uuid> {
         let request = Request::new(
             "test",
-            1,
             FitnessGoal::maximize(0.9)?,
             Selector::tournament(10),
             Schedule::generational(100, 10),
@@ -224,7 +223,6 @@ mod tests_get_aggregated_fitness {
             for _ in 0..4 {
                 let mut genotype = Genotype::new(
                     "test",
-                    1,
                     serde_json::json!([1, 2, 3]),
                     Some(request.id),
                     Some((generation_idx + 1) as i32),
@@ -241,7 +239,6 @@ mod tests_get_aggregated_fitness {
                 base + ChronoDuration::minutes(3) + ChronoDuration::seconds(idx as i64);
             let mut genotype = Genotype::new(
                 "test",
-                1,
                 serde_json::json!([4, 5, 6]),
                 Some(request.id),
                 Some((batch_times.len() as i32) + 1 + idx as i32),

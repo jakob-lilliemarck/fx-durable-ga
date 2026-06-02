@@ -18,7 +18,6 @@ use crate::services::optimization::repositories::requests::SearchRequestsFilter;
 use crate::services::optimization::{FitnessGoal, Request, Selector};
 use crate::services::{budgeting, locking};
 use crate::services::{evaluation, synchronization};
-use const_fnv1a_hash::fnv1a_hash_str_32;
 use futures::lock::Mutex;
 use fx_mq_jobs::Queries;
 use std::collections::HashMap;
@@ -91,18 +90,13 @@ impl Service {
         schedule: crate::services::optimization::Schedule,
         selector: Selector,
     ) -> Result<Uuid, Error> {
-        let type_hash = fnv1a_hash_str_32(&type_name) as i32;
-
         let has_registered_optimizer = {
             let lock = self.optimizers.lock().await;
             lock.has_registered(&type_name)
         };
 
         if !has_registered_optimizer {
-            return Err(Error::UnknownTypeError {
-                type_hash,
-                type_name,
-            });
+            return Err(Error::UnknownTypeError { type_name });
         }
 
         let mq = self.mq.clone();
@@ -111,7 +105,6 @@ impl Service {
                 let request = requests::WriteTx::new(tx)
                     .new_request(Request::new(
                         &type_name,
-                        type_hash,
                         goal,
                         selector,
                         schedule.clone(),
@@ -363,7 +356,6 @@ impl Service {
 
                 let genotype = Genotype::new(
                     &request.type_name,
-                    request.type_hash,
                     genome,
                     Some(request.id),
                     Some(1), // First generation
