@@ -5,7 +5,10 @@ use crate::services::{
     evaluation,
     optimization::{
         self,
-        service::{REASON_OPTIMIZATION_CHARGED, REASON_OPTIMIZATION_CREATED},
+        service::{
+            REASON_OPTIMIZATION_BUDGET_ADDED, REASON_OPTIMIZATION_CHARGED,
+            REASON_OPTIMIZATION_CREATED,
+        },
     },
 };
 use futures::future::BoxFuture;
@@ -79,8 +82,12 @@ impl Handler<budgeting::TransactionCreatedEvent> for TransactionCreatedHandler {
         tx: sqlx::PgTransaction<'a>,
     ) -> BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), super::Error>)> {
         Box::pin(async move {
-            if ![REASON_OPTIMIZATION_CREATED, REASON_OPTIMIZATION_CHARGED]
-                .contains(&input.reason.as_str())
+            if ![
+                REASON_OPTIMIZATION_CREATED,
+                REASON_OPTIMIZATION_BUDGET_ADDED,
+                REASON_OPTIMIZATION_CHARGED,
+            ]
+            .contains(&input.reason.as_str())
             {
                 return (tx, Ok(()));
             }
@@ -120,7 +127,9 @@ impl Handler<budgeting::TransactionCreatedEvent> for TransactionCreatedHandler {
                 };
             }
 
-            if input.reason == REASON_OPTIMIZATION_CREATED {
+            if input.reason == REASON_OPTIMIZATION_CREATED
+                || input.reason == REASON_OPTIMIZATION_BUDGET_ADDED
+            {
                 let filter = TransactionsFilter::default()
                     .with_account_id(request.account_id)
                     .with_reason(REASON_OPTIMIZATION_CHARGED);

@@ -28,6 +28,7 @@ pub(super) const EVALUATION_REASON: &str = "optimization";
 pub(super) const ACCOUNT_TYPE: &str = "OptimizationBudget";
 pub(super) const REASON_OPTIMIZATION_CHARGED: &str = "OptimizationCharged";
 pub(super) const REASON_OPTIMIZATION_CREATED: &str = "OptimizationCreated";
+pub(super) const REASON_OPTIMIZATION_BUDGET_ADDED: &str = "OptimizationBudgetAdded";
 
 /// Manages optimization requests, breeding, and budget.
 pub struct Service {
@@ -535,11 +536,30 @@ impl Service {
         }
     }
 
-    /// Searches genotypes for a request with optional filtering.
     /// Stops the optimization service.
     #[instrument(level = "debug", skip(self))]
     pub async fn stop(&self) -> Result<(), Error> {
         self.sync.stop().await?;
+        Ok(())
+    }
+
+    /// Adds budget to an optimization request's account, triggering resume.
+    ///
+    /// Looks up the request by ID, resolves the account ID, and credits the
+    /// account. Using a dedicated reason string ensures the charge-then-breed
+    /// pipeline is triggered via the event bus without conflating with
+    /// initial request creation.
+    #[instrument(level = "debug", skip(self))]
+    pub async fn add_budget(&self, request_id: Uuid, amount: i64) -> Result<(), Error> {
+        let request = self.requests_ro.get_request(request_id).await?;
+        self.budgeting
+            .append(
+                request.account_id,
+                ACCOUNT_TYPE.to_string(),
+                amount,
+                REASON_OPTIMIZATION_BUDGET_ADDED.to_string(),
+            )
+            .await?;
         Ok(())
     }
 
@@ -1369,6 +1389,49 @@ mod tests_stop {
         let svc = build_service(pool.clone()).await?;
         let result = svc.stop().await;
         assert!(result.is_ok());
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_add_budget {
+    use super::test_tools::*;
+    use super::*;
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    #[sqlx::test(migrations = false)]
+    async fn it_errors_on_unknown_request(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let missing_id = Uuid::parse_str("00000000-0000-0000-0000-000000000099")?;
+
+        let result = svc.add_budget(missing_id, 100).await;
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_creates_transaction_on_account(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let data = seed(&pool).await?;
+
+        data.svc.add_budget(data.request_id, 50).await?;
+
+        let filter = crate::services::budgeting::TransactionsFilter::default()
+            .with_account_id(data.account_id)
+            .with_reason(REASON_OPTIMIZATION_BUDGET_ADDED);
+        let txs = data.svc.transactions_ro.history(&filter, 10).await?;
+        let matching: Vec<_> = txs.iter().filter(|t| t.amount() == 50).collect();
+        assert_eq!(
+            matching.len(),
+            1,
+            "expected a BUDGET_ADDED transaction with amount=50"
+        );
 
         Ok(())
     }
