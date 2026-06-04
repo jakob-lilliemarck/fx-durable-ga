@@ -9,10 +9,6 @@ CREATE TABLE fx_durable_ga.evaluations (
     evaluated_by UUID
 );
 
-INSERT INTO fx_durable_ga.evaluations (id, genotype_id, fitness, started_at, completed_at, evaluated_by)
-SELECT id, genotype_id, fitness, started_at, completed_at, evaluated_by
-FROM evaluation.evaluations;
-
 DROP SCHEMA IF EXISTS evaluation CASCADE;
 
 ALTER TABLE fx_durable_ga.requests ADD COLUMN user_defined JSONB NOT NULL DEFAULT '{}'::jsonb, ADD COLUMN data JSONB;

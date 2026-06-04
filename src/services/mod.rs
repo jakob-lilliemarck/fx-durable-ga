@@ -1,6 +1,9 @@
 use std::sync::Arc;
 pub(crate) mod locking;
 
+#[cfg(test)]
+pub(crate) mod tests;
+
 pub mod budgeting;
 pub mod evaluation;
 pub mod genotype_explorer;

@@ -26,7 +26,8 @@ where
             started_at,
             completed_at,
             evaluated_by,
-            request_id,
+            group_id,
+            reason,
             generated_at
         ) VALUES ",
     );
@@ -53,13 +54,15 @@ where
             .push(", ")
             .push_bind(e.evaluated_by)
             .push(", ")
-            .push_bind(e.request_id)
+            .push_bind(e.group_id)
+            .push(", ")
+            .push_bind(&e.reason)
             .push(", ")
             .push_bind(e.generated_at)
             .push(")");
     }
 
-    query_builder.push(" RETURNING id, genotype_id, fitness, started_at, completed_at, evaluated_by, request_id, generated_at");
+    query_builder.push(" RETURNING id, genotype_id, fitness, started_at, completed_at, evaluated_by, group_id, reason, generated_at");
 
     let rows = query_builder.build().fetch_all(tx).await?;
 
@@ -72,7 +75,8 @@ where
             started_at: row.get("started_at"),
             completed_at: row.get("completed_at"),
             evaluated_by: row.get("evaluated_by"),
-            request_id: row.get("request_id"),
+            group_id: row.get("group_id"),
+            reason: row.get("reason"),
             generated_at: row.get("generated_at"),
         })
         .collect();
@@ -105,7 +109,7 @@ mod tests_store_evaluations {
             Genotype::new(
                 "test",
                 serde_json::json!([1, 2, 3]),
-                Some(request.id),
+                request.id,
                 Some(1),
                 None,
                 None,
@@ -113,7 +117,7 @@ mod tests_store_evaluations {
             Genotype::new(
                 "test",
                 serde_json::json!([4, 5, 6]),
-                Some(request.id),
+                request.id,
                 Some(1),
                 None,
                 None,
@@ -133,6 +137,8 @@ mod tests_store_evaluations {
         let evaluations = vec![
             Evaluation::new(
                 genotype_ids[0],
+                Uuid::nil(),
+                "test".to_string(),
                 0.1,
                 Some(Utc::now()),
                 Some(Utc::now()),
@@ -140,6 +146,8 @@ mod tests_store_evaluations {
             ),
             Evaluation::new(
                 genotype_ids[1],
+                Uuid::nil(),
+                "test".to_string(),
                 0.2,
                 Some(Utc::now()),
                 Some(Utc::now()),

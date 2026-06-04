@@ -471,7 +471,7 @@ mod test_utilities {
         Genotype::new(
             "test",
             serde_json::json!([1, 2, 3]),
-            Some(Uuid::parse_str(id).unwrap()),
+            Uuid::parse_str(id).unwrap(),
             Some(1),
             None,
             None,

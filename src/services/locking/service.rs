@@ -74,14 +74,17 @@ mod tests {
 
         let service = Arc::new(Service::new(pool, None));
         let counter = Arc::new(AtomicI32::new(0));
+        let (lock_acquired_tx, lock_acquired_rx) = tokio::sync::oneshot::channel::<()>();
 
         let s1 = service.clone();
         let c1 = counter.clone();
         let t1 = tokio::spawn(async move {
             s1.lock_while("concurrent", || {
                 let c = c1.clone();
+                let tx = lock_acquired_tx;
                 async move {
                     c.fetch_add(1, Ordering::SeqCst);
+                    let _ = tx.send(());
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     c.fetch_add(1, Ordering::SeqCst);
                 }
@@ -92,8 +95,7 @@ mod tests {
         let s2 = service.clone();
         let c2 = counter.clone();
         let t2 = tokio::spawn(async move {
-            // Small delay to ensure t1 acquires the lock first
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            let _ = lock_acquired_rx.await;
             s2.lock_while("concurrent", || {
                 let c = c2.clone();
                 async move {
@@ -107,8 +109,6 @@ mod tests {
         r1??;
         r2??;
 
-        // If t1 ran then t2, counter should be 3 (t1: +1, +1; t2: +1)
-        // If they ran concurrently, counter could be less.
         assert_eq!(counter.load(Ordering::SeqCst), 3);
         Ok(())
     }

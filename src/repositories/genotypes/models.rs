@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sqlx::prelude::FromRow;
 use std::collections::{BTreeMap, hash_map::DefaultHasher};
@@ -22,7 +22,7 @@ pub enum Error {
 }
 
 /// Represents an individual genotype in the genetic algorithm population.
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 #[cfg_attr(test, derive(PartialEq))]
 pub struct Genotype {
     pub(crate) id: Uuid,
@@ -30,8 +30,7 @@ pub struct Genotype {
     pub(crate) type_name: String,
     pub(crate) genome: Value,
     pub(crate) genome_hash: i64,
-    #[allow(dead_code)]
-    pub(crate) request_id: Option<Uuid>,
+    pub(crate) request_id: Uuid,
     #[allow(dead_code)]
     pub(crate) generation_id: Option<i32>,
     pub(crate) parent_a: Option<Uuid>,
@@ -56,7 +55,7 @@ impl Genotype {
     pub(crate) fn new<G: serde::Serialize + std::fmt::Debug>(
         type_name: &str,
         genome: G,
-        request_id: Option<Uuid>,
+        request_id: Uuid,
         generation_id: Option<i32>,
         parent_a: Option<&Uuid>,
         parent_b: Option<&Uuid>,
@@ -106,7 +105,7 @@ impl Genotype {
         self.genome_hash
     }
 
-    pub fn request_id(&self) -> Option<Uuid> {
+    pub fn request_id(&self) -> Uuid {
         self.request_id
     }
 

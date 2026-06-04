@@ -7,24 +7,18 @@ CREATE TABLE evaluation.evaluations (
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     evaluated_by UUID,
-    request_id UUID,
+    group_id UUID NOT NULL,
+    reason TEXT NOT NULL,
     generated_at TIMESTAMPTZ
 );
-
-INSERT INTO evaluation.evaluations
-SELECT
-    e.id, e.genotype_id, e.fitness, e.started_at, e.completed_at, e.evaluated_by,
-    g.request_id, g.generated_at
-FROM fx_durable_ga.evaluations e
-LEFT JOIN fx_durable_ga.genotypes g ON e.genotype_id = g.id;
 
 DROP VIEW IF EXISTS fx_durable_ga.populations;
 
 DROP TABLE fx_durable_ga.evaluations;
 
 CREATE INDEX idx_evaluations_genotype_id ON evaluation.evaluations (genotype_id);
-CREATE INDEX idx_evaluations_request_id ON evaluation.evaluations (request_id);
-CREATE INDEX idx_evaluations_request_id_gen ON evaluation.evaluations (request_id, generated_at, id);
+CREATE INDEX idx_evaluations_group_id ON evaluation.evaluations (group_id);
+CREATE INDEX idx_evaluations_group_id_gen ON evaluation.evaluations (group_id, generated_at, id);
 CREATE INDEX idx_evaluations_fitness ON evaluation.evaluations (fitness);
 
 ALTER TABLE fx_durable_ga.requests DROP COLUMN user_defined, DROP COLUMN data;

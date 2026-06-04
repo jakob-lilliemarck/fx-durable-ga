@@ -195,16 +195,12 @@ impl Handler for BreedGenotypesHandler {
 /// Message requesting evaluation of a specific genotype.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EvaluateGenotypeMessage {
-    pub request_id: Uuid,
     pub genotype_id: Uuid,
 }
 
 impl EvaluateGenotypeMessage {
-    pub(crate) fn new(request_id: Uuid, genotype_id: Uuid) -> Self {
-        Self {
-            request_id,
-            genotype_id,
-        }
+    pub(crate) fn new(genotype_id: Uuid) -> Self {
+        Self { genotype_id }
     }
 }
 
@@ -227,11 +223,7 @@ impl Handler for EvaluateGenotypeHandler {
         message: Self::Message,
         _lease_renewer: fx_mq_jobs::LeaseRenewer,
     ) -> futures::future::BoxFuture<'a, Result<(), Self::Error>> {
-        Box::pin(async move {
-            self.service
-                .evaluate_genotype(message.request_id, message.genotype_id)
-                .await
-        })
+        Box::pin(async move { self.service.evaluate_genotype(message.genotype_id).await })
     }
 
     fn max_attempts(&self) -> i32 {

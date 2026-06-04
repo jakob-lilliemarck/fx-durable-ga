@@ -543,27 +543,21 @@ mod tests {
 
     #[test]
     fn batch_iter_splits_items_into_full_and_partial_batches() {
-        // ARRANGE
         let items = vec![1, 2, 3, 4, 5, 6, 7];
         let batch_size = 3;
 
-        // ACT
         let batches = Service::batch_iter(items, batch_size).collect::<Vec<_>>();
 
-        // ASSERT
         assert_eq!(batches, vec![vec![1, 2, 3], vec![4, 5, 6], vec![7]]);
     }
 
     #[test]
     fn batch_iter_returns_empty_when_batch_size_is_zero() {
-        // ARRANGE
         let items = vec![1, 2, 3];
         let batch_size = 0;
 
-        // ACT
         let batches = Service::batch_iter(items, batch_size).collect::<Vec<_>>();
 
-        // ASSERT
         assert!(batches.is_empty());
     }
 }

@@ -110,4 +110,27 @@ mod tests {
 
         Ok(())
     }
+
+    #[sqlx::test(migrations = false)]
+    async fn search_by_request_id_returns_all_probes(pool: PgPool) -> anyhow::Result<()> {
+        migrations::run_default_migrations(&pool).await?;
+
+        let shared_id = Uuid::now_v7();
+        let other_id = Uuid::now_v7();
+
+        store_noise_probe(&pool, &NoiseProbe::new(Uuid::now_v7(), shared_id, 1)).await?;
+        store_noise_probe(&pool, &NoiseProbe::new(Uuid::now_v7(), shared_id, 1)).await?;
+        store_noise_probe(&pool, &NoiseProbe::new(Uuid::now_v7(), other_id, 1)).await?;
+
+        let results = search_noise_probes(
+            &pool,
+            &SearchNoiseProbesFilter::default().with_request_id(shared_id),
+        )
+        .await?;
+
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|p| p.request_id() == shared_id));
+
+        Ok(())
+    }
 }

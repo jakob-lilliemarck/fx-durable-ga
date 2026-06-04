@@ -32,7 +32,7 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         Genotype::new(
             "test",
             serde_json::json!([1, 2, 3]),
-            Some(rid_1),
+            rid_1,
             Some(1),
             None,
             None,
@@ -41,7 +41,7 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         Genotype::new(
             "test",
             serde_json::json!([4, 5, 6]),
-            Some(rid_1),
+            rid_1,
             Some(2),
             None,
             None,
@@ -50,7 +50,7 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         Genotype::new(
             "test",
             serde_json::json!([7, 8, 9]),
-            Some(rid_2),
+            rid_2,
             Some(1),
             None,
             None,
@@ -59,7 +59,7 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         Genotype::new(
             "test",
             serde_json::json!([10, 11, 12]),
-            Some(rid_2),
+            rid_2,
             Some(1),
             None,
             None,
@@ -68,7 +68,7 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         Genotype::new(
             "test",
             serde_json::json!([13, 14, 15]),
-            Some(rid_2),
+            rid_2,
             Some(2),
             None,
             None,
@@ -89,6 +89,8 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
     let evaluations = vec![
         Evaluation::new(
             gid_1,
+            Uuid::nil(),
+            "test".to_string(),
             0.11,
             Some(Utc::now()),
             Some(Utc::now()),
@@ -96,6 +98,8 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         ),
         Evaluation::new(
             gid_3,
+            Uuid::nil(),
+            "test".to_string(),
             0.12,
             Some(Utc::now()),
             Some(Utc::now()),
@@ -103,6 +107,8 @@ pub(super) async fn seed(pool: &sqlx::PgPool) -> (Uuid, Uuid, [Uuid; 5]) {
         ),
         Evaluation::new(
             gid_4,
+            Uuid::nil(),
+            "test".to_string(),
             0.42,
             Some(Utc::now()),
             Some(Utc::now()),
@@ -128,7 +134,7 @@ pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
     let root = Genotype::new(
         "lineage",
         serde_json::json!([0]),
-        Some(request_id),
+        request_id,
         Some(1),
         None,
         None,
@@ -139,7 +145,7 @@ pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
     let child = Genotype::new(
         "lineage",
         serde_json::json!([1]),
-        Some(request_id),
+        request_id,
         Some(2),
         Some(&root_id),
         None,
@@ -150,7 +156,7 @@ pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
     let grandchild = Genotype::new(
         "lineage",
         serde_json::json!([2]),
-        Some(request_id),
+        request_id,
         Some(3),
         Some(&child_id),
         None,
@@ -168,6 +174,8 @@ pub(super) async fn seed_lineage(pool: &sqlx::PgPool) -> Vec<Uuid> {
             pool,
             &[Evaluation::new(
                 genotype_id,
+                Uuid::nil(),
+                "test".to_string(),
                 0.5,
                 Some(Utc::now()),
                 Some(Utc::now()),

@@ -152,7 +152,7 @@ impl Service {
             let genotypes = self.genotypes_ro.search_genotypes(&filter, LIMIT).await?;
 
             let mut type_indexers: HashMap<String, Vec<Digest>> = HashMap::new();
-            let mut counts: HashMap<(Digest, Option<Uuid>), usize> = HashMap::new();
+            let mut counts: HashMap<(Digest, Uuid), usize> = HashMap::new();
 
             for genotype in &genotypes {
                 let indexer_ids = match type_indexers.entry(genotype.type_name().to_string()) {
@@ -173,7 +173,7 @@ impl Service {
                 }
             }
 
-            let mut groups: HashMap<(Digest, Option<Uuid>), Vec<Uuid>> =
+            let mut groups: HashMap<(Digest, Uuid), Vec<Uuid>> =
                 HashMap::with_capacity(counts.len());
             for (key, count) in counts {
                 groups.insert(key, Vec::with_capacity(count));
@@ -232,7 +232,11 @@ impl Service {
                     let batch_len = pending.len().min(INDEX_BATCH_SIZE);
                     let split_at = pending.len() - batch_len;
                     let batch: Vec<Uuid> = pending.split_off(split_at);
-                    jobs.push(IndexGenotypesMessage::new(indexer_id, batch, request_id));
+                    jobs.push(IndexGenotypesMessage::new(
+                        indexer_id,
+                        batch,
+                        Some(request_id),
+                    ));
                 }
             }
 
@@ -420,9 +424,7 @@ impl Service {
         tags.push(Self::fmt_tag_genotype_id(genotype.id()));
         tags.push(Self::fmt_tag_indexer_id(indexer_id));
 
-        if let Some(request_id) = genotype.request_id() {
-            tags.push(Self::fmt_tag_request_id(request_id))
-        }
+        tags.push(Self::fmt_tag_request_id(genotype.request_id()));
 
         if let Some(generation_id) = genotype.generation_id() {
             tags.push(Self::fmt_tag_generation_id(generation_id))
@@ -466,7 +468,7 @@ mod tests_index_genotypes {
     use crate::repositories::genotypes::{Genotype, TypeName, store_genotypes};
     use crate::services::indexing::EncodeInput;
     use crate::services::indexing::SearchEmbeddingsFilter;
-    use crate::services::indexing::embeddings::{self, EmbeddingNew, TagNew};
+    use crate::services::indexing::embeddings::{self, EmbeddingNew, RequestedEmbedding, TagNew};
     use crate::services::indexing::encoder::lstm::{self, AutoencoderConfig, AutoencoderModel};
     use crate::services::indexing::{
         Digest, Encoder,
@@ -1103,7 +1105,7 @@ mod tests_index_genotypes {
                 Genotype::new(
                     TestIndexableType::TYPE_NAME,
                     json!({ "values": [i as i32, (i + 1) as i32] }),
-                    Some(request_id),
+                    request_id,
                     Some((i + 1) as i32),
                     None,
                     None,
@@ -1216,7 +1218,7 @@ mod tests_index_genotypes {
 
         let indexer = TestGenotypeIndexer::default();
         let indexer_id = Registry::get_indexer_id(&indexer)?;
-        let request_id = Uuid::now_v7();
+        let request_id = Uuid::nil();
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
             .with_optimizer(NoOpOptimizer)
@@ -1326,5 +1328,212 @@ mod tests_index_genotypes {
         };
 
         Ok(encoder)
+    }
+
+    // --- retry_deferred_indexation tests ---
+
+    async fn seed_deferred(
+        pool: &sqlx::PgPool,
+        indexer_id: &Digest,
+        genotype_ids: &[Uuid],
+        request_id: Option<Uuid>,
+    ) -> anyhow::Result<()> {
+        let now = Utc::now();
+        let metadata = request_id
+            .map(|id| serde_json::json!({ "request_id": id.to_string() }))
+            .unwrap_or(serde_json::json!({}));
+
+        let deferred: Vec<RequestedEmbedding> = genotype_ids
+            .iter()
+            .map(|entity_id| {
+                RequestedEmbedding::new(
+                    *entity_id,
+                    TestIndexableType::TYPE_NAME.to_string(),
+                    *indexer_id,
+                    metadata.clone(),
+                    now,
+                )
+            })
+            .collect();
+
+        let embeddings_wr = embeddings::Write::new(db::WritePool { pool: pool.clone() });
+        db::begin(embeddings_wr.clone(), |tx| {
+            Box::pin(async move {
+                let mut wr = embeddings::WriteTx::new(tx);
+                wr.store_requested_embeddings(&deferred).await?;
+                Ok(())
+            })
+        })
+        .await?;
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_retries_deferred_items(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let indexer = TestGenotypeIndexer::default();
+        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let (request_id, genotype_ids) = seed(&pool, &[indexer], 3).await?;
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        seed_deferred(&pool, &indexer_id, &genotype_ids, Some(request_id)).await?;
+
+        app.services()
+            .genotype_indexing()
+            .retry_deferred_indexation(&indexer_id)
+            .await?;
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let jobs = mq.get_all_messages(&mut tx).await?;
+        tx.commit().await?;
+
+        let matching: Vec<_> = jobs
+            .iter()
+            .filter(|j| j.name == IndexGenotypesMessage::NAME)
+            .collect();
+        assert_eq!(matching.len(), 1);
+
+        let payload: IndexGenotypesMessage = serde_json::from_value(matching[0].payload.clone())?;
+        assert_eq!(payload.indexer_id, indexer_id);
+        assert_eq!(payload.genotype_ids.len(), 3);
+        assert_eq!(payload.request_id, Some(request_id));
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_retries_nothing_when_empty(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let indexer = TestGenotypeIndexer::default();
+        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let (_request_id, _genotype_ids) = seed(&pool, &[indexer], 2).await?;
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        app.services()
+            .genotype_indexing()
+            .retry_deferred_indexation(&indexer_id)
+            .await?;
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let jobs = mq.get_all_messages(&mut tx).await?;
+        tx.commit().await?;
+
+        let matching: Vec<_> = jobs
+            .iter()
+            .filter(|j| j.name == IndexGenotypesMessage::NAME)
+            .collect();
+        assert!(matching.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_groups_deferred_by_request_id(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let indexer = TestGenotypeIndexer::default();
+        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let (request_id_a, genotype_ids_a) = seed(&pool, &[indexer], 2).await?;
+        let (request_id_b, genotype_ids_b) = seed(&pool, &[], 1).await?;
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        seed_deferred(&pool, &indexer_id, &genotype_ids_a, Some(request_id_a)).await?;
+        seed_deferred(&pool, &indexer_id, &genotype_ids_b, Some(request_id_b)).await?;
+
+        app.services()
+            .genotype_indexing()
+            .retry_deferred_indexation(&indexer_id)
+            .await?;
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let jobs = mq.get_all_messages(&mut tx).await?;
+        tx.commit().await?;
+
+        let matching: Vec<_> = jobs
+            .iter()
+            .filter(|j| j.name == IndexGenotypesMessage::NAME)
+            .collect();
+        assert_eq!(matching.len(), 2);
+
+        let payload_a: IndexGenotypesMessage = serde_json::from_value(matching[0].payload.clone())?;
+        let payload_b: IndexGenotypesMessage = serde_json::from_value(matching[1].payload.clone())?;
+
+        assert_ne!(payload_a.request_id, payload_b.request_id);
+        assert_eq!(
+            payload_a.genotype_ids.len() + payload_b.genotype_ids.len(),
+            3
+        );
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_batches_large_deferred_sets(pool: sqlx::PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let indexer = TestGenotypeIndexer::default();
+        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let total = super::INDEX_BATCH_SIZE + 5;
+        let (request_id, genotype_ids) = seed(&pool, &[indexer], total).await?;
+
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .with_optimizer(NoOpOptimizer)
+            .with_indexer(TestGenotypeIndexer::default())
+            .build()
+            .await?;
+        let app = c.get::<Arc<App>>().await?;
+
+        seed_deferred(&pool, &indexer_id, &genotype_ids, Some(request_id)).await?;
+
+        app.services()
+            .genotype_indexing()
+            .retry_deferred_indexation(&indexer_id)
+            .await?;
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let jobs = mq.get_all_messages(&mut tx).await?;
+        tx.commit().await?;
+
+        let expected_jobs = total.div_ceil(super::INDEX_BATCH_SIZE);
+        assert_eq!(jobs.len(), expected_jobs);
+
+        let mut seen: HashSet<Uuid> = HashSet::new();
+        for job in jobs.iter() {
+            let payload: IndexGenotypesMessage = serde_json::from_value(job.payload.clone())?;
+            assert!(payload.genotype_ids.len() <= super::INDEX_BATCH_SIZE);
+            for id in payload.genotype_ids {
+                seen.insert(id);
+            }
+        }
+
+        let expected: HashSet<Uuid> = genotype_ids.into_iter().collect();
+        assert_eq!(seen, expected);
+
+        Ok(())
     }
 }

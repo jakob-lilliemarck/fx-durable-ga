@@ -5,13 +5,13 @@ use uuid::Uuid;
 
 #[derive(Default, Debug)]
 pub struct GetEvaluationAggregatesFilter {
-    request_id: Option<Uuid>,
+    group_id: Option<Uuid>,
     genotype_id: Option<Uuid>,
 }
 
 impl GetEvaluationAggregatesFilter {
-    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = Some(request_id);
+    pub fn with_group_id(mut self, group_id: Uuid) -> Self {
+        self.group_id = Some(group_id);
         self
     }
 
@@ -44,10 +44,10 @@ pub async fn get_evaluation_aggregates<'tx, E: PgExecutor<'tx>>(
                 VAR_POP(fitness) AS "variance_fitness"
             FROM evaluation.evaluations
             WHERE ($1::uuid IS NULL OR genotype_id = $1)
-              AND ($2::uuid IS NULL OR request_id = $2)
+              AND ($2::uuid IS NULL OR group_id = $2)
         "#,
         filter.genotype_id,
-        filter.request_id,
+        filter.group_id,
     )
     .fetch_one(tx)
     .await?;
@@ -79,14 +79,16 @@ mod tests {
 
     async fn seed_evaluation(pool: &PgPool, genotype_id: Uuid, fitness: f64) {
         let mut tx = pool.begin().await.unwrap();
-        let mut wr = WriteTx::new(&mut tx);
         let evaluation = Evaluation::new(
             genotype_id,
+            Uuid::nil(),
+            "test".to_string(),
             fitness,
             Some(Utc::now()),
             Some(Utc::now()),
             None,
         );
+        let mut wr = WriteTx::new(&mut tx);
         wr.store_evaluations(&[evaluation]).await.unwrap();
         tx.commit().await.unwrap();
     }
@@ -110,14 +112,7 @@ mod tests {
     async fn it_returns_aggregates_for_genotype(pool: PgPool) -> anyhow::Result<()> {
         migrations::run_default_migrations(&pool).await?;
         let request_id = create_request(&pool).await;
-        let genotype = Genotype::new(
-            "test",
-            serde_json::json!([1]),
-            Some(request_id),
-            None,
-            None,
-            None,
-        )?;
+        let genotype = Genotype::new("test", serde_json::json!([1]), request_id, None, None, None)?;
         let stored = store_genotypes(&pool, &[genotype]).await?;
         let genotype_id = stored[0].id();
 

@@ -51,7 +51,7 @@ mod tests_get_population {
             Genotype::new(
                 "test",
                 serde_json::json!([1, 2, 3]),
-                Some(request.id),
+                request.id,
                 Some(1),
                 None,
                 None,
@@ -59,7 +59,7 @@ mod tests_get_population {
             Genotype::new(
                 "test",
                 serde_json::json!([4, 5, 6]),
-                Some(request.id),
+                request.id,
                 Some(1),
                 None,
                 None,
@@ -67,7 +67,7 @@ mod tests_get_population {
             Genotype::new(
                 "test",
                 serde_json::json!([7, 8, 9]),
-                Some(request.id),
+                request.id,
                 Some(1),
                 None,
                 None,

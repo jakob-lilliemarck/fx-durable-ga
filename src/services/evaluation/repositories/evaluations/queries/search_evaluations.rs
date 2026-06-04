@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Default)]
 pub struct SearchEvaluationsFilter {
-    request_ids: Option<Vec<Uuid>>,
+    group_ids: Option<Vec<Uuid>>,
     genotype_ids: Option<Vec<Uuid>>,
     order_fitness: Option<&'static str>,
     order_completed_at: Option<&'static str>,
@@ -14,8 +14,8 @@ pub struct SearchEvaluationsFilter {
 }
 
 impl SearchEvaluationsFilter {
-    pub fn with_request_ids(mut self, request_ids: Vec<Uuid>) -> Self {
-        self.request_ids = Some(request_ids);
+    pub fn with_group_ids(mut self, group_ids: Vec<Uuid>) -> Self {
+        self.group_ids = Some(group_ids);
         self
     }
 
@@ -73,9 +73,9 @@ pub async fn search_evaluations<'tx, E: PgExecutor<'tx>>(
         r#"
             SELECT
                 id, genotype_id, fitness, started_at, completed_at,
-                evaluated_by, request_id, generated_at
+                evaluated_by, group_id, reason, generated_at
             FROM evaluation.evaluations
-            WHERE ($1::uuid[] IS NULL OR request_id = ANY($1))
+            WHERE ($1::uuid[] IS NULL OR group_id = ANY($1))
               AND ($2::uuid[] IS NULL OR genotype_id = ANY($2))
             {order_by}
             {limit_clause}
@@ -83,7 +83,7 @@ pub async fn search_evaluations<'tx, E: PgExecutor<'tx>>(
     );
 
     let rows = sqlx::query_as::<_, Evaluation>(&sql)
-        .bind(filter.request_ids.as_deref())
+        .bind(filter.group_ids.as_deref())
         .bind(filter.genotype_ids.as_deref())
         .fetch_all(tx)
         .await?;
@@ -118,7 +118,7 @@ mod tests_search_evaluations {
         let req_b = store_request(pool, new_request("test_b")?).await?;
 
         let make_genotype = |req_id: Uuid, data: serde_json::Value| {
-            Genotype::new("test", data, Some(req_id), Some(1), None, None)
+            Genotype::new("test", data, req_id, Some(1), None, None)
         };
 
         let a_genotypes = vec![
@@ -142,9 +142,16 @@ mod tests_search_evaluations {
             .iter()
             .zip(a_fitness.iter())
             .map(|(g, f)| {
-                Evaluation::new(g.id(), *f, Some(Utc::now()), Some(Utc::now()), None)
-                    .with_request_id(req_a.id)
-                    .with_generated_at(g.generated_at())
+                Evaluation::new(
+                    g.id(),
+                    req_a.id,
+                    "optimization".to_string(),
+                    *f,
+                    Some(Utc::now()),
+                    Some(Utc::now()),
+                    None,
+                )
+                .with_generated_at(g.generated_at())
             })
             .collect();
 
@@ -152,9 +159,16 @@ mod tests_search_evaluations {
             .iter()
             .zip(b_fitness.iter())
             .map(|(g, f)| {
-                Evaluation::new(g.id(), *f, Some(Utc::now()), Some(Utc::now()), None)
-                    .with_request_id(req_b.id)
-                    .with_generated_at(g.generated_at())
+                Evaluation::new(
+                    g.id(),
+                    req_b.id,
+                    "optimization".to_string(),
+                    *f,
+                    Some(Utc::now()),
+                    Some(Utc::now()),
+                    None,
+                )
+                .with_generated_at(g.generated_at())
             })
             .collect();
 
@@ -179,13 +193,13 @@ mod tests_search_evaluations {
 
         let results = search_evaluations(
             &pool,
-            &SearchEvaluationsFilter::default().with_request_ids(vec![req_a]),
+            &SearchEvaluationsFilter::default().with_group_ids(vec![req_a]),
         )
         .await?;
 
         assert_eq!(results.len(), 3);
         for eval in &results {
-            assert_eq!(eval.request_id(), &Some(req_a));
+            assert_eq!(eval.group_id(), req_a);
         }
         Ok(())
     }
@@ -217,7 +231,7 @@ mod tests_search_evaluations {
         let results = search_evaluations(
             &pool,
             &SearchEvaluationsFilter::default()
-                .with_request_ids(vec![req_a])
+                .with_group_ids(vec![req_a])
                 .with_order_fitness_asc(),
         )
         .await?;
@@ -237,7 +251,7 @@ mod tests_search_evaluations {
         let results = search_evaluations(
             &pool,
             &SearchEvaluationsFilter::default()
-                .with_request_ids(vec![req_a])
+                .with_group_ids(vec![req_a])
                 .with_order_fitness_desc(),
         )
         .await?;
@@ -267,7 +281,7 @@ mod tests_search_evaluations {
 
         let results = search_evaluations(
             &pool,
-            &SearchEvaluationsFilter::default().with_request_ids(vec![Uuid::nil()]),
+            &SearchEvaluationsFilter::default().with_group_ids(vec![Uuid::nil()]),
         )
         .await?;
 
@@ -294,7 +308,7 @@ mod tests_search_evaluations {
         let results = search_evaluations(
             &pool,
             &SearchEvaluationsFilter::default()
-                .with_request_ids(vec![req_a])
+                .with_group_ids(vec![req_a])
                 .with_order_fitness_desc()
                 .with_limit(2),
         )

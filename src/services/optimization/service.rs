@@ -24,6 +24,7 @@ use std::sync::Arc;
 use tracing::instrument;
 use uuid::Uuid;
 
+pub(super) const EVALUATION_REASON: &str = "optimization";
 pub(super) const ACCOUNT_TYPE: &str = "OptimizationBudget";
 pub(super) const REASON_OPTIMIZATION_CHARGED: &str = "OptimizationCharged";
 pub(super) const REASON_OPTIMIZATION_CREATED: &str = "OptimizationCreated";
@@ -128,18 +129,16 @@ impl Service {
 
     /// Evaluate a genotype
     #[instrument(level = "info", skip(self))]
-    pub(super) async fn evaluate_genotype(
-        &self,
-        request_id: Uuid,
-        genotype_id: Uuid,
-    ) -> Result<(), Error> {
+    pub(super) async fn evaluate_genotype(&self, genotype_id: Uuid) -> Result<(), Error> {
         tracing::info!("Evaluating genotype");
 
         let genotype = self.genotypes_ro.get_genotype(&genotype_id).await?;
-
+        let request_id = genotype.request_id();
         self.evaluation
             .evaluate_genotype(
                 genotype,
+                request_id,
+                EVALUATION_REASON,
                 vec![&request_id.to_string()],
                 vec![SHUTDOWN_SEMAPHORE],
             )
@@ -173,7 +172,7 @@ impl Service {
         let eval_pop = self
             .evaluations_ro
             .get_evaluation_stats(
-                &GetEvaluationStatsFilter::default().with_request_id(request.id),
+                &GetEvaluationStatsFilter::default().with_group_id(request.id),
                 i64::MAX,
             )
             .await
@@ -352,13 +351,13 @@ impl Service {
                 let genotype = Genotype::new(
                     &request.type_name,
                     genome,
-                    Some(request.id),
+                    request.id,
                     Some(1), // First generation
                     None,    // No parent_a
                     None,    // No parent_b
                 )?;
 
-                jobs.push(EvaluateGenotypeMessage::new(request.id, genotype.id()));
+                jobs.push(EvaluateGenotypeMessage::new(genotype.id()));
                 genotypes.push(genotype);
             }
         }
@@ -437,7 +436,7 @@ impl Service {
                 .evaluations_ro
                 .search_evaluations(
                     &SearchEvaluationsFilter::default()
-                        .with_request_ids(vec![request.id])
+                        .with_group_ids(vec![request.id])
                         .with_order_completed_at_desc()
                         .with_limit(population_size),
                 )
@@ -484,7 +483,7 @@ impl Service {
 
         let jobs: Vec<EvaluateGenotypeMessage> = genotypes
             .iter()
-            .map(|g| EvaluateGenotypeMessage::new(request.id, g.id()))
+            .map(|g| EvaluateGenotypeMessage::new(g.id()))
             .collect();
 
         let mq = self.mq.clone();
@@ -524,11 +523,7 @@ impl Service {
 
         let mut best_evals = self
             .evaluations_ro
-            .search_evaluations(
-                &order_filter
-                    .with_request_ids(vec![request_id])
-                    .with_limit(1),
-            )
+            .search_evaluations(&order_filter.with_group_ids(vec![request_id]).with_limit(1))
             .await?;
 
         match best_evals.pop() {
@@ -684,6 +679,696 @@ mod tests {
         // Verify the request exists via the read repository
         let request = svc.requests_ro.get_request(request_id).await?;
         assert_eq!(request.type_name, TEST_TYPE_NAME);
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_tools {
+    use super::*;
+    use crate::repositories::genotypes::{Genotype, TypeName, store_genotypes};
+    use crate::services::budgeting;
+    use crate::services::evaluation::repositories::evaluations;
+    use crate::services::evaluation::{Evaluator, Service as EvaluationService};
+    use crate::services::optimization as foreign_service;
+    use crate::services::optimization::Schedule;
+    use crate::test_tools::TestConfig;
+    use chrono::Utc;
+    use futures::future::BoxFuture;
+    use serde::{Deserialize, Serialize};
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    pub(crate) const TEST_TYPE_NAME: &str = "test::optimization";
+    pub(crate) const POPULATION_SIZE: u32 = 5;
+    pub(crate) const SELECTION_INTERVAL: u32 = 4;
+
+    #[derive(Serialize, Deserialize)]
+    pub(crate) struct TestGenome;
+
+    pub(crate) struct TestOptimizer;
+
+    impl TypeName for TestOptimizer {
+        fn type_name(&self) -> &str {
+            TEST_TYPE_NAME
+        }
+    }
+
+    impl foreign_service::Optimizer for TestOptimizer {
+        type Type = TestGenome;
+
+        fn random(&self) -> anyhow::Result<Self::Type> {
+            Ok(TestGenome)
+        }
+
+        fn crossover(
+            &self,
+            _parent1: Self::Type,
+            _parent2: Self::Type,
+        ) -> anyhow::Result<Self::Type> {
+            Ok(TestGenome)
+        }
+
+        fn mutate(&self, _instance: &mut Self::Type) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    pub(crate) struct TestEvaluator;
+
+    impl Evaluator for TestEvaluator {
+        type Type = serde_json::Value;
+
+        fn evaluate<'a>(
+            &'a self,
+            _instance: &'a Self::Type,
+        ) -> BoxFuture<'a, Result<f64, Box<dyn std::error::Error + Send + Sync>>> {
+            Box::pin(async move { Ok(0.5) })
+        }
+    }
+
+    pub(crate) struct SeedData {
+        pub(crate) svc: Arc<Service>,
+        pub(crate) request_id: Uuid,
+        pub(crate) account_id: Uuid,
+    }
+
+    pub(crate) async fn seed(pool: &PgPool) -> anyhow::Result<SeedData> {
+        let svc = build_service(pool.clone()).await?;
+
+        let max_evaluations = POPULATION_SIZE * 10;
+        let schedule = Schedule::rolling(max_evaluations, POPULATION_SIZE, SELECTION_INTERVAL);
+        let request_id = svc
+            .request_new(
+                TEST_TYPE_NAME.to_string(),
+                FitnessGoal::maximize(1.0)?,
+                schedule,
+                Selector::tournament(3),
+            )
+            .await?;
+
+        let request = svc.requests_ro.get_request(request_id).await?;
+        let account_id = request.account_id;
+
+        seed_budget(pool, account_id).await?;
+
+        let genotypes: Vec<Genotype> = (0..POPULATION_SIZE as usize)
+            .map(|i| {
+                Genotype::new(
+                    TEST_TYPE_NAME,
+                    serde_json::json!({}),
+                    request_id,
+                    Some(1),
+                    None,
+                    None,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let stored = store_genotypes(pool, &genotypes).await?;
+
+        let now = Utc::now();
+        let evals: Vec<evaluations::Evaluation> = stored[..SELECTION_INTERVAL as usize]
+            .iter()
+            .map(|g| {
+                evaluations::Evaluation::new(
+                    g.id(),
+                    request_id,
+                    "optimization".to_string(),
+                    0.5,
+                    Some(now),
+                    Some(now),
+                    Some(Uuid::nil()),
+                )
+            })
+            .collect();
+        evaluations::queries::store_evaluations(pool, &evals).await?;
+
+        Ok(SeedData {
+            svc,
+            request_id,
+            account_id,
+        })
+    }
+
+    async fn seed_budget(pool: &PgPool, account_id: Uuid) -> anyhow::Result<()> {
+        let mut c = TestConfig::new(pool.clone())
+            .with_optimizer(TestOptimizer)
+            .build()
+            .await?;
+        let budgeting = c.get::<Arc<budgeting::Service>>().await?;
+        budgeting
+            .append(
+                account_id,
+                super::ACCOUNT_TYPE.to_string(),
+                100,
+                super::REASON_OPTIMIZATION_CREATED.to_string(),
+            )
+            .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn build_service(pool: PgPool) -> anyhow::Result<Arc<Service>> {
+        let mut c = TestConfig::new(pool)
+            .with_optimizer(TestOptimizer)
+            .build()
+            .await?;
+        let evaluation = c.get::<Arc<EvaluationService>>().await?;
+        evaluation.register(TEST_TYPE_NAME, TestEvaluator).await;
+        let svc = c.get::<Arc<Service>>().await?;
+        Ok(svc)
+    }
+
+    pub(crate) async fn seed_genotypes(
+        pool: &PgPool,
+        request_id: Uuid,
+        count: usize,
+    ) -> anyhow::Result<Vec<Genotype>> {
+        let genotypes: Vec<Genotype> = (0..count)
+            .map(|i| {
+                Genotype::new(
+                    TEST_TYPE_NAME,
+                    serde_json::json!({}),
+                    request_id,
+                    Some(1),
+                    None,
+                    None,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let stored = store_genotypes(pool, &genotypes).await?;
+        Ok(stored)
+    }
+}
+
+#[cfg(test)]
+mod tests_evaluate_genotype {
+    use super::test_tools::*;
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    #[sqlx::test(migrations = false)]
+    async fn evaluate_genotype_errors_on_missing_genotype(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        seed(&pool).await?;
+
+        let missing_id = Uuid::parse_str("00000000-0000-0000-0000-000000000099")?;
+        let result = svc.evaluate_genotype(missing_id).await;
+
+        assert!(result.is_err());
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_should_breed_next_generation {
+    use super::test_tools::*;
+    use crate::services::optimization::jobs::ChargeOptimizationBudgetMessage;
+    use fx_mq_building_blocks::testing_tools::TestQueries;
+    use fx_mq_jobs::{FX_MQ_JOBS_SCHEMA_NAME, Message};
+    use sqlx::PgPool;
+
+    #[sqlx::test(migrations = false)]
+    async fn it_skips_breeding_when_not_ready(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let data = seed(&pool).await?;
+
+        // Add 1 extra genotype without evaluation so live > threshold
+        seed_genotypes(&pool, data.request_id, 1).await?;
+
+        data.svc
+            .should_breed_next_generation(data.request_id, 0.1)
+            .await?;
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let charge_jobs: Vec<_> = mq
+            .get_all_messages(&mut tx)
+            .await?
+            .into_iter()
+            .filter(|j| j.name == ChargeOptimizationBudgetMessage::NAME)
+            .collect();
+        tx.commit().await?;
+        assert!(charge_jobs.is_empty());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_dispatches_charge_job_when_ready(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let data = seed(&pool).await?;
+
+        data.svc
+            .should_breed_next_generation(data.request_id, 0.1)
+            .await?;
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let charge_jobs: Vec<_> = mq
+            .get_all_messages(&mut tx)
+            .await?
+            .into_iter()
+            .filter(|j| j.name == ChargeOptimizationBudgetMessage::NAME)
+            .collect();
+        tx.commit().await?;
+        assert_eq!(charge_jobs.len(), 1);
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_try_charge {
+    use super::test_tools::*;
+    use super::*;
+    use crate::services::budgeting::TransactionsFilter;
+    use crate::services::optimization::Schedule;
+    use crate::test_tools::TestConfig;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use uuid::Uuid;
+
+    async fn count_charges(svc: &Service, account_id: Uuid) -> anyhow::Result<usize> {
+        let filter = TransactionsFilter::default().with_account_id(account_id);
+        let txs = svc.transactions_ro.history(&filter, i64::MAX).await?;
+        Ok(txs
+            .iter()
+            .filter(|t| t.reason() == super::REASON_OPTIMIZATION_CHARGED)
+            .count())
+    }
+
+    async fn seed_budget_amount(
+        pool: &PgPool,
+        account_id: Uuid,
+        amount: i64,
+    ) -> anyhow::Result<Arc<crate::services::budgeting::Service>> {
+        let mut c = TestConfig::new(pool.clone())
+            .with_optimizer(TestOptimizer)
+            .build()
+            .await?;
+        let budgeting = c.get::<Arc<crate::services::budgeting::Service>>().await?;
+        budgeting
+            .append(
+                account_id,
+                super::ACCOUNT_TYPE.to_string(),
+                amount,
+                super::REASON_OPTIMIZATION_CREATED.to_string(),
+            )
+            .await?;
+        Ok(budgeting)
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn try_charge_partial_when_balance_lower_than_amount(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let schedule = Schedule::rolling(POPULATION_SIZE * 10, POPULATION_SIZE, SELECTION_INTERVAL);
+        let request_id = svc
+            .request_new(
+                TEST_TYPE_NAME.to_string(),
+                FitnessGoal::maximize(1.0)?,
+                schedule,
+                Selector::tournament(3),
+            )
+            .await?;
+        let request = svc.requests_ro.get_request(request_id).await?;
+
+        // Seed a budget of 2, lower than the charge amount (SELECTION_INTERVAL = 4)
+        seed_budget_amount(&pool, request.account_id, 2).await?;
+
+        svc.try_charge(request.account_id, SELECTION_INTERVAL as i64, None)
+            .await?;
+
+        let txs = svc
+            .transactions_ro
+            .history(
+                &TransactionsFilter::default().with_account_id(request.account_id),
+                i64::MAX,
+            )
+            .await?;
+        let charges: Vec<_> = txs
+            .iter()
+            .filter(|t| t.reason() == super::REASON_OPTIMIZATION_CHARGED)
+            .collect();
+        assert_eq!(charges.len(), 1);
+        assert_eq!(charges[0].amount(), -2);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn try_charge_skips_when_idempotent(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let data = seed(&pool).await?;
+
+        // First call with expected=None — no prior charges, so actual=None → match → charges
+        data.svc
+            .try_charge(data.account_id, SELECTION_INTERVAL as i64, None)
+            .await?;
+
+        assert_eq!(count_charges(&data.svc, data.account_id).await?, 1);
+
+        // Second call with expected=None again — simulates the same job being replayed.
+        // Now actual=Some(first_charge_id) ≠ None → skip.
+        data.svc
+            .try_charge(data.account_id, SELECTION_INTERVAL as i64, None)
+            .await?;
+
+        let all_txs = data
+            .svc
+            .transactions_ro
+            .history(
+                &TransactionsFilter::default().with_account_id(data.account_id),
+                i64::MAX,
+            )
+            .await?;
+        let charge_txs: Vec<_> = all_txs
+            .iter()
+            .filter(|t| t.reason() == super::REASON_OPTIMIZATION_CHARGED)
+            .collect();
+        assert_eq!(charge_txs.len(), 1);
+        assert_eq!(charge_txs[0].amount(), -(SELECTION_INTERVAL as i64));
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn try_charge_skips_when_insufficient_balance(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        // No with_listeners() → AddOptimizationBudgetMessage dispatched by
+        // request_new is never processed, so the account balance stays at 0.
+        let svc = build_service(pool.clone()).await?;
+        let max_evaluations = POPULATION_SIZE * 10;
+        let schedule = Schedule::rolling(max_evaluations, POPULATION_SIZE, SELECTION_INTERVAL);
+        let request_id = svc
+            .request_new(
+                TEST_TYPE_NAME.to_string(),
+                FitnessGoal::maximize(1.0)?,
+                schedule,
+                Selector::tournament(3),
+            )
+            .await?;
+        let request = svc.requests_ro.get_request(request_id).await?;
+
+        svc.try_charge(request.account_id, SELECTION_INTERVAL as i64, None)
+            .await?;
+
+        let count = count_charges(&svc, request.account_id).await?;
+        assert_eq!(count, 0);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn try_charge_errors_for_unknown_account(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let unknown_id = Uuid::parse_str("00000000-0000-0000-0000-000000000099")?;
+
+        let result = svc
+            .try_charge(unknown_id, SELECTION_INTERVAL as i64, None)
+            .await;
+
+        assert!(matches!(result, Err(Error::NoRequestOfAccount(_))));
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_breed_genotypes {
+    use super::test_tools::*;
+    use super::*;
+    use crate::services::evaluation::repositories::evaluations;
+    use crate::services::optimization::Schedule;
+    use crate::services::optimization::jobs::EvaluateGenotypeMessage;
+    use chrono::Utc;
+    use fx_mq_building_blocks::testing_tools::TestQueries;
+    use fx_mq_jobs::{FX_MQ_JOBS_SCHEMA_NAME, Message};
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    /// Tournament(2) needs ≥4 candidates. POPULATION_SIZE = 5, so all tests
+    /// that breed from existing genotypes have enough evaluated parents.
+    async fn make_request(svc: &Service) -> Result<Uuid, Error> {
+        let schedule = Schedule::rolling(POPULATION_SIZE * 10, POPULATION_SIZE, SELECTION_INTERVAL);
+        let goal = FitnessGoal::maximize(1.0).expect("1.0 is a valid threshold");
+        svc.request_new(
+            TEST_TYPE_NAME.to_string(),
+            goal,
+            schedule,
+            Selector::tournament(2),
+        )
+        .await
+    }
+
+    async fn evaluate_all(svc: &Service, pool: &PgPool, request_id: Uuid) -> anyhow::Result<()> {
+        let pop = svc.genotypes_ro.get_population(&request_id).await?;
+        let genotypes = svc
+            .genotypes_ro
+            .search_genotypes(
+                &crate::SearchGenotypesFilter::default()
+                    .with_request_id(request_id)
+                    .with_generation_id(pop.current_generation()),
+                pop.total_genotypes(),
+            )
+            .await?;
+        let now = Utc::now();
+        let evals: Vec<evaluations::Evaluation> = genotypes
+            .iter()
+            .map(|g| {
+                evaluations::Evaluation::new(
+                    g.id(),
+                    request_id,
+                    "optimization".to_string(),
+                    0.5,
+                    Some(now),
+                    Some(now),
+                    Some(Uuid::nil()),
+                )
+            })
+            .collect();
+        evaluations::queries::store_evaluations(pool, &evals).await?;
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_seeds_population_when_generation_zero(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let request_id = make_request(&svc).await?;
+
+        let pop_before = svc.genotypes_ro.get_population(&request_id).await?;
+        assert_eq!(pop_before.current_generation(), 0);
+        assert_eq!(pop_before.total_genotypes(), 0);
+
+        svc.breed_genotypes(request_id, POPULATION_SIZE as i64)
+            .await?;
+
+        let pop_after = svc.genotypes_ro.get_population(&request_id).await?;
+        assert_eq!(pop_after.total_genotypes(), POPULATION_SIZE as i64);
+        assert_eq!(pop_after.current_generation(), 1);
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let jobs = mq.get_all_messages(&mut tx).await?;
+        tx.commit().await?;
+        let eval_jobs: Vec<_> = jobs
+            .iter()
+            .filter(|j| j.name == EvaluateGenotypeMessage::NAME)
+            .collect();
+        assert_eq!(eval_jobs.len(), POPULATION_SIZE as usize);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_breeds_next_generation(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let request_id = make_request(&svc).await?;
+
+        // First breed: seed the initial population
+        svc.breed_genotypes(request_id, POPULATION_SIZE as i64)
+            .await?;
+
+        // Evaluate all seeded genotypes so breed can select parents
+        evaluate_all(&svc, &pool, request_id).await?;
+
+        // Second breed: create next generation
+        let count = 3;
+        svc.breed_genotypes(request_id, count).await?;
+
+        let pop = svc.genotypes_ro.get_population(&request_id).await?;
+        assert_eq!(pop.total_genotypes(), POPULATION_SIZE as i64 + count);
+        assert_eq!(pop.current_generation(), 2);
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let jobs = mq.get_all_messages(&mut tx).await?;
+        tx.commit().await?;
+        let eval_jobs: Vec<_> = jobs
+            .iter()
+            .filter(|j| j.name == EvaluateGenotypeMessage::NAME)
+            .collect();
+        assert_eq!(eval_jobs.len(), (POPULATION_SIZE + count as u32) as usize);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_errors_on_invalid_count(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let request_id = make_request(&svc).await?;
+
+        let result = svc.breed_genotypes(request_id, 0).await;
+        assert!(matches!(result, Err(Error::CouldNotBreed(_))));
+
+        let result = svc.breed_genotypes(request_id, -1).await;
+        assert!(matches!(result, Err(Error::CouldNotBreed(_))));
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_get_best_genotype {
+    use super::test_tools::*;
+    use super::*;
+    use crate::services::evaluation::repositories::evaluations;
+    use crate::services::optimization::Schedule;
+    use chrono::Utc;
+    use sqlx::PgPool;
+    use uuid::Uuid;
+
+    async fn seed_data(pool: &PgPool, goal: FitnessGoal) -> anyhow::Result<(Arc<Service>, Uuid)> {
+        let svc = build_service(pool.clone()).await?;
+        let schedule = Schedule::rolling(100, 10, 2);
+        let request_id = svc
+            .request_new(
+                TEST_TYPE_NAME.to_string(),
+                goal,
+                schedule,
+                Selector::tournament(2),
+            )
+            .await?;
+
+        let genotypes = super::test_tools::seed_genotypes(pool, request_id, 3).await?;
+        let now = Utc::now();
+        let fitnesses = [0.1, 0.5, 0.9];
+        let evals: Vec<evaluations::Evaluation> = genotypes
+            .iter()
+            .zip(fitnesses.iter())
+            .map(|(g, &f)| {
+                evaluations::Evaluation::new(
+                    g.id(),
+                    request_id,
+                    "optimization".to_string(),
+                    f,
+                    Some(now),
+                    Some(now),
+                    Some(Uuid::nil()),
+                )
+            })
+            .collect();
+        evaluations::queries::store_evaluations(pool, &evals).await?;
+
+        Ok((svc, request_id))
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_best_for_maximize(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let (svc, request_id) =
+            seed_data(&pool, FitnessGoal::maximize(1.0).expect("valid threshold")).await?;
+
+        let result = svc.get_best_genotype(request_id).await?;
+
+        let (genotype, fitness) = result.expect("expected a best genotype");
+        assert!((fitness - 0.9).abs() < 1e-12);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_best_for_minimize(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let (svc, request_id) =
+            seed_data(&pool, FitnessGoal::minimize(1.0).expect("valid threshold")).await?;
+
+        let result = svc.get_best_genotype(request_id).await?;
+
+        let (genotype, fitness) = result.expect("expected a best genotype");
+        assert!((fitness - 0.1).abs() < 1e-12);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_none_when_no_evals(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let schedule = Schedule::rolling(100, 10, 2);
+        let goal = FitnessGoal::maximize(1.0).expect("valid threshold");
+        let request_id = svc
+            .request_new(
+                TEST_TYPE_NAME.to_string(),
+                goal,
+                schedule,
+                Selector::tournament(2),
+            )
+            .await?;
+
+        let result = svc.get_best_genotype(request_id).await?;
+        assert!(result.is_none());
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn it_errors_on_unknown_request(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let missing_id = Uuid::parse_str("00000000-0000-0000-0000-000000000099")?;
+
+        let result = svc.get_best_genotype(missing_id).await;
+        assert!(result.is_err());
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_stop {
+    use super::test_tools::*;
+    use super::*;
+    use sqlx::PgPool;
+
+    #[sqlx::test(migrations = false)]
+    async fn it_returns_ok(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let svc = build_service(pool.clone()).await?;
+        let result = svc.stop().await;
+        assert!(result.is_ok());
 
         Ok(())
     }

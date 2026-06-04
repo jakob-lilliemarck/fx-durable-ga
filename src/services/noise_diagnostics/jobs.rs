@@ -14,10 +14,7 @@ pub(super) struct EvaluateNoiseProbeGenotypeMessage {
 
 impl EvaluateNoiseProbeGenotypeMessage {
     pub fn new(probe_id: Uuid, genotype: crate::repositories::genotypes::Genotype) -> Self {
-        Self {
-            probe_id,
-            genotype,
-        }
+        Self { probe_id, genotype }
     }
 }
 

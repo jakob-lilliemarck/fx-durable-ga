@@ -48,12 +48,12 @@ impl Read {
     #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
     pub async fn get_aggregated_fitness(
         &self,
-        request_id: &Uuid,
+        group_id: &Uuid,
         bin_size: i64,
         limit: i64,
         filter: &GetAggregatedFitnessFilter,
     ) -> Result<Vec<AggregatedFitness>, Error> {
-        super::queries::get_aggregated_fitness(&self.ro.pool, request_id, bin_size, limit, filter)
+        super::queries::get_aggregated_fitness(&self.ro.pool, group_id, bin_size, limit, filter)
             .await
     }
 
@@ -96,7 +96,7 @@ impl Read {
         let mut evals = self
             .search_evaluations(
                 &SearchEvaluationsFilter::default()
-                    .with_request_ids(vec![request_id])
+                    .with_group_ids(vec![request_id])
                     .with_order_fitness_asc()
                     .with_limit(1),
             )
@@ -110,7 +110,7 @@ impl Read {
         let mut evals = self
             .search_evaluations(
                 &SearchEvaluationsFilter::default()
-                    .with_request_ids(vec![request_id])
+                    .with_group_ids(vec![request_id])
                     .with_order_fitness_desc()
                     .with_limit(1),
             )
@@ -197,7 +197,7 @@ mod tests {
         let genotype = Genotype::new(
             "test",
             serde_json::json!([1, 2]),
-            Some(request_id),
+            request_id,
             None,
             None,
             None,
@@ -207,10 +207,16 @@ mod tests {
 
         let started_at = Utc::now();
         let completed_at = Utc::now();
-        let evaluation =
-            Evaluation::new(genotype.id, 0.5, Some(started_at), Some(completed_at), None)
-                .with_request_id(request_id)
-                .with_generated_at(started_at);
+        let evaluation = Evaluation::new(
+            genotype.id,
+            request_id,
+            "optimization".to_string(),
+            0.5,
+            Some(started_at),
+            Some(completed_at),
+            None,
+        )
+        .with_generated_at(started_at);
         let mut tx = pool.begin().await?;
         {
             let mut wr = WriteTx::new(&mut tx);
@@ -231,7 +237,7 @@ mod tests {
         let genotype = Genotype::new(
             "test",
             serde_json::json!([1, 2]),
-            Some(request_id),
+            request_id,
             None,
             None,
             None,
@@ -241,10 +247,16 @@ mod tests {
 
         let started_at = Utc::now();
         let completed_at = Utc::now();
-        let evaluation =
-            Evaluation::new(genotype.id, 0.5, Some(started_at), Some(completed_at), None)
-                .with_request_id(request_id)
-                .with_generated_at(started_at);
+        let evaluation = Evaluation::new(
+            genotype.id,
+            request_id,
+            "optimization".to_string(),
+            0.5,
+            Some(started_at),
+            Some(completed_at),
+            None,
+        )
+        .with_generated_at(started_at);
         let mut tx = pool.begin().await?;
         {
             let mut wr = WriteTx::new(&mut tx);

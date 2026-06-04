@@ -50,7 +50,7 @@ mod tests_generation_exists {
         let genotype = Genotype::new(
             "test",
             serde_json::json!([1, 2, 3]),
-            Some(request_id),
+            request_id,
             Some(1),
             None,
             None,

@@ -99,6 +99,8 @@ impl Service {
     pub(crate) async fn evaluate_genotype(
         &self,
         genotype: Genotype,
+        group_id: Uuid,
+        reason: &str,
         drop_on: Vec<&str>,
         retry_on: Vec<&str>,
     ) -> Result<(), super::Error> {
@@ -133,18 +135,18 @@ impl Service {
         };
 
         let host_id = self.host_id.clone();
+        let reason = reason.to_string();
         db::begin(self.evaluations_wr.clone(), |tx| {
             Box::pin(async move {
-                let mut evaluation = Evaluation::new(
+                let evaluation = Evaluation::new(
                     genotype.id,
+                    group_id,
+                    reason.clone(),
                     fitness,
                     Some(started_at),
                     Some(completed_at),
                     Some(host_id.value),
                 );
-                if let Some(request_id) = genotype.request_id {
-                    evaluation = evaluation.with_request_id(request_id);
-                }
                 let evaluation = evaluation.with_generated_at(genotype.generated_at);
                 let evaluation_id = evaluation.id();
                 evaluations::WriteTx::new(tx)
@@ -156,7 +158,8 @@ impl Service {
                 publisher
                     .publish(super::GenotypeEvaluatedEvent::new(
                         evaluation_id,
-                        genotype.request_id,
+                        group_id,
+                        reason.clone(),
                         genotype.id,
                         fitness,
                     ))
@@ -210,13 +213,36 @@ where
 mod tests_evaluate_genotype {
     use super::*;
     use crate::services::evaluation;
+    use crate::services::optimization::{self, store_request};
     use crate::test_tools::TestConfig;
     use futures::future::BoxFuture;
     use sqlx::PgPool;
     use std::sync::Arc;
     use std::time::Duration;
 
-    struct SlowEvaluator;
+    async fn create_request(pool: &PgPool) -> Uuid {
+        let request = optimization::Request::new(
+            "test",
+            optimization::FitnessGoal::maximize(1.0).unwrap(),
+            optimization::Selector::tournament(3),
+            optimization::Schedule::generational(10, 2),
+        );
+        let id = request.id;
+        store_request(pool, request).await.unwrap();
+        id
+    }
+
+    struct SlowEvaluator {
+        started: Arc<tokio::sync::Notify>,
+    }
+
+    impl SlowEvaluator {
+        fn new() -> Self {
+            Self {
+                started: Arc::new(tokio::sync::Notify::new()),
+            }
+        }
+    }
 
     impl Evaluator for SlowEvaluator {
         type Type = serde_json::Value;
@@ -225,7 +251,9 @@ mod tests_evaluate_genotype {
             &'a self,
             _instance: &'a Self::Type,
         ) -> BoxFuture<'a, Result<f64, Box<dyn std::error::Error + Send + Sync>>> {
+            let started = self.started.clone();
             Box::pin(async move {
+                started.notify_one();
                 tokio::time::sleep(Duration::from_millis(200)).await;
                 Ok(0.5)
             })
@@ -244,7 +272,7 @@ mod tests_evaluate_genotype {
             .get::<Arc<crate::services::synchronization::Service>>()
             .await?;
         let evaluation = c.get::<Arc<evaluation::Service>>().await?;
-        evaluation.register("test", SlowEvaluator).await;
+        evaluation.register("test", SlowEvaluator::new()).await;
 
         Ok(TestContext {
             evaluation,
@@ -252,19 +280,32 @@ mod tests_evaluate_genotype {
         })
     }
 
-    async fn setup_with_listeners(pool: PgPool) -> anyhow::Result<TestContext> {
+    async fn setup_with_listeners_and_started(
+        pool: PgPool,
+    ) -> anyhow::Result<(TestContext, Arc<tokio::sync::Notify>)> {
+        let started = Arc::new(tokio::sync::Notify::new());
         let mut c = TestConfig::new(pool).with_listeners().build().await?;
 
         let synchronization = c
             .get::<Arc<crate::services::synchronization::Service>>()
             .await?;
         let evaluation = c.get::<Arc<evaluation::Service>>().await?;
-        evaluation.register("test", SlowEvaluator).await;
+        evaluation
+            .register(
+                "test",
+                SlowEvaluator {
+                    started: started.clone(),
+                },
+            )
+            .await;
 
-        Ok(TestContext {
-            evaluation,
-            synchronization,
-        })
+        Ok((
+            TestContext {
+                evaluation,
+                synchronization,
+            },
+            started,
+        ))
     }
 
     #[sqlx::test(migrations = false)]
@@ -272,12 +313,20 @@ mod tests_evaluate_genotype {
         crate::migrations::run_default_migrations(&pool).await?;
         let ctx = setup(pool.clone()).await?;
 
-        let genotype = Genotype::new("test", serde_json::json!([1, 2]), None, None, None, None)?;
+        let request_id = create_request(&pool).await;
+        let genotype = Genotype::new(
+            "test",
+            serde_json::json!([1, 2]),
+            request_id,
+            None,
+            None,
+            None,
+        )?;
         let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
         let genotype = stored.into_iter().next().unwrap();
 
         ctx.evaluation
-            .evaluate_genotype(genotype, vec![], vec![])
+            .evaluate_genotype(genotype, Uuid::nil(), "test", vec![], vec![])
             .await
             .unwrap();
 
@@ -287,17 +336,24 @@ mod tests_evaluate_genotype {
     #[sqlx::test(migrations = false)]
     async fn it_returns_ok_on_drop_semaphore(pool: PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        let ctx = setup_with_listeners(pool.clone()).await?;
+        let (ctx, started) = setup_with_listeners_and_started(pool.clone()).await?;
 
-        let genotype = Genotype::new("test", serde_json::json!([1, 2]), None, None, None, None)?;
+        let request_id = create_request(&pool).await;
+        let genotype = Genotype::new(
+            "test",
+            serde_json::json!([1, 2]),
+            request_id,
+            None,
+            None,
+            None,
+        )?;
         let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
         let genotype = stored.into_iter().next().unwrap();
 
-        // Raise the drop_on semaphore after a short delay
         let sync = ctx.synchronization.clone();
         let pool_clone = pool.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            started.notified().await;
             let mut tx = pool_clone.begin().await.unwrap();
             sync.raise(&mut tx, "test-drop").await.unwrap();
             tx.commit().await.unwrap();
@@ -305,7 +361,7 @@ mod tests_evaluate_genotype {
 
         let result = ctx
             .evaluation
-            .evaluate_genotype(genotype, vec!["test-drop"], vec![])
+            .evaluate_genotype(genotype, Uuid::nil(), "test", vec!["test-drop"], vec![])
             .await;
         assert!(result.is_ok());
 
@@ -315,17 +371,22 @@ mod tests_evaluate_genotype {
     #[sqlx::test(migrations = false)]
     async fn it_returns_aborted_on_retry_semaphore(pool: PgPool) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
-        let ctx = setup_with_listeners(pool.clone()).await?;
+        let (ctx, started) = setup_with_listeners_and_started(pool.clone()).await?;
 
-        let genotype = Genotype::new("test", serde_json::json!([1, 2]), None, None, None, None)?;
-        let stored = crate::repositories::genotypes::store_genotypes(&pool, &[genotype]).await?;
-        let genotype = stored.into_iter().next().unwrap();
+        let request_id = create_request(&pool).await;
+        let genotype = Genotype::new(
+            "test",
+            serde_json::json!([1, 2]),
+            request_id,
+            None,
+            None,
+            None,
+        )?;
 
-        // Raise the retry_on semaphore after a short delay
         let sync = ctx.synchronization.clone();
         let pool_clone = pool.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(50)).await;
+            started.notified().await;
             let mut tx = pool_clone.begin().await.unwrap();
             sync.raise(&mut tx, "test-retry").await.unwrap();
             tx.commit().await.unwrap();
@@ -333,7 +394,7 @@ mod tests_evaluate_genotype {
 
         let result = ctx
             .evaluation
-            .evaluate_genotype(genotype, vec![], vec!["test-retry"])
+            .evaluate_genotype(genotype, Uuid::nil(), "test", vec![], vec!["test-retry"])
             .await;
         assert!(result.is_err());
         assert!(matches!(

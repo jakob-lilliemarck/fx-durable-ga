@@ -6,7 +6,6 @@ DROP TABLE IF EXISTS fx_durable_ga.noise_probes;
 
 -- Restore NOT NULL on genotypes
 ALTER TABLE fx_durable_ga.genotypes
-    ALTER COLUMN request_id SET NOT NULL,
     ALTER COLUMN generation_id SET NOT NULL;
 
 -- Revert evaluations PK back to genotype_id

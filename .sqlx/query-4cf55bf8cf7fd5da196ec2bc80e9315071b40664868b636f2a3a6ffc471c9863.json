@@ -1,0 +1,41 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                COUNT(*)::bigint AS \"count!\",\n                AVG(fitness) AS \"avg_fitness\",\n                STDDEV_POP(fitness) AS \"stddev_fitness\",\n                VAR_POP(fitness) AS \"variance_fitness\"\n            FROM evaluation.evaluations\n            WHERE ($1::uuid IS NULL OR genotype_id = $1)\n              AND ($2::uuid IS NULL OR group_id = $2)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "avg_fitness",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 2,
+        "name": "stddev_fitness",
+        "type_info": "Float8"
+      },
+      {
+        "ordinal": 3,
+        "name": "variance_fitness",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "4cf55bf8cf7fd5da196ec2bc80e9315071b40664868b636f2a3a6ffc471c9863"
+}

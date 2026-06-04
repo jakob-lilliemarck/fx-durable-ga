@@ -329,7 +329,7 @@ async fn get_population(
         .repositories()
         .evaluations()
         .get_evaluation_stats(
-            &GetEvaluationStatsFilter::default().with_request_id(id),
+            &GetEvaluationStatsFilter::default().with_group_id(id),
             i64::MAX,
         )
         .await
@@ -373,7 +373,7 @@ pub async fn get_fitness(
         .repositories()
         .evaluations()
         .get_evaluation_stats(
-            &GetEvaluationStatsFilter::default().with_request_id(id),
+            &GetEvaluationStatsFilter::default().with_group_id(id),
             i64::MAX,
         )
         .await

@@ -35,6 +35,9 @@ pub mod embeddings {
 
     #[cfg(any(test, feature = "test-tools"))]
     pub use super::repositories::embeddings::search_requested_embeddings;
+
+    #[cfg(any(test, feature = "test-tools"))]
+    pub use super::repositories::embeddings::RequestedEmbedding;
 }
 pub use indexable::{EncodeInput, Indexer, IndexerErased, Registry};
 pub use repositories::embeddings::Error as EmbeddingsError;

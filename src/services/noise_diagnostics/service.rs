@@ -8,6 +8,8 @@ use std::sync::Arc;
 use tracing::instrument;
 use uuid::Uuid;
 
+pub(super) const EVALUATION_REASON: &str = "noise_diagnostic";
+
 /// Estimates evaluation noise by repeatedly evaluating probe genotypes.
 pub struct Service {
     probe_wr: probes::Write,
@@ -87,13 +89,19 @@ impl Service {
     /// The `genotype` is pre-fetched in `new_noise_probe` and carried in the job message
     /// to avoid an N+1 query pattern across all evaluation jobs for the same probe.
     #[instrument(level = "debug", skip(self))]
-    pub(super) async fn evaluate_probe(
+    pub(crate) async fn evaluate_probe(
         &self,
         probe_id: Uuid,
         genotype: genotypes::Genotype,
     ) -> Result<(), super::Error> {
         self.evaluation
-            .evaluate_genotype(genotype, probe_id, vec![], vec![EVAL_SHUTDOWN])
+            .evaluate_genotype(
+                genotype,
+                probe_id,
+                EVALUATION_REASON,
+                vec![],
+                vec![EVAL_SHUTDOWN],
+            )
             .await
             .map_err(|e| super::Error::Internal(anyhow::Error::from(e)))?;
 
@@ -105,12 +113,28 @@ impl Service {
 mod tests {
     use super::*;
     use crate::repositories::genotypes::{Genotype, store_genotypes};
+    use crate::services::evaluation::Evaluator;
+    use crate::services::evaluation::repositories::evaluations;
     use crate::services::optimization::{FitnessGoal, Request, Schedule, Selector, store_request};
     use crate::test_tools::TestConfig;
+    use futures::future::BoxFuture;
     use fx_mq_building_blocks::testing_tools::TestQueries;
     use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
     use sqlx::PgPool;
     use std::sync::Arc;
+
+    struct TestEvaluator;
+
+    impl Evaluator for TestEvaluator {
+        type Type = serde_json::Value;
+
+        fn evaluate<'a>(
+            &'a self,
+            _instance: &'a Self::Type,
+        ) -> BoxFuture<'a, Result<f64, Box<dyn std::error::Error + Send + Sync>>> {
+            Box::pin(async move { Ok(0.5) })
+        }
+    }
 
     async fn create_request(pool: &PgPool) -> Uuid {
         let request = Request::new(
@@ -135,7 +159,13 @@ mod tests {
         crate::migrations::run_default_migrations(&pool).await?;
         let (svc, _) = setup(pool.clone()).await?;
 
-        let result = svc.new_noise_probe(Uuid::now_v7(), Uuid::now_v7(), 0).await;
+        let result = svc
+            .new_noise_probe(
+                Uuid::parse_str("00000000-0000-0000-0000-000000000001")?,
+                Uuid::parse_str("00000000-0000-0000-0000-000000000002")?,
+                0,
+            )
+            .await;
 
         assert!(result.is_err());
         Ok(())
@@ -147,7 +177,7 @@ mod tests {
         let (svc, pool) = setup(pool.clone()).await?;
 
         let request_id = create_request(&pool).await;
-        let genotype = Genotype::new("test", serde_json::json!([1]), None, None, None, None)?;
+        let genotype = Genotype::new("test", serde_json::json!([1]), request_id, None, None, None)?;
         let stored = store_genotypes(&pool, &[genotype]).await?;
         let genotype_id = stored[0].id();
 
@@ -169,6 +199,59 @@ mod tests {
             let payload: serde_json::Value = serde_json::from_value(job.payload.clone())?;
             assert_eq!(payload["probe_id"], serde_json::json!(probe_id));
         }
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn noise_stats_queryable_after_evaluation(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let mut c = TestConfig::new(pool.clone())
+            .with_listeners()
+            .build()
+            .await?;
+
+        let evaluation = c.get::<Arc<crate::services::evaluation::Service>>().await?;
+        evaluation.register("test", TestEvaluator).await;
+
+        let svc = c.get::<Arc<Service>>().await?;
+
+        let request_id = create_request(&pool).await;
+        let genotype = Genotype::new("test", serde_json::json!([1]), request_id, None, None, None)?;
+        let stored = store_genotypes(&pool, &[genotype]).await?;
+        let genotype_id = stored[0].id();
+
+        let probe_request_id = Uuid::parse_str("00000000-0000-0000-0000-000000000003")?;
+        let probe_id = svc
+            .new_noise_probe(genotype_id, probe_request_id, 1)
+            .await?;
+
+        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
+        let mut tx = pool.begin().await?;
+        let jobs = mq.get_all_messages(&mut tx).await?;
+        tx.commit().await?;
+        let probe_job = jobs
+            .into_iter()
+            .find(|j| j.name == "EvaluateNoiseProbeGenotype")
+            .unwrap();
+        let payload: serde_json::Value = serde_json::from_value(probe_job.payload.clone())?;
+        let msg_genotype: Genotype = serde_json::from_value(payload["genotype"].clone())?;
+
+        svc.evaluate_probe(probe_id, msg_genotype).await?;
+
+        let evaluations_ro = c.get::<evaluations::Read>().await?;
+        let result = evaluations_ro
+            .get_evaluation_aggregates(
+                &evaluations::GetEvaluationAggregatesFilter::default()
+                    .with_genotype_id(genotype_id),
+            )
+            .await?;
+
+        assert_eq!(result.count, 1);
+        assert_eq!(result.avg_fitness, Some(0.5));
+        assert_eq!(result.stddev_fitness, Some(0.0));
+        assert_eq!(result.variance_fitness, Some(0.0));
 
         Ok(())
     }

@@ -60,7 +60,7 @@ pub async fn get_aggregated_fitness<'tx, E: PgExecutor<'tx>>(
                 fitness,
                 ROW_NUMBER() OVER (ORDER BY generated_at ASC, id ASC) AS rn
             FROM evaluation.evaluations
-            WHERE request_id = $1
+            WHERE group_id = $1
         ),
         binned AS (
             SELECT
@@ -224,7 +224,7 @@ mod tests_get_aggregated_fitness {
                 let mut genotype = Genotype::new(
                     "test",
                     serde_json::json!([1, 2, 3]),
-                    Some(request.id),
+                    request.id,
                     Some((generation_idx + 1) as i32),
                     None,
                     None,
@@ -240,7 +240,7 @@ mod tests_get_aggregated_fitness {
             let mut genotype = Genotype::new(
                 "test",
                 serde_json::json!([4, 5, 6]),
-                Some(request.id),
+                request.id,
                 Some((batch_times.len() as i32) + 1 + idx as i32),
                 None,
                 None,
@@ -261,13 +261,14 @@ mod tests_get_aggregated_fitness {
         for (genotype, fitness) in genotypes.iter().zip(all_fitness.iter()) {
             evaluations.push(
                 Evaluation::new(
-                    genotype.id,
+                    genotype.id(),
+                    request.id,
+                    "optimization".to_string(),
                     *fitness,
-                    Some(Utc::now()),
-                    Some(Utc::now()),
+                    Some(genotype.generated_at),
+                    Some(genotype.generated_at),
                     None,
                 )
-                .with_request_id(request.id)
                 .with_generated_at(genotype.generated_at),
             );
         }

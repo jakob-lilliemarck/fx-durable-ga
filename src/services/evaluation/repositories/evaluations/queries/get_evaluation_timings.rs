@@ -7,7 +7,7 @@ use uuid::Uuid;
 #[derive(Debug, Default)]
 pub struct GetEvaluationTimingsFilter {
     genotype_id: Option<Uuid>,
-    request_id: Option<Uuid>,
+    group_id: Option<Uuid>,
     evaluated_by: Option<Uuid>,
 }
 
@@ -17,8 +17,8 @@ impl GetEvaluationTimingsFilter {
         self
     }
 
-    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = Some(request_id);
+    pub fn with_group_id(mut self, group_id: Uuid) -> Self {
+        self.group_id = Some(group_id);
         self
     }
 
@@ -91,12 +91,12 @@ pub async fn get_evaluation_timings<'tx, E: PgExecutor<'tx>>(
                 (EXTRACT(EPOCH FROM completed_at - started_at) * 1e6)::bigint AS duration_micros
             FROM evaluation.evaluations
             WHERE ($1::uuid IS NULL OR genotype_id = $1)
-              AND ($2::uuid IS NULL OR request_id = $2)
+              AND ($2::uuid IS NULL OR group_id = $2)
               AND ($3::uuid IS NULL OR evaluated_by = $3)
         ) timed
         "#,
         filter.genotype_id,
-        filter.request_id,
+        filter.group_id,
         filter.evaluated_by,
         percentiles
     )
@@ -134,7 +134,7 @@ mod tests_get_evaluation_timings {
             Genotype::new(
                 "timings",
                 serde_json::json!([1]),
-                Some(request_id),
+                request_id,
                 Some(1),
                 None,
                 None,
@@ -142,7 +142,7 @@ mod tests_get_evaluation_timings {
             Genotype::new(
                 "timings",
                 serde_json::json!([2]),
-                Some(request_id),
+                request_id,
                 Some(1),
                 None,
                 None,
@@ -150,7 +150,7 @@ mod tests_get_evaluation_timings {
             Genotype::new(
                 "timings",
                 serde_json::json!([3]),
-                Some(request_id),
+                request_id,
                 Some(1),
                 None,
                 None,
@@ -175,12 +175,13 @@ mod tests_get_evaluation_timings {
                 pool,
                 &[Evaluation::new(
                     *genotype_id,
+                    request_id,
+                    "optimization".to_string(),
                     0.5,
                     Some(started_at),
                     Some(completed_at),
                     Some(host),
-                )
-                .with_request_id(request_id)],
+                )],
             )
             .await?;
         }
@@ -195,7 +196,7 @@ mod tests_get_evaluation_timings {
 
         let summary = get_evaluation_timings(
             &pool,
-            &GetEvaluationTimingsFilter::default().with_request_id(request_id),
+            &GetEvaluationTimingsFilter::default().with_group_id(request_id),
             &[0.5, 0.9],
         )
         .await?;
@@ -215,7 +216,7 @@ mod tests_get_evaluation_timings {
 
         let summary = get_evaluation_timings(
             &pool,
-            &GetEvaluationTimingsFilter::default().with_request_id(request_id),
+            &GetEvaluationTimingsFilter::default().with_group_id(request_id),
             &[],
         )
         .await?;
@@ -232,7 +233,7 @@ mod tests_get_evaluation_timings {
 
         let all = get_evaluation_timings(
             &pool,
-            &GetEvaluationTimingsFilter::default().with_request_id(request_id),
+            &GetEvaluationTimingsFilter::default().with_group_id(request_id),
             &[],
         )
         .await?;
@@ -241,7 +242,7 @@ mod tests_get_evaluation_timings {
         let filtered = get_evaluation_timings(
             &pool,
             &GetEvaluationTimingsFilter::default()
-                .with_request_id(request_id)
+                .with_group_id(request_id)
                 .with_evaluated_by(host_a),
             &[],
         )

@@ -14,6 +14,7 @@ use fx_mq_jobs::Queries;
 use sqlx::PgTransaction;
 use std::{ops::Neg, sync::Arc};
 use tracing::instrument;
+
 /// Handler that responds to genotype evaluations by scheduling population maintenance.
 pub struct GenotypeEvaluatedHandler {
     queries: Arc<Queries>,
@@ -30,16 +31,16 @@ impl Handler<evaluation::GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
         tx: sqlx::PgTransaction<'a>,
     ) -> futures::future::BoxFuture<'a, (sqlx::PgTransaction<'a>, Result<(), Self::Error>)> {
         Box::pin(async move {
-            // Return early if there is no request id (eg. noise analytics)
-            let Some(request_id) = input.request_id else {
+            // Only process evaluations that belong to an optimization request
+            if input.reason != super::service::EVALUATION_REASON {
                 return (tx, Ok(()));
-            };
+            }
 
             let mut publisher = fx_mq_jobs::Publisher::<PgTransaction<'_>>::new(tx, &self.queries);
 
             let ret = match publisher
                 .publish(&MaintainPopulationMessage::new(
-                    request_id,
+                    input.group_id,
                     input.genotype_id,
                     input.fitness,
                 ))
@@ -48,7 +49,7 @@ impl Handler<evaluation::GenotypeEvaluatedEvent> for GenotypeEvaluatedHandler {
                 Err(err) => {
                     tracing::error!(
                         message = "Failed to publish MaintainPopulation",
-                        request_id = request_id.to_string(),
+                        request_id = input.group_id.to_string(),
                     );
                     let err: super::Error = err.into();
                     Err(err)

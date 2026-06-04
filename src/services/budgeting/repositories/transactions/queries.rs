@@ -249,6 +249,7 @@ pub async fn history<'tx, E: PgExecutor<'tx>>(
         FROM budgeting.transactions
         WHERE
             ($1::UUID IS NULL OR account_id = $1::UUID)
+            AND ($5::TEXT IS NULL OR reason = $5)
             AND (
                 $2::TIMESTAMPTZ IS NULL
                 OR $3::UUID IS NULL
@@ -260,7 +261,8 @@ pub async fn history<'tx, E: PgExecutor<'tx>>(
         filter.account_id.as_ref(),
         filter.cursor.as_ref().map(|(ts, _)| ts),
         filter.cursor.as_ref().map(|(_, id)| id),
-        limit
+        limit,
+        filter.reason.as_deref()
     )
     .fetch_all(tx)
     .await?;

@@ -7,7 +7,7 @@ use uuid::Uuid;
 
 #[derive(Debug, Default)]
 pub struct GetEvaluationStatsFilter {
-    request_id: Option<Uuid>,
+    group_id: Option<Uuid>,
     genotype_id: Option<Uuid>,
     generated_since: Option<DateTime<Utc>>,
     generated_until: Option<DateTime<Utc>>,
@@ -16,8 +16,8 @@ pub struct GetEvaluationStatsFilter {
 }
 
 impl GetEvaluationStatsFilter {
-    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = Some(request_id);
+    pub fn with_group_id(mut self, group_id: Uuid) -> Self {
+        self.group_id = Some(group_id);
         self
     }
 
@@ -58,7 +58,7 @@ pub async fn get_evaluation_stats<'tx, E: PgExecutor<'tx>>(
             WITH filtered AS (
                 SELECT fitness
                 FROM evaluation.evaluations e
-                WHERE ($1::uuid IS NULL OR e.request_id = $1)
+                WHERE ($1::uuid IS NULL OR e.group_id = $1)
                   AND ($2::uuid IS NULL OR e.genotype_id = $2)
                   AND ($3::timestamptz IS NULL OR e.generated_at >= $3)
                   AND ($4::timestamptz IS NULL OR e.generated_at <= $4)
@@ -77,7 +77,7 @@ pub async fn get_evaluation_stats<'tx, E: PgExecutor<'tx>>(
                 MAX(fitness) AS "max?"
             FROM filtered
         "#,
-        filter.request_id,
+        filter.group_id,
         filter.genotype_id,
         filter.generated_since,
         filter.generated_until,
@@ -128,14 +128,7 @@ mod tests_get_evaluation_stats {
         let request_b = store_request(pool, request_b).await?;
 
         let make_gen = |req_id, data| {
-            Genotype::new(
-                "test",
-                serde_json::json!(data),
-                Some(req_id),
-                Some(1),
-                None,
-                None,
-            )
+            Genotype::new("test", serde_json::json!(data), req_id, Some(1), None, None)
         };
 
         let a_genotypes = store_genotypes(
@@ -163,12 +156,13 @@ mod tests_get_evaluation_stats {
             .map(|(i, g)| {
                 Evaluation::new(
                     g.id(),
+                    request_a.id,
+                    "optimization".to_string(),
                     0.1 * (i as f64 + 1.0),
                     Some(now),
                     Some(now),
                     Some(host_id),
                 )
-                .with_request_id(request_a.id)
                 .with_generated_at(now - Duration::seconds((a_genotypes.len() - i) as i64))
             })
             .collect();
@@ -180,12 +174,13 @@ mod tests_get_evaluation_stats {
             .map(|(i, g)| {
                 Evaluation::new(
                     g.id(),
+                    request_b.id,
+                    "optimization".to_string(),
                     0.5 + 0.1 * (i as f64),
                     Some(now),
                     Some(now),
                     Some(host_id),
                 )
-                .with_request_id(request_b.id)
                 .with_generated_at(now - Duration::seconds((b_genotypes.len() - i) as i64))
             })
             .collect();
@@ -208,7 +203,7 @@ mod tests_get_evaluation_stats {
 
         let stats = get_evaluation_stats(
             &pool,
-            &GetEvaluationStatsFilter::default().with_request_id(req_a),
+            &GetEvaluationStatsFilter::default().with_group_id(req_a),
             i64::MAX,
         )
         .await?;
@@ -218,7 +213,7 @@ mod tests_get_evaluation_stats {
 
         let stats = get_evaluation_stats(
             &pool,
-            &GetEvaluationStatsFilter::default().with_request_id(req_b),
+            &GetEvaluationStatsFilter::default().with_group_id(req_b),
             i64::MAX,
         )
         .await?;
@@ -236,7 +231,7 @@ mod tests_get_evaluation_stats {
 
         let stats = get_evaluation_stats(
             &pool,
-            &GetEvaluationStatsFilter::default().with_request_id(Uuid::nil()),
+            &GetEvaluationStatsFilter::default().with_group_id(Uuid::nil()),
             i64::MAX,
         )
         .await?;
@@ -254,7 +249,7 @@ mod tests_get_evaluation_stats {
 
         let stats = get_evaluation_stats(
             &pool,
-            &GetEvaluationStatsFilter::default().with_request_id(req_a),
+            &GetEvaluationStatsFilter::default().with_group_id(req_a),
             2,
         )
         .await?;
@@ -273,7 +268,7 @@ mod tests_get_evaluation_stats {
         let stats = get_evaluation_stats(
             &pool,
             &GetEvaluationStatsFilter::default()
-                .with_request_id(req_a)
+                .with_group_id(req_a)
                 .with_evaluated_by(Uuid::nil()),
             i64::MAX,
         )
@@ -291,7 +286,7 @@ mod tests_get_evaluation_stats {
         let evals = search_evaluations(
             &pool,
             &SearchEvaluationsFilter::default()
-                .with_request_ids(vec![req_a])
+                .with_group_ids(vec![req_a])
                 .with_order_fitness_asc(),
         )
         .await?;
@@ -301,7 +296,7 @@ mod tests_get_evaluation_stats {
         let stats = get_evaluation_stats(
             &pool,
             &GetEvaluationStatsFilter::default()
-                .with_request_id(req_a)
+                .with_group_id(req_a)
                 .with_cursor(cursor),
             i64::MAX,
         )

@@ -95,7 +95,7 @@ mod tests_store_genotypes {
         let genotypes = vec![Genotype::new(
             "test",
             serde_json::json!([1, 2, 3]),
-            Some(request_id),
+            request_id,
             Some(1),
             None,
             None,
@@ -132,7 +132,7 @@ mod tests_store_genotypes {
         let genotype = Genotype::new(
             "test",
             serde_json::json!([1, 2, 3]),
-            Some(request_id),
+            request_id,
             Some(1),
             None,
             None,

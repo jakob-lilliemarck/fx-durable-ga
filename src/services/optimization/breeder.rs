@@ -37,7 +37,7 @@ impl Breeder {
         let child = Genotype::new(
             &request.type_name,
             genome,
-            Some(request.id),
+            request.id,
             Some(next_generation_id),
             Some(&parent_a.id),
             Some(&parent_b.id),

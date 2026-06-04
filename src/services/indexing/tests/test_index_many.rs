@@ -324,16 +324,6 @@ async fn it_does_not_dispatch_training_jobs_if_there_is_an_availability_record(
     Ok(())
 }
 
-#[ignore]
-#[sqlx::test(migrations = false)]
-async fn it_does_not_race_while_dispatching_training_jobs(
-    _pool: sqlx::PgPool,
-) -> anyhow::Result<()> {
-    // FIXME!
-    // Assert that the training job dispatch can **never** race!
-    unimplemented!()
-}
-
 #[sqlx::test(migrations = false)]
 async fn get_indexer_ids_of_type_returns_registered_indexers(
     pool: sqlx::PgPool,

@@ -4,7 +4,8 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GenotypeEvaluatedEvent {
     pub evaluation_id: Uuid,
-    pub request_id: Option<Uuid>,
+    pub group_id: Uuid,
+    pub reason: String,
     pub genotype_id: Uuid,
     pub fitness: f64,
 }
@@ -16,13 +17,15 @@ impl fx_event_bus::Event for GenotypeEvaluatedEvent {
 impl GenotypeEvaluatedEvent {
     pub fn new(
         evaluation_id: Uuid,
-        request_id: Option<Uuid>,
+        group_id: Uuid,
+        reason: String,
         genotype_id: Uuid,
         fitness: f64,
     ) -> Self {
         Self {
             evaluation_id,
-            request_id,
+            group_id,
+            reason,
             genotype_id,
             fitness,
         }

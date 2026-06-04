@@ -76,7 +76,8 @@ pub struct Evaluation {
     pub(crate) started_at: Option<DateTime<Utc>>,
     pub(crate) completed_at: Option<DateTime<Utc>>,
     pub(crate) evaluated_by: Option<Uuid>,
-    pub(crate) request_id: Option<Uuid>,
+    pub(crate) group_id: Uuid,
+    pub(crate) reason: String,
     pub(crate) generated_at: Option<DateTime<Utc>>,
 }
 
@@ -91,6 +92,8 @@ impl Evaluation {
     /// Creates an evaluation for a genotype with the given fitness and timing data.
     pub(crate) fn new(
         genotype_id: Uuid,
+        group_id: Uuid,
+        reason: String,
         fitness: f64,
         started_at: Option<DateTime<Utc>>,
         completed_at: Option<DateTime<Utc>>,
@@ -99,19 +102,14 @@ impl Evaluation {
         Self {
             id: Uuid::now_v7(),
             genotype_id,
+            group_id,
+            reason,
             fitness,
             started_at,
             completed_at,
             evaluated_by,
-            request_id: None,
             generated_at: None,
         }
-    }
-
-    /// Sets the optimization request this evaluation belongs to.
-    pub fn with_request_id(mut self, request_id: Uuid) -> Self {
-        self.request_id = Some(request_id);
-        self
     }
 
     /// Sets the timestamp when the evaluated genotype was generated.
@@ -144,8 +142,12 @@ impl Evaluation {
         &self.evaluated_by
     }
 
-    pub fn request_id(&self) -> &Option<Uuid> {
-        &self.request_id
+    pub fn group_id(&self) -> Uuid {
+        self.group_id
+    }
+
+    pub fn reason(&self) -> &str {
+        &self.reason
     }
 
     pub fn generated_at(&self) -> &Option<DateTime<Utc>> {

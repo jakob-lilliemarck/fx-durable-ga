@@ -23,7 +23,6 @@ ALTER TABLE fx_durable_ga.evaluations
     ADD CONSTRAINT evaluations_pkey PRIMARY KEY (id);
 
 ALTER TABLE fx_durable_ga.genotypes
-    ALTER COLUMN request_id DROP NOT NULL,
     ALTER COLUMN generation_id DROP NOT NULL;
 
 CREATE TABLE IF NOT EXISTS fx_durable_ga.noise_probes (
