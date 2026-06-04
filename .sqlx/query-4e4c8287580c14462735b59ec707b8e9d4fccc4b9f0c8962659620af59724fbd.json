@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id,\n            account_id,\n            account_type,\n            amount,\n            balance,\n            timestamp,\n            reason\n        FROM budgeting.transactions\n        WHERE\n            ($1::UUID IS NULL OR account_id = $1::UUID)\n            AND (\n                $2::TIMESTAMPTZ IS NULL\n                OR $3::UUID IS NULL\n                OR (timestamp, id) < ($2, $3::UUID)\n            )\n            ORDER BY timestamp DESC, id DESC\n        LIMIT $4;\n        ",
+  "query": "\n        SELECT\n            id,\n            account_id,\n            account_type,\n            amount,\n            balance,\n            timestamp,\n            reason\n        FROM budgeting.transactions\n        WHERE\n            ($1::UUID IS NULL OR account_id = $1::UUID)\n            AND ($5::TEXT IS NULL OR reason = $5)\n            AND (\n                $2::TIMESTAMPTZ IS NULL\n                OR $3::UUID IS NULL\n                OR (timestamp, id) < ($2, $3::UUID)\n            )\n            ORDER BY timestamp DESC, id DESC\n        LIMIT $4;\n        ",
   "describe": {
     "columns": [
       {
@@ -44,7 +44,8 @@
         "Uuid",
         "Timestamptz",
         "Uuid",
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -57,5 +58,5 @@
       false
     ]
   },
-  "hash": "85a6a71e09d7072e24a2abdc408a92a353ab7c2a1b607b1d2a89757a35433c42"
+  "hash": "4e4c8287580c14462735b59ec707b8e9d4fccc4b9f0c8962659620af59724fbd"
 }
