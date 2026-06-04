@@ -4,7 +4,7 @@
 
 ### F1 — Evaluation Noise Estimation
 
-A standalone diagnostic service. Shares only `genotype_evaluation_service` and
+A standalone diagnostic service. Shares `genotype_evaluation_service` and
 the budget aggregate as dependencies. Can be run before or alongside the GA.
 
 #### Responsibility
@@ -13,39 +13,23 @@ evaluating the same genotype repeatedly. Expressed as mean and standard
 deviation. All skip decisions in Q1 are expressed relative to this baseline.
 
 #### Design
-- The framework randomly generates a small population of probe genotypes
-- Each probe is evaluated repeatedly via `genotype_evaluation_service`,
-  debiting a dedicated F1 budget on each evaluation
-- Stopping criterion per probe: rolling std dev has changed by less than
-  epsilon over successive estimates **and** `min_evaluations_per_probe` has
-  been reached — guards against false convergence by chance
-- Hard stop when budget is exhausted regardless of convergence
-- If the evaluation function is deterministic, std dev converges to zero
-  immediately after `min_evaluations_per_probe` — F1 exits cheaply and reports
-  a noise floor of zero, which is the correct and useful answer
+- Callers create probe genotypes and register them via
+  `noise_diagnostics::Service::new_noise_probe`, which dispatches N evaluation
+  jobs atomically
+- Each job evaluates the probe genotype exactly once via
+  `genotype_evaluation_service`
+- If the evaluation function is deterministic, std dev is zero after the first
+  evaluation, and the scaffolding cost is negligible
 - If noise floors differ meaningfully across probes, report **per fitness-band
   noise floors** rather than a single global value
 
 #### User-configurable parameters
 - `probe_population_size`
-- `min_evaluations_per_probe`
-- `evaluations_per_probe` (budget per probe, soft target)
-- `epsilon` (convergence threshold)
-- `budget` (hard cap on total evaluations)
-
-#### Aggregate & persistence
-Lives in the **genotype aggregate** — noise is a derived fact about a
-genotype's evaluation history.
-
-New table: `noise_estimates`
-- `genotype_id`
-- `mean`, `std_dev`   — current estimate
-- `sample_count`      — evaluations contributed
-- `converged`         — stopping criterion met, or budget exhausted
-- `samples`           — individual fitness values for stabilization chart
+- `evaluations_per_probe`
 
 #### Output
-- Stabilization chart (sample count vs. rolling std dev) per probe
+- Per-probe noise floor: mean, stddev, and sample count (from evaluation
+  aggregates queried via `evaluations::Read`)
 - Global and per fitness-band noise floor estimates
 
 ---
@@ -170,7 +154,7 @@ budget_repository                        (new, foundation)
 genotype_evaluation_service              (new, core)
         ↑
         ├── ga_service                   (existing, refactored)
-        └── genotype_evaluation_noise_diagnostic_service   (F1, new)
+        └── noise_diagnostics            (F1, existing but incomplete)
 
 genotype_indexing_service                (existing, renamed)
         ↑
@@ -188,8 +172,7 @@ budget aggregate                         (new, foundation)
 
 genotype aggregate
   ├── genotypes                          (existing)
-  ├── evaluations                        (existing)
-  └── noise_estimates                    (new, F1)
+  └── evaluations                        (existing)
 
 embedding aggregate
   ├── embeddings                         (existing)
@@ -204,40 +187,18 @@ fitness_distance_correlation aggregate   (new, F2a)
 
 ## Priority Checklist
 
-Prio 1 — Test coverage (all `pub` and `pub(crate)` methods on impl Service)
-- [x] Verify indexer digest is deterministic
-- [x] `budgeting::Service`
-- [x] `locking::Service`
-- [x] `genotype_explorer::Service`
-- [x] `evaluation::Service`
-- [x] `indexing::Service`
-- [x] `optimization::Service`
-- [x] `genotype_indexing::Service`
-
-In more detail:
-in the lineage view:
-1. Mark the "selected genotype" with an accent color
-2. Provide a hover-over showing some data about the each genotype including:
-  a. ID
-  b. Fitness
-  c. Genome (as well formatted json)
-3. Contain the SVG area, and on right side, show a list of N similar genotypes as the currently selected one (later on we can introduce pagination, for now just N most similar).
-4. Requests view
-  a. requests selector
-
 Prio 2
 - [ ] Reduce encoder model to bare essentials; expose minimal fields outside repository/crate.
 - [ ] Make Indexer::dataset async (return BoxFuture) to support async dataset construction.
 
-Prio 3
-- [ ] Support stop/pause/resume by rethinking Requests -> Optimizations with OptimizationState + OptimizationBudget tables (event-sourced state, budget deltas).
+Prio 3 — Resume / Pause
+- [ ] Add `add_budget(request_id, amount)` public method on optimization service
+- [ ] Add `resume(request_id, amount)` convenience wrapper
 
 Prio 4 — F1: Evaluation Noise Estimation
-- [ ] Probe genotype generation and repeated evaluation via genotype_evaluation_service
-- [ ] Rolling std dev convergence detection (epsilon + min_evaluations_per_probe)
-- [ ] Budget exhaustion hard stop
+- [~] Probe genotype creation & evaluation job dispatch (scaffolding exists)
+- [ ] Per-probe noise floor query via evaluation aggregates
 - [ ] Per fitness-band noise floor reporting
-- [ ] Stabilization chart output
 
 Prio 5 — F2: Embedding Space Quality Diagnostics
 - [ ] F2a: Fitness-Distance Correlation — rolling window, pairwise distances, Spearman correlation
