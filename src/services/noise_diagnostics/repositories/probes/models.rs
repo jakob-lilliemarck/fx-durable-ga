@@ -42,11 +42,17 @@ impl NoiseProbe {
 #[derive(Default, Debug)]
 pub struct SearchNoiseProbesFilter {
     pub(super) request_id: Option<Uuid>,
+    pub(super) genotype_id: Option<Uuid>,
 }
 
 impl SearchNoiseProbesFilter {
     pub fn with_request_id(mut self, request_id: Uuid) -> Self {
         self.request_id = Some(request_id);
+        self
+    }
+
+    pub fn with_genotype_id(mut self, genotype_id: Uuid) -> Self {
+        self.genotype_id = Some(genotype_id);
         self
     }
 }

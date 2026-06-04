@@ -1,9 +1,7 @@
 use super::Error;
 use super::models::{NoiseProbe, SearchNoiseProbesFilter};
-use chrono::Utc;
 use sqlx::PgExecutor;
 use tracing::instrument;
-use uuid::Uuid;
 
 #[instrument(level = "debug", skip(tx))]
 pub async fn store_noise_probe<'tx, E: PgExecutor<'tx>>(
@@ -39,9 +37,11 @@ pub async fn search_noise_probes<'tx, E: PgExecutor<'tx>>(
             SELECT id, genotype_id, request_id, evaluation_count, created_at
             FROM fx_durable_ga.noise_probes
             WHERE ($1::uuid IS NULL OR request_id = $1)
+              AND ($2::uuid IS NULL OR genotype_id = $2)
             ORDER BY created_at ASC
         "#,
         filter.request_id,
+        filter.genotype_id,
     )
     .fetch_all(tx)
     .await
@@ -68,6 +68,26 @@ mod tests {
         let results = search_noise_probes(
             &pool,
             &SearchNoiseProbesFilter::default().with_request_id(request_id),
+        )
+        .await?;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].id, probe.id);
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn search_by_genotype_id(pool: PgPool) -> anyhow::Result<()> {
+        migrations::run_default_migrations(&pool).await?;
+
+        let request_id = Uuid::now_v7();
+        let genotype_id = Uuid::now_v7();
+        let probe = NoiseProbe::new(genotype_id, request_id, 5);
+        store_noise_probe(&pool, &probe).await?;
+
+        let results = search_noise_probes(
+            &pool,
+            &SearchNoiseProbesFilter::default().with_genotype_id(genotype_id),
         )
         .await?;
         assert_eq!(results.len(), 1);

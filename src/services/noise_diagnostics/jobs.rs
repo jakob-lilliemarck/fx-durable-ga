@@ -9,14 +9,14 @@ use uuid::Uuid;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(super) struct EvaluateNoiseProbeGenotypeMessage {
     pub probe_id: Uuid,
-    pub genotype_id: Uuid,
+    pub genotype: crate::repositories::genotypes::Genotype,
 }
 
 impl EvaluateNoiseProbeGenotypeMessage {
-    pub fn new(probe_id: Uuid, genotype_id: Uuid) -> Self {
+    pub fn new(probe_id: Uuid, genotype: crate::repositories::genotypes::Genotype) -> Self {
         Self {
             probe_id,
-            genotype_id,
+            genotype,
         }
     }
 }
@@ -41,7 +41,7 @@ impl Handler for EvaluateNoiseProbeGenotypeHandler {
     ) -> BoxFuture<'a, Result<(), Self::Error>> {
         Box::pin(async move {
             self.service
-                .evaluate_probe(message.probe_id, message.genotype_id)
+                .evaluate_probe(message.probe_id, message.genotype)
                 .await
         })
     }

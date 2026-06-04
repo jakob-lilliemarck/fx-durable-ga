@@ -52,11 +52,17 @@ impl Service {
             return Err(super::Error::InvalidEvaluationCount(evaluation_count));
         }
 
+        let genotype = self
+            .genotypes_ro
+            .get_genotype(&genotype_id)
+            .await
+            .map_err(|e| super::Error::Internal(anyhow::Error::from(e)))?;
+
         let probe = NoiseProbe::new(genotype_id, request_id, evaluation_count);
         let probe_id = probe.id();
 
         let jobs: Vec<EvaluateNoiseProbeGenotypeMessage> = (0..evaluation_count)
-            .map(|_| EvaluateNoiseProbeGenotypeMessage::new(probe_id, genotype_id))
+            .map(|_| EvaluateNoiseProbeGenotypeMessage::new(probe_id, genotype.clone()))
             .collect();
 
         let mq = self.mq.clone();
@@ -77,20 +83,17 @@ impl Service {
     }
 
     /// Evaluates a probe genotype (called by the job handler).
+    ///
+    /// The `genotype` is pre-fetched in `new_noise_probe` and carried in the job message
+    /// to avoid an N+1 query pattern across all evaluation jobs for the same probe.
     #[instrument(level = "debug", skip(self))]
     pub(super) async fn evaluate_probe(
         &self,
-        _probe_id: Uuid,
-        genotype_id: Uuid,
+        probe_id: Uuid,
+        genotype: genotypes::Genotype,
     ) -> Result<(), super::Error> {
-        let genotype = self
-            .genotypes_ro
-            .get_genotype(&genotype_id)
-            .await
-            .map_err(|e| super::Error::Internal(anyhow::Error::from(e)))?;
-
         self.evaluation
-            .evaluate_genotype(genotype, vec![], vec![EVAL_SHUTDOWN])
+            .evaluate_genotype(genotype, probe_id, vec![], vec![EVAL_SHUTDOWN])
             .await
             .map_err(|e| super::Error::Internal(anyhow::Error::from(e)))?;
 
@@ -165,7 +168,6 @@ mod tests {
         for job in &probe_jobs {
             let payload: serde_json::Value = serde_json::from_value(job.payload.clone())?;
             assert_eq!(payload["probe_id"], serde_json::json!(probe_id));
-            assert_eq!(payload["genotype_id"], serde_json::json!(genotype_id));
         }
 
         Ok(())
