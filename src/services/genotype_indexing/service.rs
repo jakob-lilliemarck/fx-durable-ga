@@ -1256,7 +1256,11 @@ mod tests_index_genotypes {
         let embeddings_wr = embeddings::Write::new(db::WritePool { pool: pool.clone() });
         store_indexed(&app, &embeddings_wr, &indexer_id, &genotype_ids).await?;
 
-        let request = app.repositories().requests().get_request(request_id).await?;
+        let request = app
+            .repositories()
+            .requests()
+            .get_request(request_id)
+            .await?;
         let indexers = app
             .services()
             .genotype_indexing()
@@ -1276,10 +1280,16 @@ mod tests_index_genotypes {
 
         let (request_id, _) = seed(&pool, &[], 2).await?;
 
-        let mut c = crate::test_tools::TestConfig::new(pool.clone()).build().await?;
+        let mut c = crate::test_tools::TestConfig::new(pool.clone())
+            .build()
+            .await?;
         let app = c.get::<Arc<App>>().await?;
 
-        let request = app.repositories().requests().get_request(request_id).await?;
+        let request = app
+            .repositories()
+            .requests()
+            .get_request(request_id)
+            .await?;
         let indexers = app
             .services()
             .genotype_indexing()

@@ -2,6 +2,7 @@
 DROP TABLE IF EXISTS fx_durable_ga.noise_diagnostic_run_evaluations;
 DROP TABLE IF EXISTS fx_durable_ga.noise_diagnostic_runs;
 DROP TABLE IF EXISTS fx_durable_ga.noise_diagnostic_configs;
+DROP TABLE IF EXISTS fx_durable_ga.noise_probes;
 
 -- Restore NOT NULL on genotypes
 ALTER TABLE fx_durable_ga.genotypes

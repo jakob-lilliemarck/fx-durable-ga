@@ -6,6 +6,7 @@ pub mod evaluation;
 pub mod genotype_explorer;
 pub mod genotype_indexing;
 pub mod indexing;
+pub mod noise_diagnostics;
 pub mod optimization;
 pub mod synchronization;
 
@@ -21,6 +22,7 @@ pub struct Provider {
     pub indexing: Arc<indexing::Service>,
     pub genotype_explorer: Arc<genotype_explorer::Service>,
     pub genotype_indexing: Arc<genotype_indexing::Service>,
+    pub noise_diagnostics: Arc<noise_diagnostics::Service>,
     pub synchronization: Arc<synchronization::Service>,
 }
 

@@ -4,7 +4,7 @@ use crate::infrastructure::{
 };
 use futures::future::BoxFuture;
 
-pub fn provide_noise_diagnostics_repository_ro(
+pub fn provide_probes_repository_ro(
     c: &mut Container,
 ) -> BoxFuture<'_, ProviderResult<super::Read>> {
     Box::pin(async {
@@ -14,7 +14,7 @@ pub fn provide_noise_diagnostics_repository_ro(
     })
 }
 
-pub fn provide_noise_diagnostics_repository_wr(
+pub fn provide_probes_repository_wr(
     c: &mut Container,
 ) -> BoxFuture<'_, ProviderResult<super::Write>> {
     Box::pin(async {
@@ -22,9 +22,4 @@ pub fn provide_noise_diagnostics_repository_wr(
         let repository = super::Write::new(wr);
         Ok(repository)
     })
-}
-
-pub fn register(c: &mut Container) {
-    c.provide(provide_noise_diagnostics_repository_ro);
-    c.provide(provide_noise_diagnostics_repository_wr);
 }

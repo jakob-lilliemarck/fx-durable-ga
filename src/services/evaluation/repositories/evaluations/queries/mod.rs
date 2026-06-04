@@ -1,4 +1,5 @@
 mod get_aggregated_fitness;
+mod get_evaluation_aggregates;
 mod get_evaluation_stats;
 mod get_evaluation_timings;
 mod search_evaluations;
@@ -6,6 +7,9 @@ mod store_evaluations;
 
 pub use get_aggregated_fitness::{
     AggregatedFitness, GetAggregatedFitnessFilter, get_aggregated_fitness,
+};
+pub use get_evaluation_aggregates::{
+    EvaluationAggregates, GetEvaluationAggregatesFilter, get_evaluation_aggregates,
 };
 pub use get_evaluation_stats::{GetEvaluationStatsFilter, get_evaluation_stats};
 pub use get_evaluation_timings::{GetEvaluationTimingsFilter, get_evaluation_timings};

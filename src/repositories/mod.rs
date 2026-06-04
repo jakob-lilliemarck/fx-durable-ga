@@ -4,7 +4,7 @@ use crate::services::evaluation::repositories::evaluations;
 use crate::services::indexing::embeddings;
 pub(crate) use crate::services::optimization::Read;
 pub mod genotypes;
-pub mod noise_diagnostics;
+
 pub mod ordering;
 
 #[derive(Clone)]

@@ -375,14 +375,11 @@ async fn get_deferred_items_returns_pending_items(pool: sqlx::PgPool) -> anyhow:
     let indexing = ctx.container.get::<Arc<indexing::Service>>().await?;
     let embeddings_wr = ctx.container.get::<embeddings::Write>().await?;
 
-    let expected_entity_id =
-        Uuid::parse_str("00000000-0000-0000-0000-00000000a101")?;
+    let expected_entity_id = Uuid::parse_str("00000000-0000-0000-0000-00000000a101")?;
     let requests = vec![RequestedEmbedding::new(
         expected_entity_id,
         "genotype".to_string(),
-        Digest::from_hex(
-            "0000000000000000000000000000000000000000000000000000000000000010",
-        )?,
+        Digest::from_hex("0000000000000000000000000000000000000000000000000000000000000010")?,
         serde_json::Value::Object(Default::default()),
         Utc::now(),
     )];

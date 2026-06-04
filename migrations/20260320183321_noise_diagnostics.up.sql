@@ -1,19 +1,3 @@
-CREATE TABLE fx_durable_ga.noise_diagnostic_configs (
-    id UUID PRIMARY KEY,
-    optimization_type_name TEXT NOT NULL,
-    probe_population_size INTEGER NOT NULL,
-    probe_min_evaluations INTEGER NOT NULL,
-    probe_max_evaluations INTEGER NOT NULL,
-    budget_id UUID NOT NULL,
-    revised_at TIMESTAMPTZ NOT NULL
-);
-
-CREATE TABLE fx_durable_ga.noise_diagnostic_runs (
-    id UUID PRIMARY KEY,
-    noise_diagnostic_config_id UUID NOT NULL REFERENCES fx_durable_ga.noise_diagnostic_configs(id),
-    initiated_at TIMESTAMPTZ NOT NULL
-);
-
 -- Step 1: Drop the copied_from column (removes the FK dependency on fitness_pkey)
 ALTER TABLE fx_durable_ga.evaluations
     DROP COLUMN copied_from;
@@ -42,9 +26,10 @@ ALTER TABLE fx_durable_ga.genotypes
     ALTER COLUMN request_id DROP NOT NULL,
     ALTER COLUMN generation_id DROP NOT NULL;
 
-CREATE TABLE fx_durable_ga.noise_diagnostic_run_evaluations (
-    noise_diagnostic_run_id UUID NOT NULL REFERENCES fx_durable_ga.noise_diagnostic_runs(id) ON DELETE CASCADE,
-    evaluation_id UUID NOT NULL,
-    referenced_at TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (noise_diagnostic_run_id, evaluation_id)
+CREATE TABLE IF NOT EXISTS fx_durable_ga.noise_probes (
+    id UUID PRIMARY KEY,
+    genotype_id UUID NOT NULL,
+    request_id UUID NOT NULL,
+    evaluation_count INTEGER NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL
 );

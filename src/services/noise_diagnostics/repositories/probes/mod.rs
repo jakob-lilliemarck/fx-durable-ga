@@ -6,7 +6,7 @@ mod repository;
 pub mod registrations;
 
 pub use errors::Error;
-pub use registrations::register;
+pub use models::{NoiseProbe, SearchNoiseProbesFilter};
 
 pub(crate) use repository::Read;
 pub(crate) use repository::Write;

@@ -145,14 +145,17 @@ impl Service {
                 if let Some(request_id) = genotype.request_id {
                     evaluation = evaluation.with_request_id(request_id);
                 }
+                let evaluation = evaluation.with_generated_at(genotype.generated_at);
+                let evaluation_id = evaluation.id();
                 evaluations::WriteTx::new(tx)
-                    .store_evaluations(&[evaluation.with_generated_at(genotype.generated_at)])
+                    .store_evaluations(&[evaluation])
                     .await?;
 
                 let mut publisher = fx_event_bus::Publisher::new_tx(tx);
 
                 publisher
                     .publish(super::GenotypeEvaluatedEvent::new(
+                        evaluation_id,
                         genotype.request_id,
                         genotype.id,
                         fitness,

@@ -1,7 +1,8 @@
 use super::errors::Error;
 use super::queries::{
-    AggregatedFitness, GetAggregatedFitnessFilter, GetEvaluationStatsFilter,
-    GetEvaluationTimingsFilter, SearchEvaluationsFilter,
+    AggregatedFitness, EvaluationAggregates, GetAggregatedFitnessFilter,
+    GetEvaluationAggregatesFilter, GetEvaluationStatsFilter, GetEvaluationTimingsFilter,
+    SearchEvaluationsFilter,
 };
 use super::{Evaluation, EvaluationPopulation, TimingsSummary};
 use crate::infrastructure::db;
@@ -116,6 +117,15 @@ impl Read {
             .await?;
         Ok(evals.pop().map(|e| e.fitness()))
     }
+
+    /// Returns aggregate statistics (COUNT, AVG, STDDEV_POP, VAR_POP) for a set of evaluations.
+    #[instrument(level = "debug", skip(self), fields(filter = ?filter))]
+    pub async fn get_evaluation_aggregates(
+        &self,
+        filter: &GetEvaluationAggregatesFilter,
+    ) -> Result<EvaluationAggregates, Error> {
+        super::queries::get_evaluation_aggregates(&self.ro.pool, filter).await
+    }
 }
 
 impl Write {
@@ -197,15 +207,10 @@ mod tests {
 
         let started_at = Utc::now();
         let completed_at = Utc::now();
-        let evaluation = Evaluation::new(
-            genotype.id,
-            0.5,
-            Some(started_at),
-            Some(completed_at),
-            None,
-        )
-        .with_request_id(request_id)
-        .with_generated_at(started_at);
+        let evaluation =
+            Evaluation::new(genotype.id, 0.5, Some(started_at), Some(completed_at), None)
+                .with_request_id(request_id)
+                .with_generated_at(started_at);
         let mut tx = pool.begin().await?;
         {
             let mut wr = WriteTx::new(&mut tx);
@@ -236,15 +241,10 @@ mod tests {
 
         let started_at = Utc::now();
         let completed_at = Utc::now();
-        let evaluation = Evaluation::new(
-            genotype.id,
-            0.5,
-            Some(started_at),
-            Some(completed_at),
-            None,
-        )
-        .with_request_id(request_id)
-        .with_generated_at(started_at);
+        let evaluation =
+            Evaluation::new(genotype.id, 0.5, Some(started_at), Some(completed_at), None)
+                .with_request_id(request_id)
+                .with_generated_at(started_at);
         let mut tx = pool.begin().await?;
         {
             let mut wr = WriteTx::new(&mut tx);

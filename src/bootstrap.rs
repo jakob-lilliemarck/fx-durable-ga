@@ -127,12 +127,17 @@ pub fn provide_app(c: &mut Container) -> BoxFuture<'_, ProviderResult<Arc<App>>>
             .get::<Arc<super::services::optimization::Service>>()
             .await?;
 
+        let noise_diagnostics = c
+            .get::<Arc<super::services::noise_diagnostics::Service>>()
+            .await?;
+
         let services = super::services::Provider {
             synchronization,
             indexing,
             genotype_indexing,
             optimization,
             genotype_explorer,
+            noise_diagnostics,
         };
 
         let app = super::bootstrap::App {
@@ -286,7 +291,6 @@ pub fn register(c: &mut Container) {
 
     // Repositories
     super::repositories::genotypes::register(c);
-    super::repositories::noise_diagnostics::register(c);
 
     // Services
     super::services::locking::register(c);
@@ -297,6 +301,7 @@ pub fn register(c: &mut Container) {
     super::services::genotype_explorer::register(c);
     super::services::optimization::register(c);
     super::services::evaluation::register(c);
+    super::services::noise_diagnostics::register(c);
 
     // The application instance
     c.provide(provide_app);
