@@ -51,6 +51,14 @@ pub enum Error {
     #[error("Breeding called with zero or negative count: {0}")]
     CouldNotBreed(i64),
 
+    #[error(
+        "Invalid configuration: population_size ({population_size}) must be >= {required} for the selected selector"
+    )]
+    InvalidConfiguration {
+        population_size: u32,
+        required: usize,
+    },
+
     #[error("Evaluation service error: {0}")]
     EvaluationService(#[from] evaluation::Error),
 

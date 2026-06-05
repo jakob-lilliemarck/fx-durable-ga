@@ -45,9 +45,9 @@ async fn it_trains_an_encoder(pool: sqlx::PgPool) -> anyhow::Result<()> {
 
     let fetched = encoders.get_encoder(&encoder_digest).await?;
 
-    assert_eq!(fetched.digest, encoder_digest);
-    assert_eq!(fetched.shape_in, vec![2]);
-    assert_eq!(fetched.shape_out, 2);
+    assert_eq!(*fetched.digest(), encoder_digest);
+    assert_eq!(fetched.shape_in(), vec![2]);
+    assert_eq!(fetched.shape_out(), 2);
 
     Ok(())
 }

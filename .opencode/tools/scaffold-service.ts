@@ -4,7 +4,7 @@ import * as path from "path";
 
 export default tool({
   description:
-    "Scaffold a new service module under src/services/. Creates the required boilerplate (mod.rs, errors.rs, service.rs, registrations.rs) and optionally events.rs, jobs.rs, and repositories/mod.rs. Optionally updates src/services/mod.rs with the module declaration.",
+    "Scaffold a new service module under src/services/. Creates the required boilerplate (mod.rs, errors.rs, service.rs, registrations.rs) and optionally events.rs, jobs.rs, and repositories/mod.rs with schema migration files. Optionally updates src/services/mod.rs with the module declaration.",
   args: {
     serviceName: tool.schema
       .string()
@@ -40,10 +40,6 @@ export default tool({
 
     fs.mkdirSync(serviceDir, { recursive: true });
 
-    if (withRepositories) {
-      fs.mkdirSync(path.join(serviceDir, "repositories"), { recursive: true });
-    }
-
     writeFile(path.join(serviceDir, "errors.rs"), errorsContent());
     writeFile(path.join(serviceDir, "service.rs"), serviceContent(serviceName));
     writeFile(
@@ -63,13 +59,24 @@ export default tool({
       writeFile(path.join(serviceDir, "jobs.rs"), jobsContent());
     }
 
-    if (withRepositories) {
-      writeFile(path.join(serviceDir, "repositories", "mod.rs"), repositoriesModContent());
-    }
-
     const messages: string[] = [
       `Created ${path.relative(root, serviceDir)}/`,
     ];
+
+    if (withRepositories) {
+      fs.mkdirSync(path.join(serviceDir, "repositories"), { recursive: true });
+      writeFile(path.join(serviceDir, "repositories", "mod.rs"), repositoriesModContent());
+
+      const ts = migrationTimestamp();
+      const migrationsDir = path.join(root, "migrations");
+      fs.mkdirSync(migrationsDir, { recursive: true });
+      const upName = `${ts}_add_${serviceName}_schema.up.sql`;
+      const downName = `${ts}_add_${serviceName}_schema.down.sql`;
+      writeFile(path.join(migrationsDir, upName), migrationUpContent(serviceName));
+      writeFile(path.join(migrationsDir, downName), migrationDownContent(serviceName));
+      messages.push(`Created migrations/${upName}`);
+      messages.push(`Created migrations/${downName}`);
+    }
 
     if (updateParentMod) {
       messages.push(updateServicesMod(root, serviceName));
@@ -79,10 +86,12 @@ export default tool({
   },
 });
 
+/// Writes a file as UTF-8.
 function writeFile(p: string, content: string) {
   fs.writeFileSync(p, content, "utf-8");
 }
 
+/// Returns the Error enum template with a catch-all Internal variant.
 function errorsContent(): string {
   return `#[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -94,6 +103,7 @@ pub enum Error {
 `;
 }
 
+/// Returns the Service struct template with a placeholder method.
 function serviceContent(name: string): string {
   return `use tracing::instrument;
 
@@ -114,6 +124,8 @@ impl Service {
 `;
 }
 
+/// Returns the registrations.rs template. Adds commented c.invokable lines
+/// when the service has events or jobs.
 function registrationsContent(
   name: string,
   withEvents: boolean,
@@ -150,6 +162,8 @@ pub fn register(c: &mut Container) {
 `;
 }
 
+/// Returns the mod.rs template. Module declarations are active or commented
+/// based on which optional features are selected.
 function modContent(
   name: string,
   withEvents: boolean,
@@ -197,6 +211,7 @@ function modContent(
   return lines.join("\n") + "\n";
 }
 
+/// Returns the events.rs stub with a SomethingHappenedEvent placeholder.
 function eventsContent(): string {
   return `use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -218,6 +233,8 @@ impl SomethingHappenedEvent {
 `;
 }
 
+/// Returns the jobs.rs stub with DoSomethingMessage and DoSomethingHandler
+/// placeholders.
 function jobsContent(): string {
   return `use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -256,11 +273,28 @@ impl fx_mq_jobs::Handler for DoSomethingHandler {
 `;
 }
 
+/// Returns the repositories/mod.rs placeholder directing to scaffold-repository.
 function repositoriesModContent(): string {
   return `// Repository aggregates will be scaffolded with the scaffold-repository tool.
 `;
 }
 
+/// Returns the current UTC time as YYYYMMDDHHMMSS for migration filenames.
+function migrationTimestamp(): string {
+  return new Date().toISOString().replace(/\D/g, "").slice(0, 14);
+}
+
+/// Returns CREATE SCHEMA SQL for the service's database schema.
+function migrationUpContent(name: string): string {
+  return `CREATE SCHEMA IF NOT EXISTS ${name};\n`;
+}
+
+/// Returns DROP SCHEMA ... CASCADE SQL to roll back the service's schema.
+function migrationDownContent(name: string): string {
+  return `DROP SCHEMA IF EXISTS ${name} CASCADE;\n`;
+}
+
+/// Reads a file as UTF-8, returning null if it doesn't exist.
 function readOptionalFile(p: string): string | null {
   try {
     return fs.readFileSync(p, "utf-8");
@@ -269,6 +303,7 @@ function readOptionalFile(p: string): string | null {
   }
 }
 
+/// Appends `pub mod <name>;` to src/services/mod.rs. Creates the file if missing.
 function updateServicesMod(root: string, name: string): string {
   const modPath = path.join(root, "src", "services", "mod.rs");
   const line = `pub mod ${name};\n`;

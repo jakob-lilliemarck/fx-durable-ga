@@ -100,13 +100,63 @@ impl Encode<'_, Postgres> for Digest {
 
 #[derive(Debug)]
 pub struct Encoder {
-    pub(crate) digest: Digest,
-    pub(crate) encodable_type_name: String,
-    pub(crate) model_config: serde_json::Value,
-    pub(crate) model_weights: Vec<u8>,
-    pub(crate) model_format: String,
-    pub(crate) shape_in: Vec<i32>,
-    pub(crate) shape_out: i32,
+    digest: Digest,
+    encodable_type_name: String,
+    model_config: serde_json::Value,
+    model_weights: Vec<u8>,
+    model_format: String,
+    shape_in: Vec<i32>,
+    shape_out: i32,
+}
+
+impl Encoder {
+    pub fn new(
+        digest: Digest,
+        encodable_type_name: String,
+        model_config: serde_json::Value,
+        model_weights: Vec<u8>,
+        model_format: String,
+        shape_in: Vec<i32>,
+        shape_out: i32,
+    ) -> Self {
+        Self {
+            digest,
+            encodable_type_name,
+            model_config,
+            model_weights,
+            model_format,
+            shape_in,
+            shape_out,
+        }
+    }
+
+    pub fn digest(&self) -> &Digest {
+        &self.digest
+    }
+
+    pub fn encodable_type_name(&self) -> &str {
+        &self.encodable_type_name
+    }
+
+    pub fn model_config(&self) -> &serde_json::Value {
+        &self.model_config
+    }
+
+    pub fn model_weights(&self) -> &[u8] {
+        &self.model_weights
+    }
+
+    pub fn model_format(&self) -> &str {
+        &self.model_format
+    }
+
+    pub fn shape_in(&self) -> &[i32] {
+        &self.shape_in
+    }
+
+    pub fn shape_out(&self) -> i32 {
+        self.shape_out
+    }
 }
 
 /// The availability state of an encoder
@@ -174,28 +224,28 @@ mod tests_get {
             Digest::from_hex("0000000000000000000000000000000000000000000000000000000000000000")
                 .unwrap();
 
-        let encoder = Encoder {
-            digest: digest,
-            model_config: json!({ "layers": 2 }),
-            model_weights: vec![1, 2, 3, 4],
-            model_format: "bin".to_string(),
-            shape_in: vec![128, 256],
-            shape_out: 64,
-            encodable_type_name: "encodable_type_name".to_string(),
-        };
+        let encoder = Encoder::new(
+            digest,
+            "encodable_type_name".to_string(),
+            json!({ "layers": 2 }),
+            vec![1, 2, 3, 4],
+            "bin".to_string(),
+            vec![128, 256],
+            64,
+        );
 
         let stored = store_encoder(&pool, &encoder, &trained_at).await?;
 
-        let fetched = get_encoder(&pool, &encoder.digest)
+        let fetched = get_encoder(&pool, encoder.digest())
             .await?
             .expect("Expect an encoder to be returned");
 
-        assert_eq!(stored.digest, fetched.digest);
-        assert_eq!(stored.model_config, fetched.model_config);
-        assert_eq!(stored.model_weights, fetched.model_weights);
-        assert_eq!(stored.model_format, fetched.model_format);
-        assert_eq!(stored.shape_in, fetched.shape_in);
-        assert_eq!(stored.shape_out, fetched.shape_out);
+        assert_eq!(stored.digest(), fetched.digest());
+        assert_eq!(stored.model_config(), fetched.model_config());
+        assert_eq!(stored.model_weights(), fetched.model_weights());
+        assert_eq!(stored.model_format(), fetched.model_format());
+        assert_eq!(stored.shape_in(), fetched.shape_in());
+        assert_eq!(stored.shape_out(), fetched.shape_out());
 
         Ok(())
     }
@@ -234,13 +284,13 @@ pub(crate) async fn store_encoder<'tx, E: PgExecutor<'tx>>(
                 shape_in,
                 shape_out;
         "#,
-        encoder.digest.as_str(),
-        encoder.encodable_type_name,
-        encoder.model_config,
-        encoder.model_weights,
-        encoder.model_format,
-        &encoder.shape_in,
-        encoder.shape_out,
+        encoder.digest().as_str(),
+        encoder.encodable_type_name(),
+        encoder.model_config(),
+        encoder.model_weights(),
+        encoder.model_format(),
+        encoder.shape_in(),
+        encoder.shape_out(),
         trained_at
     )
     .fetch_one(tx)
@@ -265,25 +315,25 @@ mod tests_store {
             Digest::from_hex("0000000000000000000000000000000000000000000000000000000000000000")
                 .unwrap();
 
-        let encoder = Encoder {
+        let encoder = Encoder::new(
             digest,
-            encodable_type_name: "encodable_type_name".to_string(),
-            model_config: json!({ "heads": 4 }),
-            model_weights: vec![5, 4, 3, 2, 1],
-            model_format: "bin".to_string(),
-            shape_in: vec![64],
-            shape_out: 32,
-        };
+            "encodable_type_name".to_string(),
+            json!({ "heads": 4 }),
+            vec![5, 4, 3, 2, 1],
+            "bin".to_string(),
+            vec![64],
+            32,
+        );
 
         let stored = store_encoder(&pool, &encoder, &trained_at).await?;
 
-        assert_eq!(stored.digest, encoder.digest);
-        assert_eq!(stored.encodable_type_name, encoder.encodable_type_name);
-        assert_eq!(stored.model_config, encoder.model_config);
-        assert_eq!(stored.model_weights, encoder.model_weights);
-        assert_eq!(stored.model_format, encoder.model_format);
-        assert_eq!(stored.shape_in, encoder.shape_in);
-        assert_eq!(stored.shape_out, encoder.shape_out);
+        assert_eq!(stored.digest(), encoder.digest());
+        assert_eq!(stored.encodable_type_name(), encoder.encodable_type_name());
+        assert_eq!(stored.model_config(), encoder.model_config());
+        assert_eq!(stored.model_weights(), encoder.model_weights());
+        assert_eq!(stored.model_format(), encoder.model_format());
+        assert_eq!(stored.shape_in(), encoder.shape_in());
+        assert_eq!(stored.shape_out(), encoder.shape_out());
 
         Ok(())
     }
@@ -297,15 +347,15 @@ mod tests_store {
             Digest::from_hex("0000000000000000000000000000000000000000000000000000000000000000")
                 .unwrap();
 
-        let encoder = Encoder {
+        let encoder = Encoder::new(
             digest,
-            encodable_type_name: "encodable_type_name".to_string(),
-            model_config: json!({ "filters": 16 }),
-            model_weights: vec![0, 1, 0, 1],
-            model_format: "bin".to_string(),
-            shape_in: vec![32, 32, 3],
-            shape_out: 10,
-        };
+            "encodable_type_name".to_string(),
+            json!({ "filters": 16 }),
+            vec![0, 1, 0, 1],
+            "bin".to_string(),
+            vec![32, 32, 3],
+            10,
+        );
 
         store_encoder(&pool, &encoder, &trained_at).await?;
         let result = store_encoder(&pool, &encoder, &trained_at).await;
@@ -329,15 +379,15 @@ mod test_tools {
         ))
         .unwrap();
 
-        let encoder = Encoder {
+        let encoder = Encoder::new(
             digest,
-            encodable_type_name: "encodable_type_name".to_string(),
-            model_config: serde_json::json!({ "heads": 4 }),
-            model_weights: vec![5, 4, 3, 2, 1],
-            model_format: "bin".to_string(),
-            shape_in: vec![64],
-            shape_out: 32,
-        };
+            "encodable_type_name".to_string(),
+            serde_json::json!({ "heads": 4 }),
+            vec![5, 4, 3, 2, 1],
+            "bin".to_string(),
+            vec![64],
+            32,
+        );
 
         let stored = super::store_encoder(tx, &encoder, &trained_at).await?;
         Ok(stored)
@@ -376,15 +426,16 @@ mod tests_get_available_encoder_digests {
         let encoder_a = super::test_tools::seed_encoder(&pool, 'a').await?;
         let encoder_b = super::test_tools::seed_encoder(&pool, 'b').await?;
 
-        store_encoder_availability(&pool, &encoder_a.digest, true, &Utc::now()).await?;
-        store_encoder_availability(&pool, &encoder_b.digest, true, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_a.digest(), true, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_b.digest(), true, &Utc::now()).await?;
 
         let enabled =
-            get_available_encoder_digests(&pool, &[encoder_a.digest, encoder_b.digest]).await?;
+            get_available_encoder_digests(&pool, &[*encoder_a.digest(), *encoder_b.digest()])
+                .await?;
 
         assert_eq!(enabled.len(), 2);
-        assert!(enabled.iter().any(|digest| digest == &encoder_a.digest));
-        assert!(enabled.iter().any(|digest| digest == &encoder_b.digest));
+        assert!(enabled.iter().any(|digest| digest == encoder_a.digest()));
+        assert!(enabled.iter().any(|digest| digest == encoder_b.digest()));
 
         Ok(())
     }
@@ -395,29 +446,29 @@ mod tests_get_available_encoder_digests {
 
         // just enabled
         let encoder_a = super::test_tools::seed_encoder(&pool, 'a').await?;
-        store_encoder_availability(&pool, &encoder_a.digest, true, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_a.digest(), true, &Utc::now()).await?;
 
         // just disabled
         let encoder_b = super::test_tools::seed_encoder(&pool, 'b').await?;
-        store_encoder_availability(&pool, &encoder_b.digest, false, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_b.digest(), false, &Utc::now()).await?;
 
         // enabled then disabled
         let encoder_c = super::test_tools::seed_encoder(&pool, 'c').await?;
-        store_encoder_availability(&pool, &encoder_c.digest, true, &Utc::now()).await?;
-        store_encoder_availability(&pool, &encoder_c.digest, false, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_c.digest(), true, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_c.digest(), false, &Utc::now()).await?;
 
         // disabled then enabled
         let encoder_d = super::test_tools::seed_encoder(&pool, 'd').await?;
-        store_encoder_availability(&pool, &encoder_d.digest, false, &Utc::now()).await?;
-        store_encoder_availability(&pool, &encoder_d.digest, true, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_d.digest(), false, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_d.digest(), true, &Utc::now()).await?;
 
         let enabled = get_available_encoder_digests(
             &pool,
             &[
-                encoder_a.digest,
-                encoder_b.digest,
-                encoder_c.digest,
-                encoder_d.digest,
+                *encoder_a.digest(),
+                *encoder_b.digest(),
+                *encoder_c.digest(),
+                *encoder_d.digest(),
             ],
         )
         .await?;
@@ -425,12 +476,12 @@ mod tests_get_available_encoder_digests {
         assert_eq!(enabled.len(), 2);
 
         // enabled
-        assert!(enabled.iter().any(|digest| *digest == encoder_a.digest));
-        assert!(enabled.iter().any(|digest| *digest == encoder_d.digest));
+        assert!(enabled.iter().any(|digest| *digest == *encoder_a.digest()));
+        assert!(enabled.iter().any(|digest| *digest == *encoder_d.digest()));
 
         // disabled
-        assert!(enabled.iter().all(|digest| *digest != encoder_b.digest));
-        assert!(enabled.iter().all(|digest| *digest != encoder_c.digest));
+        assert!(enabled.iter().all(|digest| *digest != *encoder_b.digest()));
+        assert!(enabled.iter().all(|digest| *digest != *encoder_c.digest()));
 
         Ok(())
     }
@@ -440,18 +491,19 @@ mod tests_get_available_encoder_digests {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let encoder_a = super::test_tools::seed_encoder(&pool, 'a').await?;
-        store_encoder_availability(&pool, &encoder_a.digest, true, &Utc::now()).await?;
-        store_encoder_availability(&pool, &encoder_a.digest, false, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_a.digest(), true, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_a.digest(), false, &Utc::now()).await?;
 
         let encoder_b = super::test_tools::seed_encoder(&pool, 'b').await?;
-        store_encoder_availability(&pool, &encoder_b.digest, false, &Utc::now()).await?;
-        store_encoder_availability(&pool, &encoder_b.digest, true, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_b.digest(), false, &Utc::now()).await?;
+        store_encoder_availability(&pool, encoder_b.digest(), true, &Utc::now()).await?;
 
         let enabled =
-            get_available_encoder_digests(&pool, &[encoder_a.digest, encoder_b.digest]).await?;
+            get_available_encoder_digests(&pool, &[*encoder_a.digest(), *encoder_b.digest()])
+                .await?;
 
         assert_eq!(enabled.len(), 1);
-        assert_eq!(enabled[0], encoder_b.digest);
+        assert_eq!(enabled[0], *encoder_b.digest());
 
         Ok(())
     }

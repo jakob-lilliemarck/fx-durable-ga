@@ -99,6 +99,13 @@ impl Service {
             return Err(Error::UnknownTypeError { type_name });
         }
 
+        if (schedule.population_size() as usize) < selector.min_candidates() {
+            return Err(Error::InvalidConfiguration {
+                population_size: schedule.population_size(),
+                required: selector.min_candidates(),
+            });
+        }
+
         let mq = self.mq.clone();
         let request = db::begin(self.requests_wr.clone(), |tx| {
             Box::pin(async move {
@@ -672,7 +679,7 @@ mod tests {
                 "unknown::type".to_string(),
                 FitnessGoal::maximize(1.0)?,
                 Schedule::generational(10, 2),
-                Selector::tournament(3),
+                Selector::tournament(1),
             )
             .await;
 
@@ -692,7 +699,7 @@ mod tests {
                 TEST_TYPE_NAME.to_string(),
                 FitnessGoal::maximize(1.0)?,
                 Schedule::generational(10, 2),
-                Selector::tournament(3),
+                Selector::tournament(1),
             )
             .await?;
 
@@ -785,7 +792,7 @@ pub(crate) mod test_tools {
                 TEST_TYPE_NAME.to_string(),
                 FitnessGoal::maximize(1.0)?,
                 schedule,
-                Selector::tournament(3),
+                Selector::tournament(2),
             )
             .await?;
 
@@ -1015,7 +1022,7 @@ mod tests_try_charge {
                 TEST_TYPE_NAME.to_string(),
                 FitnessGoal::maximize(1.0)?,
                 schedule,
-                Selector::tournament(3),
+                Selector::tournament(2),
             )
             .await?;
         let request = svc.requests_ro.get_request(request_id).await?;
@@ -1094,7 +1101,7 @@ mod tests_try_charge {
                 TEST_TYPE_NAME.to_string(),
                 FitnessGoal::maximize(1.0)?,
                 schedule,
-                Selector::tournament(3),
+                Selector::tournament(2),
             )
             .await?;
         let request = svc.requests_ro.get_request(request_id).await?;
@@ -1431,6 +1438,115 @@ mod tests_add_budget {
             matching.len(),
             1,
             "expected a BUDGET_ADDED transaction with amount=50"
+        );
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests_resume {
+    use super::test_tools::*;
+    use super::*;
+    use crate::services::evaluation::Service as EvaluationService;
+    use crate::services::optimization::{FitnessGoal, Schedule, Selector};
+    use crate::test_tools::TestConfig;
+    use chrono::Utc;
+    use sqlx::PgPool;
+    use std::sync::Arc;
+    use tokio::time::{Duration, timeout};
+
+    #[sqlx::test(migrations = false)]
+    async fn it_resumes_after_add_budget(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let mut c = TestConfig::new(pool.clone())
+            .with_listeners()
+            .with_optimizer(TestOptimizer)
+            .build()
+            .await?;
+        let evaluation = c.get::<Arc<EvaluationService>>().await?;
+        evaluation.register(TEST_TYPE_NAME, TestEvaluator).await;
+        let svc = c.get::<Arc<Service>>().await?;
+
+        let schedule = Schedule::rolling(2, 2, 2);
+        let request_id = svc
+            .request_new(
+                TEST_TYPE_NAME.to_string(),
+                FitnessGoal::maximize(1.0)?,
+                schedule,
+                Selector::tournament(1),
+            )
+            .await?;
+
+        let request = svc.requests_ro.get_request(request_id).await?;
+
+        let started_at = Utc::now();
+
+        // Wait for initial budget to be exhausted
+        timeout(
+            Duration::from_secs(20),
+            svc.sync.wait_for(&request_id.to_string(), &started_at),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for initial budget exhaustion"))??;
+
+        let after_exhaustion = Utc::now();
+
+        // ACT — add budget to the exhausted account, triggering the resume pipeline
+        svc.add_budget(request_id, 2).await?;
+
+        // Wait for the budget to be re-exhausted after add_budget
+        timeout(
+            Duration::from_secs(20),
+            svc.sync
+                .wait_for(&request_id.to_string(), &after_exhaustion),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("timed out waiting for re-exhaustion after add_budget"))??;
+
+        // Assert — transactions should show: budget added → charged to 0 → budget added → charged to 0
+        let txs = svc
+            .transactions_ro
+            .history(
+                &crate::services::budgeting::TransactionsFilter::default()
+                    .with_account_id(request.account_id),
+                100,
+            )
+            .await?;
+
+        assert_eq!(
+            txs.len(),
+            4,
+            "expected 4 transactions (credit, charge, credit, charge), got {}",
+            txs.len()
+        );
+
+        let last = txs.first().expect("expected at least one transaction");
+        assert_eq!(
+            last.balance(),
+            0,
+            "expected final balance to be 0 after re-exhaustion, got {}",
+            last.balance()
+        );
+
+        let budget_added_count = txs
+            .iter()
+            .filter(|t| t.reason() == REASON_OPTIMIZATION_BUDGET_ADDED && t.amount() == 2)
+            .count();
+        assert_eq!(
+            budget_added_count, 1,
+            "expected exactly one BUDGET_ADDED transaction with amount 2"
+        );
+
+        let charged_count = txs
+            .iter()
+            .filter(|t| t.reason() == REASON_OPTIMIZATION_CHARGED)
+            .count();
+        assert_eq!(
+            charged_count, 2,
+            "expected exactly 2 CHARGED transactions (one per budget round), got {}",
+            charged_count
         );
 
         Ok(())

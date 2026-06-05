@@ -1317,15 +1317,15 @@ mod tests_index_genotypes {
         let recorder = BinBytesRecorder::<FullPrecisionSettings>::new();
         let model_bytes = Recorder::<TestBackend>::record(&recorder, model.into_record(), ())?;
 
-        let encoder = Encoder {
-            digest: *indexer_id,
-            encodable_type_name: TestIndexableType::TYPE_NAME.to_string(),
-            model_config: serde_json::to_value(&config)?,
-            model_weights: model_bytes,
-            model_format: MODEL_FORMAT.to_string(),
-            shape_in: vec![TestGenotypeIndexer::INPUT_SIZE as i32],
-            shape_out: TestGenotypeIndexer::LATENT_SIZE as i32,
-        };
+        let encoder = Encoder::new(
+            *indexer_id,
+            TestIndexableType::TYPE_NAME.to_string(),
+            serde_json::to_value(&config)?,
+            model_bytes,
+            MODEL_FORMAT.to_string(),
+            vec![TestGenotypeIndexer::INPUT_SIZE as i32],
+            TestGenotypeIndexer::LATENT_SIZE as i32,
+        );
 
         Ok(encoder)
     }

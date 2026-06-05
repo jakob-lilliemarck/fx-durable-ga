@@ -2,7 +2,11 @@
   "$schema": "https://opencode.ai/config.json",
   "permission": {
     "external_directory": {
-      ".opencode/skills/**": "allow"
+      ".opencode/skills/**": "allow",
+      "~/Projects/fx-event-bus/**": "allow",
+      "~/Projects/fx-mq-jobs/**": "allow",
+      "~/Projects/fx-pgmux/**": "allow",
+      "~/Projects/fx-mq-building-blocks/**": "allow"
     },
     "edit": {
       ".opencode/skills/**": "allow"

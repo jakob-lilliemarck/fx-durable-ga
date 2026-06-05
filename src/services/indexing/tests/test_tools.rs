@@ -167,15 +167,15 @@ pub async fn seed_encoder(ctx: &mut TestContext) -> anyhow::Result<Digest> {
     let model_bytes = Recorder::<TestBackend>::record(&recorder, model.into_record(), ())?;
     let trained_at = Utc::now();
 
-    let encoder = Encoder {
-        digest: ctx.indexer_id,
-        encodable_type_name: "encodable_type_name".to_string(),
-        model_config: serde_json::to_value(&config)?,
-        model_weights: model_bytes,
-        model_format: MODEL_FORMAT.to_string(),
-        shape_in: vec![2],
-        shape_out: 2,
-    };
+    let encoder = Encoder::new(
+        ctx.indexer_id,
+        "encodable_type_name".to_string(),
+        serde_json::to_value(&config)?,
+        model_bytes,
+        MODEL_FORMAT.to_string(),
+        vec![2],
+        2,
+    );
 
     let encoders_wr = ctx.container.get::<encoders::Write>().await?;
 
@@ -194,5 +194,5 @@ pub async fn seed_encoder(ctx: &mut TestContext) -> anyhow::Result<Digest> {
     })
     .await?;
 
-    Ok(encoder.digest)
+    Ok(*encoder.digest())
 }

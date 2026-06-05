@@ -32,6 +32,10 @@ src/services/<name>/
 ├── jobs.rs               # (if withJobs) stub message + handler
 └── repositories/
     └── mod.rs            # (if withRepositories) empty stub
+
+migrations/                            # (if withRepositories)
+├── {ts}_add_{name}_schema.up.sql      # CREATE SCHEMA IF NOT EXISTS {name}
+└── {ts}_add_{name}_schema.down.sql    # DROP SCHEMA IF EXISTS {name} CASCADE
 ```
 
 `mod.rs` has `mod events;` / `mod jobs;` / `pub(super) mod repositories;` active
@@ -74,10 +78,23 @@ pub fn register(c: &mut Container) {
 Replace the stub types with real event/job types following the naming rules
 below.
 
-### repositories/
+### repositories/ + migrations
 
 Use the **create-repository** skill guidance and the `scaffold-repository`
 tool for each aggregate.
+
+The tool also generated migration files for this service's database schema
+(when `withRepositories` was true). Populate them as you create each
+aggregate: add `CREATE TABLE` statements for the aggregate's tables to the
+`.up.sql` and corresponding `DROP TABLE` statements to the `.down.sql`.
+If the migration was already applied in a previous deployment, create a new
+timestamped migration pair instead.
+
+### controllers + views
+
+If the service needs HTTP endpoints, use the **create-controller** skill to
+scaffold controller handlers and view types. Controllers wire the service's
+public methods to REST routes with content negotiation (JSON / HTMX / HTML).
 
 ## Naming conventions (reference)
 

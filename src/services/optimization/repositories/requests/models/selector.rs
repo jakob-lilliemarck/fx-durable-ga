@@ -201,6 +201,14 @@ impl Selector {
         }
     }
 
+    /// Returns the minimum number of candidates required by this selector.
+    pub(crate) fn min_candidates(&self) -> usize {
+        match self.method {
+            SelectionMethod::Tournament { size } => size * 2,
+            SelectionMethod::Roulette => 2,
+        }
+    }
+
     /// Selects parent pairs from candidates using the configured selection method.
     #[instrument(level = "debug", skip(self, candidates_with_fitness), fields(method = ?self.method, num_pairs = num_pairs, num_candidates = candidates_with_fitness.len()))]
     pub(crate) fn select_parents<'a>(

@@ -68,10 +68,12 @@ export default tool({
   },
 });
 
+/// Writes a file as UTF-8.
 function writeFile(p: string, content: string) {
   fs.writeFileSync(p, content, "utf-8");
 }
 
+/// Returns the repository Error enum with Database and Internal variants.
 function errorsContent(): string {
   return `#[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -84,6 +86,7 @@ pub enum Error {
 `;
 }
 
+/// Returns the domain model struct template with id: Uuid and a new() constructor.
 function modelsContent(singular: string): string {
   return `use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
@@ -112,6 +115,8 @@ impl Default for ${singular} {
 `;
 }
 
+/// Returns the registrations.rs template with provide_*_repository_ro/wr
+/// provider functions.
 function registrationsContent(name: string): string {
   return `use crate::infrastructure::db;
 use crate::infrastructure::di::{Container, ProviderResult};
@@ -137,6 +142,7 @@ pub fn provide_${name}_repository_wr(
 `;
 }
 
+/// Returns the mod.rs template declaring sub-modules and re-exporting types.
 function modContent(singular: string): string {
   return `mod errors;
 mod models;
@@ -154,6 +160,8 @@ pub(crate) use repository::WriteTx;
 `;
 }
 
+/// Returns the Read/Write/WriteTx struct template with db::Tx impl and
+/// constructors.
 function repositoryContent(singular: string): string {
   return `use super::errors::Error;
 use super::models::${singular};
@@ -206,12 +214,14 @@ impl<'tx> WriteTx<'tx> {
 `;
 }
 
+/// Returns the queries/mod.rs placeholder directing to the create-repository skill.
 function queriesModContent(): string {
   return `// Query functions will be added per repository concern.
 // See AGENTS.md for query conventions and the create-repository skill for guidance.
 `;
 }
 
+/// Reads a file as UTF-8, returning null if it doesn't exist.
 function readOptionalFile(p: string): string | null {
   try {
     return fs.readFileSync(p, "utf-8");
@@ -220,6 +230,8 @@ function readOptionalFile(p: string): string | null {
   }
 }
 
+/// Appends `pub(super) mod <aggregate>;` to the service's repositories/mod.rs.
+/// Creates the file if missing.
 function updateRepositoriesMod(
   root: string,
   service: string,
@@ -244,6 +256,8 @@ function updateRepositoriesMod(
   return `Updated ${path.relative(root, modPath)}`;
 }
 
+/// Inserts pub use re-exports for the aggregate's model and Read type into
+/// the service's mod.rs.
 function updateServiceMod(
   root: string,
   service: string,

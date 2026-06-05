@@ -286,7 +286,7 @@ impl Service {
 
             let embedding_raw = Self::encode(&preprocessed, &encoder)?;
 
-            let embedding = EmbeddingNew::new(encoder.digest, timestamp, embedding_raw);
+            let embedding = EmbeddingNew::new(*encoder.digest(), timestamp, embedding_raw);
 
             for tag in t.iter() {
                 tags.push(TagNew::new(tag, *embedding.id(), timestamp));
@@ -344,7 +344,7 @@ impl Service {
         encoder: &Arc<Encoder>,
     ) -> Result<embeddings::EmbeddingValue, super::Error> {
         let model_cfg: lstm::AutoencoderConfig =
-            serde_json::from_value(encoder.model_config.clone())?;
+            serde_json::from_value(encoder.model_config().clone())?;
 
         let seq_len = input.dimensions.get(0).copied().unwrap_or(0);
         let input_size = input
@@ -363,8 +363,11 @@ impl Service {
 
         let device = <InferenceBackend as Backend>::Device::default();
         let recorder = BinBytesRecorder::<FullPrecisionSettings>::new();
-        let record =
-            Recorder::<InferenceBackend>::load(&recorder, encoder.model_weights.clone(), &device)?;
+        let record = Recorder::<InferenceBackend>::load(
+            &recorder,
+            encoder.model_weights().to_vec(),
+            &device,
+        )?;
         let model =
             lstm::LstmAutoencoder::<InferenceBackend>::new(&device, model_cfg).load_record(record);
 
@@ -466,15 +469,15 @@ impl Service {
             autoencoder_cfg.latent_size as i32,
         );
 
-        let encoder = encoders::Encoder {
-            digest: *indexer_id,
-            encodable_type_name: indexer.encodable_type_name().to_string(),
-            model_config: serde_json::to_value(&autoencoder_cfg)?,
-            model_weights: weights,
-            model_format: MODEL_FORMAT.to_string(),
+        let encoder = encoders::Encoder::new(
+            *indexer_id,
+            indexer.encodable_type_name().to_string(),
+            serde_json::to_value(&autoencoder_cfg)?,
+            weights,
+            MODEL_FORMAT.to_string(),
             shape_in,
             shape_out,
-        };
+        );
 
         let encoder = db::begin(self.encoders_wr.clone(), |tx| {
             Box::pin(async move {
@@ -489,7 +492,7 @@ impl Service {
         })
         .await?;
 
-        Ok(encoder.digest)
+        Ok(*encoder.digest())
     }
 
     #[instrument(level = "debug", skip(self, dataset))]

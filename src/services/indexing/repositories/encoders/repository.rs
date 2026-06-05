@@ -28,7 +28,7 @@ impl EncoderCache {
     }
 
     pub fn set(&mut self, encoder: Arc<super::Encoder>) {
-        self.cache.insert(encoder.digest, encoder);
+        self.cache.insert(*encoder.digest(), encoder);
     }
 }
 
