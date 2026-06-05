@@ -21,7 +21,7 @@ use uuid::Uuid;
 
 async fn setup(pool: &PgPool) -> anyhow::Result<TestContext> {
     let indexer = TestIndexer::default();
-    let indexer_id = Registry::get_indexer_id(&indexer)?;
+    let indexer_id = Registry::get_indexer_id(&indexer).await?;
     let mut c = TestConfig::new(pool.clone())
         .with_optimizer(NoOpOptimizer)
         .with_indexer(indexer)
@@ -330,7 +330,7 @@ async fn get_indexer_ids_of_type_returns_registered_indexers(
 ) -> anyhow::Result<()> {
     migrations::run_default_migrations(&pool).await?;
 
-    let expected = Registry::get_indexer_id(&TestIndexer::default())?;
+    let expected = Registry::get_indexer_id(&TestIndexer::default()).await?;
     let mut ctx = setup(&pool).await?;
     let indexing = ctx.container.get::<Arc<indexing::Service>>().await?;
 

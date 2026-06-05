@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 async fn setup(pool: &PgPool) -> anyhow::Result<TestContext> {
     let indexer = TestIndexer::default();
-    let indexer_id = Registry::get_indexer_id(&indexer)?;
+    let indexer_id = Registry::get_indexer_id(&indexer).await?;
     let mut c = TestConfig::new(pool.clone())
         .with_optimizer(NoOpOptimizer)
         .with_indexer(indexer)

@@ -1,6 +1,7 @@
 use crate::repositories::genotypes::TypeName;
 use crate::services::indexing::{Digest as IndexerDigest, EncoderDigestError};
 use crate::services::indexing::{TrainModelConfig, encoder::dataset::SequenceDataSource};
+use futures::future::BoxFuture;
 use serde::{Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 use std::{
@@ -70,13 +71,13 @@ pub trait Indexer: TypeName + Send + Sync {
     type Type: DeserializeOwned;
 
     fn preprocess(&self, entity: &Self::Type) -> EncodeInput;
-    fn dataset(&self) -> Dataset;
+    fn dataset(&self) -> BoxFuture<'_, Dataset>;
     fn training_config(&self) -> &TrainModelConfig;
 }
 
 pub trait IndexerErased: Send + Sync {
     fn preprocess(&self, json: serde_json::Value) -> Result<EncodeInput, Error>;
-    fn dataset(&self) -> Dataset;
+    fn dataset(&self) -> BoxFuture<'_, Dataset>;
     fn train_config(&self) -> &TrainModelConfig;
     fn encodable_type_name(&self) -> &str;
 }
@@ -91,7 +92,7 @@ where
         Ok(Indexer::preprocess(self, &typed))
     }
 
-    fn dataset(&self) -> Dataset {
+    fn dataset(&self) -> BoxFuture<'_, Dataset> {
         Indexer::dataset(self)
     }
 
@@ -124,8 +125,11 @@ impl Registry {
     }
 
     #[instrument(level = "info", skip(self, indexer))]
-    pub fn register(&mut self, indexer: Arc<dyn IndexerErased>) -> Result<IndexerDigest, Error> {
-        let digest = Self::get_erased_indexer_id(&indexer)?;
+    pub async fn register(
+        &mut self,
+        indexer: Arc<dyn IndexerErased>,
+    ) -> Result<IndexerDigest, Error> {
+        let digest = Self::get_erased_indexer_id(&indexer).await?;
 
         let type_name = indexer.encodable_type_name().to_string();
 
@@ -180,7 +184,7 @@ impl Registry {
         Ok(indexer)
     }
 
-    pub fn get_indexer_id<I>(indexer: &I) -> Result<IndexerDigest, Error>
+    pub async fn get_indexer_id<I>(indexer: &I) -> Result<IndexerDigest, Error>
     where
         I: Indexer + 'static,
         I::Type: DeserializeOwned + 'static,
@@ -190,7 +194,7 @@ impl Registry {
         let type_name_bytes = indexer.type_name().as_bytes();
         hasher.update(type_name_bytes);
 
-        let dataset_digest_bytes = indexer.dataset().checksum();
+        let dataset_digest_bytes = indexer.dataset().await.checksum();
         hasher.update(dataset_digest_bytes);
 
         let serializable_config = SerializableTrainModelConfig::from(indexer.training_config());
@@ -204,13 +208,15 @@ impl Registry {
         Ok(digest)
     }
 
-    pub fn get_erased_indexer_id(indexer: &Arc<dyn IndexerErased>) -> Result<IndexerDigest, Error> {
+    pub async fn get_erased_indexer_id(
+        indexer: &Arc<dyn IndexerErased>,
+    ) -> Result<IndexerDigest, Error> {
         let mut hasher = Sha256::new();
 
         let type_name_bytes = indexer.encodable_type_name().as_bytes();
         hasher.update(type_name_bytes);
 
-        let dataset_digest_bytes = indexer.dataset().checksum();
+        let dataset_digest_bytes = indexer.dataset().await.checksum();
         hasher.update(dataset_digest_bytes);
 
         let serializable_config = SerializableTrainModelConfig::from(indexer.train_config());
@@ -298,8 +304,10 @@ mod tests {
             }
         }
 
-        fn dataset(&self) -> std::sync::Arc<dyn SequenceDataSource> {
-            std::sync::Arc::new(self.dataset.clone())
+        fn dataset(&self) -> BoxFuture<'_, std::sync::Arc<dyn SequenceDataSource>> {
+            let dataset: std::sync::Arc<dyn SequenceDataSource> =
+                std::sync::Arc::new(self.dataset.clone());
+            Box::pin(async { dataset })
         }
 
         fn training_config(&self) -> &TrainModelConfig {
@@ -307,13 +315,13 @@ mod tests {
         }
     }
 
-    #[test]
-    fn digest_is_deterministic() {
+    #[tokio::test]
+    async fn digest_is_deterministic() {
         let indexer = DeterministicIndexer::new();
 
-        let digest_a = Registry::get_indexer_id(&indexer).unwrap();
-        let digest_b = Registry::get_indexer_id(&indexer).unwrap();
-        let digest_c = Registry::get_indexer_id(&indexer).unwrap();
+        let digest_a = Registry::get_indexer_id(&indexer).await.unwrap();
+        let digest_b = Registry::get_indexer_id(&indexer).await.unwrap();
+        let digest_c = Registry::get_indexer_id(&indexer).await.unwrap();
 
         assert_eq!(digest_a, digest_b);
         assert_eq!(digest_b, digest_c);

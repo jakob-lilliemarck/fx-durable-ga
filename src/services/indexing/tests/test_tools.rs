@@ -24,6 +24,7 @@ use burn::prelude::*;
 use burn::record::{BinBytesRecorder, FullPrecisionSettings, Recorder};
 use burn_ndarray::NdArray;
 use chrono::Utc;
+use futures::future::BoxFuture;
 use fx_mq_building_blocks::testing_tools::TestQueries;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -118,8 +119,8 @@ impl indexable::Indexer for TestIndexer {
         entity.to_encode_input()
     }
 
-    fn dataset(&self) -> Arc<dyn SequenceDataSource> {
-        Arc::new(SequenceDataset::new(
+    fn dataset(&self) -> BoxFuture<'_, Arc<dyn SequenceDataSource>> {
+        let dataset: Arc<dyn SequenceDataSource> = Arc::new(SequenceDataset::new(
             vec![
                 SequenceSample {
                     steps: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
@@ -129,7 +130,8 @@ impl indexable::Indexer for TestIndexer {
                 },
             ],
             2,
-        ))
+        ));
+        Box::pin(async { dataset })
     }
 
     fn training_config(&self) -> &TrainModelConfig {

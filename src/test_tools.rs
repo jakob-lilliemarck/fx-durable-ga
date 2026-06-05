@@ -43,6 +43,7 @@ impl TestConfig {
                 let provided = c.get::<Arc<Mutex<indexable::Registry>>>().await?;
                 let mut lock = provided.lock().await;
                 lock.register(Arc::new(indexer))
+                    .await
                     .map_err(|err| InvokeError::new(err))?;
                 Ok(())
             })

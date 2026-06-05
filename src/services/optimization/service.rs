@@ -802,7 +802,7 @@ pub(crate) mod test_tools {
         seed_budget(pool, account_id).await?;
 
         let genotypes: Vec<Genotype> = (0..POPULATION_SIZE as usize)
-            .map(|i| {
+            .map(|_| {
                 Genotype::new(
                     TEST_TYPE_NAME,
                     serde_json::json!({}),
@@ -873,7 +873,7 @@ pub(crate) mod test_tools {
         count: usize,
     ) -> anyhow::Result<Vec<Genotype>> {
         let genotypes: Vec<Genotype> = (0..count)
-            .map(|i| {
+            .map(|_| {
                 Genotype::new(
                     TEST_TYPE_NAME,
                     serde_json::json!({}),
@@ -1326,7 +1326,7 @@ mod tests_get_best_genotype {
 
         let result = svc.get_best_genotype(request_id).await?;
 
-        let (genotype, fitness) = result.expect("expected a best genotype");
+        let (_, fitness) = result.expect("expected a best genotype");
         assert!((fitness - 0.9).abs() < 1e-12);
 
         Ok(())
@@ -1341,7 +1341,7 @@ mod tests_get_best_genotype {
 
         let result = svc.get_best_genotype(request_id).await?;
 
-        let (genotype, fitness) = result.expect("expected a best genotype");
+        let (_, fitness) = result.expect("expected a best genotype");
         assert!((fitness - 0.1).abs() < 1e-12);
 
         Ok(())
@@ -1386,7 +1386,6 @@ mod tests_get_best_genotype {
 #[cfg(test)]
 mod tests_stop {
     use super::test_tools::*;
-    use super::*;
     use sqlx::PgPool;
 
     #[sqlx::test(migrations = false)]
@@ -1469,6 +1468,7 @@ mod tests_resume {
         evaluation.register(TEST_TYPE_NAME, TestEvaluator).await;
         let svc = c.get::<Arc<Service>>().await?;
 
+        let started_at = Utc::now();
         let schedule = Schedule::rolling(4, 2, 2);
         let request_id = svc
             .request_new(
@@ -1480,8 +1480,6 @@ mod tests_resume {
             .await?;
 
         let request = svc.requests_ro.get_request(request_id).await?;
-
-        let started_at = Utc::now();
 
         // Wait for initial budget to be exhausted
         timeout(

@@ -234,6 +234,15 @@ pub enum Error {
 
 8. **`#[sqlx::test]` with manual migrations** — Tests use `#[sqlx::test(migrations = false)]` to get a fresh database pool. The first line of the test function calls `crate::migrations::run_default_migrations(&pool).await?` to apply schema.
 
+9. **Never relax tests due to unexplained failures** — If an assertion fails
+   inconsistently, investigate until the root cause is understood. Do not change
+   `==` to `>=`, add loose tolerances, or remove assertions to make a test pass.
+   A non-deterministic test is a bug report. Either fix the underlying issue or,
+   if the test exercises inherently async/event-driven behavior, use deterministic
+   synchronization (semaphores, timeouts with polling) to wait for the expected
+   state before asserting, as described in point 5. The test must pass reliably
+   in isolation AND in the full suite.
+
 ## Repositories
 
 ### Repository structure

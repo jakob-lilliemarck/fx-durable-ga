@@ -1,4 +1,5 @@
 use anyhow::Result;
+use futures::future::BoxFuture;
 use futures::lock::Mutex;
 use fx_durable_ga::configuration;
 use fx_durable_ga::infrastructure::di::{Container, InvokeError};
@@ -43,7 +44,7 @@ async fn main() -> Result<()> {
     let function_inputs = ProgramInputsDataset::new(INPUT_SEQUENCES, TIME_STEPS, INPUT_FEATURES);
     let indexer_dataset = ProgramOutputsDataset::new(&programs, &function_inputs);
     let indexer = ProgramIndexer::new(indexer_dataset.clone());
-    let indexer_id = Registry::get_indexer_id(&indexer)?;
+    let indexer_id = Registry::get_indexer_id(&indexer).await?;
 
     // Create a DI container
     let mut c = Container::new();
@@ -75,6 +76,7 @@ async fn main() -> Result<()> {
             let provided = c.get::<Arc<Mutex<indexable::Registry>>>().await?;
             let mut lock = provided.lock().await;
             lock.register(Arc::new(indexer))
+                .await
                 .map_err(|err| InvokeError::new(err))?;
             Ok(())
         })
@@ -392,8 +394,9 @@ impl indexable::Indexer for ProgramIndexer {
         entity.to_encode_input()
     }
 
-    fn dataset(&self) -> Arc<dyn SequenceDataSource> {
-        Arc::new(self.dataset.clone())
+    fn dataset(&self) -> BoxFuture<'_, Arc<dyn SequenceDataSource>> {
+        let dataset: Arc<dyn SequenceDataSource> = Arc::new(self.dataset.clone());
+        Box::pin(async { dataset })
     }
 
     fn training_config(&self) -> &TrainModelConfig {

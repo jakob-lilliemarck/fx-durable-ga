@@ -276,7 +276,11 @@ fn invoke_mux_listening(c: &mut Container) -> BoxFuture<'_, InvokeResult> {
             panic!("Could not take mux")
         };
 
-        tokio::spawn(mux.listen());
+        tokio::spawn(async move {
+            if let Err(err) = mux.listen().await {
+                tracing::error!(message = "Mux listen error", err = ?err);
+            }
+        });
 
         Ok(())
     })

@@ -489,6 +489,7 @@ mod tests_index_genotypes {
     use burn::record::{BinBytesRecorder, FullPrecisionSettings, Recorder};
     use burn_ndarray::NdArray;
     use chrono::Utc;
+    use futures::future::BoxFuture;
     use fx_mq_building_blocks::testing_tools::TestQueries;
     use fx_mq_jobs::FX_MQ_JOBS_SCHEMA_NAME;
     use fx_mq_jobs::Message;
@@ -506,7 +507,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let (_request_id, genotype_ids) = seed(&pool, &[indexer], 2).await?;
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
@@ -571,7 +572,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let (_request_id, genotype_ids) =
             seed(&pool, &[indexer], super::LIMIT as usize + 5).await?;
 
@@ -636,7 +637,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], 3).await?;
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
@@ -708,7 +709,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], 3).await?;
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
@@ -744,7 +745,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let total = super::INDEX_BATCH_SIZE + 5;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], total).await?;
 
@@ -792,7 +793,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let total = super::DB_PAGE_SIZE + 5;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], total).await?;
 
@@ -837,8 +838,8 @@ mod tests_index_genotypes {
 
         let indexer_a = TestGenotypeIndexer::default();
         let indexer_b = test_indexer_with_epochs(2);
-        let indexer_id_a = Registry::get_indexer_id(&indexer_a)?;
-        let indexer_id_b = Registry::get_indexer_id(&indexer_b)?;
+        let indexer_id_a = Registry::get_indexer_id(&indexer_a).await?;
+        let indexer_id_b = Registry::get_indexer_id(&indexer_b).await?;
         let (request_id, genotype_ids) = seed(&pool, &[indexer_a, indexer_b], 4).await?;
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
@@ -998,8 +999,8 @@ mod tests_index_genotypes {
             }
         }
 
-        fn dataset(&self) -> Arc<dyn SequenceDataSource> {
-            Arc::new(SequenceDataset::new(
+        fn dataset(&self) -> BoxFuture<'_, Arc<dyn SequenceDataSource>> {
+            let dataset: Arc<dyn SequenceDataSource> = Arc::new(SequenceDataset::new(
                 vec![
                     SequenceSample {
                         steps: vec![vec![0.1, 0.2], vec![0.3, 0.4]],
@@ -1009,7 +1010,8 @@ mod tests_index_genotypes {
                     },
                 ],
                 Self::INPUT_SIZE,
-            ))
+            ));
+            Box::pin(async { dataset })
         }
 
         fn training_config(&self) -> &TrainModelConfig {
@@ -1032,7 +1034,7 @@ mod tests_index_genotypes {
         store_genotypes(pool, &genotypes).await?;
 
         for indexer in indexers.iter() {
-            let indexer_id = Registry::get_indexer_id(indexer)?;
+            let indexer_id = Registry::get_indexer_id(indexer).await?;
             let encoder = new_encoder(&indexer_id)?;
             store_encoder(pool, &encoder, &now).await?;
             store_encoder_availability(pool, &indexer_id, true, &now).await?;
@@ -1122,7 +1124,7 @@ mod tests_index_genotypes {
     ) -> anyhow::Result<()> {
         crate::migrations::run_default_migrations(&pool).await?;
 
-        let expected = Registry::get_indexer_id(&TestGenotypeIndexer::default())?;
+        let expected = Registry::get_indexer_id(&TestGenotypeIndexer::default()).await?;
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
             .with_optimizer(NoOpOptimizer)
             .with_indexer(TestGenotypeIndexer::default())
@@ -1179,7 +1181,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let request_id = seed_request(&pool).await?;
         let genotypes = new_genotypes(request_id, 2)?;
         let stored = store_genotypes(&pool, &genotypes).await?;
@@ -1217,7 +1219,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let request_id = Uuid::nil();
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
@@ -1245,7 +1247,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], 2).await?;
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
@@ -1374,7 +1376,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], 3).await?;
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
@@ -1415,7 +1417,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let (_request_id, _genotype_ids) = seed(&pool, &[indexer], 2).await?;
 
         let mut c = crate::test_tools::TestConfig::new(pool.clone())
@@ -1449,7 +1451,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let (request_id_a, genotype_ids_a) = seed(&pool, &[indexer], 2).await?;
         let (request_id_b, genotype_ids_b) = seed(&pool, &[], 1).await?;
 
@@ -1496,7 +1498,7 @@ mod tests_index_genotypes {
         crate::migrations::run_default_migrations(&pool).await?;
 
         let indexer = TestGenotypeIndexer::default();
-        let indexer_id = Registry::get_indexer_id(&indexer)?;
+        let indexer_id = Registry::get_indexer_id(&indexer).await?;
         let total = super::INDEX_BATCH_SIZE + 5;
         let (request_id, genotype_ids) = seed(&pool, &[indexer], total).await?;
 

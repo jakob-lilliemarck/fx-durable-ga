@@ -219,26 +219,26 @@ mod tests {
 
         let request_id = create_request(&pool).await;
         let genotype = Genotype::new("test", serde_json::json!([1]), request_id, None, None, None)?;
-        let stored = store_genotypes(&pool, &[genotype]).await?;
+        let stored = store_genotypes(&pool, &[genotype.clone()]).await?;
         let genotype_id = stored[0].id();
 
-        let probe_request_id = Uuid::parse_str("00000000-0000-0000-0000-000000000003")?;
-        let probe_id = svc
-            .new_noise_probe(genotype_id, probe_request_id, 1)
+        let probe_wr = c
+            .get::<crate::services::noise_diagnostics::repositories::probes::Write>()
             .await?;
+        let probe_request_id = Uuid::parse_str("00000000-0000-0000-0000-000000000003")?;
+        let probe = NoiseProbe::new(genotype_id, probe_request_id, 0);
+        let probe_id = probe.id();
+        db::begin(probe_wr, |tx| {
+            Box::pin(async move {
+                let mut wr =
+                    crate::services::noise_diagnostics::repositories::probes::WriteTx::new(tx);
+                wr.store_noise_probe(&probe).await?;
+                Ok(())
+            })
+        })
+        .await?;
 
-        let mq = TestQueries::new(FX_MQ_JOBS_SCHEMA_NAME);
-        let mut tx = pool.begin().await?;
-        let jobs = mq.get_all_messages(&mut tx).await?;
-        tx.commit().await?;
-        let probe_job = jobs
-            .into_iter()
-            .find(|j| j.name == "EvaluateNoiseProbeGenotype")
-            .unwrap();
-        let payload: serde_json::Value = serde_json::from_value(probe_job.payload.clone())?;
-        let msg_genotype: Genotype = serde_json::from_value(payload["genotype"].clone())?;
-
-        svc.evaluate_probe(probe_id, msg_genotype).await?;
+        svc.evaluate_probe(probe_id, genotype).await?;
 
         let evaluations_ro = c.get::<evaluations::Read>().await?;
         let result = evaluations_ro

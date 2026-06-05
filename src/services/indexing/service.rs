@@ -458,7 +458,7 @@ impl Service {
     pub(crate) async fn train_encoder(&self, indexer_id: &Digest) -> Result<Digest, super::Error> {
         let indexer = self.get_indexer(indexer_id).await?;
 
-        let dataset = indexer.dataset();
+        let dataset = indexer.dataset().await;
 
         let train_config = indexer.train_config();
 
