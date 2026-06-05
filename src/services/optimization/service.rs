@@ -1469,7 +1469,7 @@ mod tests_resume {
         evaluation.register(TEST_TYPE_NAME, TestEvaluator).await;
         let svc = c.get::<Arc<Service>>().await?;
 
-        let schedule = Schedule::rolling(2, 2, 2);
+        let schedule = Schedule::rolling(4, 2, 2);
         let request_id = svc
             .request_new(
                 TEST_TYPE_NAME.to_string(),
@@ -1517,8 +1517,8 @@ mod tests_resume {
 
         assert_eq!(
             txs.len(),
-            4,
-            "expected 4 transactions (credit, charge, credit, charge), got {}",
+            5,
+            "expected 5 transactions (credit, 2 charges, budget_added, charge), got {}",
             txs.len()
         );
 
@@ -1544,8 +1544,8 @@ mod tests_resume {
             .filter(|t| t.reason() == REASON_OPTIMIZATION_CHARGED)
             .count();
         assert_eq!(
-            charged_count, 2,
-            "expected exactly 2 CHARGED transactions (one per budget round), got {}",
+            charged_count, 3,
+            "expected exactly 3 CHARGED transactions (2 for initial budget, 1 for added budget), got {}",
             charged_count
         );
 
