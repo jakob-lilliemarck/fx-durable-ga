@@ -313,6 +313,213 @@ impl Filter {
 
 8.  **Single search query per entity** — Never create separate queries for different filter combinations. Use a single `search_[entity_type]` function with a filter parameter that uses conditional SQL (`$1 IS NULL OR column = $1`). Filter fields default to `None`; builder methods follow `with_[attribute_name]` naming but are not required to match field names exactly (e.g., `with_group_ids` for a `group_id` field).
 
+## Controllers
+
+Controllers are HTTP handlers that expose service functionality via REST endpoints. They use **Axum** with the **aide** crate for OpenAPI documentation.
+
+### Module structure
+
+```
+src/controllers/
+├── mod.rs                  # Router composition + request/response re-exports
+├── {resource}.rs           # Handlers + route definitions
+└── models/
+    ├── mod.rs
+    ├── form_or_json.rs      # FormOrJson custom extractor
+    └── namespaced_query.rs  # NamespacedQuery custom extractor
+```
+
+Each controller file follows a consistent layout:
+
+```
+mod.rs                   — module decls + re-exports
+{resource}.rs            — handlers + route definitions
+models/                  — custom Axum extractors (shared across controllers)
+```
+
+### Router pattern
+
+Each controller module exports a `pub fn router(app: Arc<App>) -> ApiRouter` that registers its routes:
+
+```rust
+pub fn router(app: Arc<App>) -> ApiRouter {
+    ApiRouter::new()
+        .api_route(
+            "/resource",
+            post_with(create_handler, |op| {
+                op.operation_id("create_resource")
+                    .tag("Resources")
+                    .response_with::<500, Json<ErrorResponse>, _>(
+                        |r| r.description("Internal server error"),
+                    )
+            }),
+        )
+        .api_route(
+            "/resource/{id}",
+            get_with(get_handler, |op| {
+                op.operation_id("get_resource")
+                    .tag("Resources")
+                    .response_with::<500, Json<ErrorResponse>, _>(
+                        |r| r.description("Internal server error"),
+                    )
+            }),
+        )
+        .with_state(app)
+}
+```
+
+Routes are composed in `controllers/mod.rs`:
+
+```rust
+pub fn router(app: Arc<App>) -> ApiRouter {
+    ApiRouter::new()
+        .merge(resource_a::router(app.clone()))
+        .merge(resource_b::router(app))
+}
+```
+
+### Handler signature conventions
+
+Handlers follow a consistent argument order:
+
+| Parameter | When to use |
+|---|---|
+| `State(app): State<Arc<App>>` | Always — provides access to services and repositories |
+| `Path(id): Path<Uuid>` | Route segment contains `{id}` |
+| `NamespacedQuery(params): NamespacedQuery<Q>` | GET with query parameters on HTMX pages |
+| `input: FormOrJson<P>` | POST with body (accepts both form and JSON) |
+| `Json(payload): Json<P>` | POST with JSON-only body (API endpoints) |
+| `headers: HeaderMap` | Almost always — used for content negotiation |
+| `uri: Uri` | Needed for building relative URLs within the page |
+
+All handlers return `Response` (not `impl IntoResponse`). Annotate handlers with `#[axum::debug_handler]` for better compile-time error messages.
+
+### Custom extractors
+
+Two custom Axum extractors live in `controllers/models/`:
+
+**`FormOrJson<T>`** — Accepts either `application/json` or URL-encoded form data. Used for endpoints that serve both HTMX forms and API clients. The OpenAPI schema always shows the JSON variant. Access the inner value via `.into_inner()`.
+
+**`NamespacedQuery<T>`** — Strips `{namespace}--` prefixes from query parameter keys. Used on HTMX pages where multiple components on the same page issue requests with overlapping parameter names. Both namespaced keys (`component--search=foo`) and plain keys (`search=foo`) resolve to the same deserialized field.
+
+### Content negotiation (`RenderService`)
+
+Each controller module defines a private `RenderService` struct that dispatches based on request headers:
+
+| Condition | Response body |
+|---|---|
+| `Accept: application/json` | JSON — the view is serialized via `serde` |
+| `HX-Request` header present | HTMX fragment — the view is rendered as partial HTML |
+| Neither | Full HTML page — wrapped in `<html><head>` with HTMX, Chart.js, and stylesheets |
+
+```rust
+fn respond<T>(&self, headers: &HeaderMap, status: StatusCode, view: &T) -> Response
+where
+    T: maud::Render + serde::Serialize;
+```
+
+Error responses follow the same pattern via `respond_error`:
+
+```rust
+fn respond_error(&self, headers: &HeaderMap, status: StatusCode, message: impl std::fmt::Display) -> Response;
+```
+
+### API-only endpoints
+
+For endpoints that serve only API clients (no browser UI), use `Json<T>` directly and return typed results:
+
+```rust
+use crate::views::errors::ErrorResponse;
+
+async fn create_api_endpoint(
+    State(app): State<Arc<App>>,
+    Json(payload): Json<Payload>,
+) -> Result<(StatusCode, Json<Response>), (StatusCode, Json<ErrorResponse>)> {
+    // ...
+    Ok((StatusCode::CREATED, Json(response)))
+}
+```
+
+The error response format is consistent across all endpoints (see `src/views/errors.rs`):
+
+```rust
+pub struct ErrorResponse {
+    error: String,
+}
+```
+
+### Request/Response type re-exports
+
+`controllers/mod.rs` re-exports payload and response types for use by API clients:
+
+```rust
+pub use resource_a::CreatePayload;
+pub use resource_a::CreateResponse;
+```
+
+### Payload/query struct conventions
+
+- Derive `Debug, Deserialize, schemars::JsonSchema` on all request payloads and query structs
+- Use `#[serde(rename_all = "snake_case")]` on enums
+- Use `#[serde(default)]` with custom deserializers for optional fields with non-standard formats
+- Query struct fields should be `Option<T>` for optional parameters
+
+## Views
+
+Views are the rendering layer paired with controllers. Each view type implements both `maud::Render` for HTML and `serde::Serialize` for JSON, enabling the content negotiation pattern.
+
+### Module structure
+
+```
+src/views/
+├── mod.rs
+├── diversity.rs
+├── errors.rs
+├── fitness.rs
+├── genotypes.rs
+├── optimization.rs
+└── population.rs
+```
+
+### View pattern
+
+```rust
+#[derive(serde::Serialize, schemars::JsonSchema)]
+pub struct SomeView {
+    id: String,
+    name: String,
+}
+
+impl SomeView {
+    pub fn new(id: String, name: String) -> Self { // ...
+    }
+    pub fn with_some_flag(mut self, flag: bool) -> Self { // ...
+    }
+}
+
+impl maud::Render for SomeView {
+    fn render(&self) -> Markup {
+        html! {
+            // Full or partial HTML markup
+        }
+    }
+}
+```
+
+### Construction conventions
+
+- Use builder-pattern `with_*` methods for optional fields
+- Support partial rendering via an `is_partial` flag — when true, render only the fragment for HTMX swap; when false, render the full layout
+- The `Serialize` impl should produce the JSON representation of the data (typically a simplified version of the full view)
+- For list views, the `Serialize` impl often delegates to a simplified item type (e.g., `OptimizationListView` serializes as `Vec<Optimization>`)
+- Derive `schemars::JsonSchema` on all view types for OpenAPI schema generation
+
+### HTMX conventions
+
+- Lazy-load sections via `hx-get` with `hx-trigger="load"` or `hx-trigger="intersect once"`
+- Sub-route URLs are constructed from the current page's URI via `base_url()` + path segment
+- Namespace overlapping query parameters using the `{section}--` prefix pattern (handled by `NamespacedQuery`)
+
 ## Logging and Instrumentation
 
 - Use `#[instrument(level = "debug")]` to instrument methods. The default level is `"info"`, so explicitly specify `"debug"`.
