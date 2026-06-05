@@ -187,13 +187,14 @@ fitness_distance_correlation aggregate   (new, F2a)
 
 ## Priority Checklist
 
-Prio 2
-- [ ] Reduce encoder model to bare essentials; expose minimal fields outside repository/crate.
-- [ ] Make Indexer::dataset async (return BoxFuture) to support async dataset construction.
-
-Prio 3 — Resume / Pause
-- [ ] Add `add_budget(request_id, amount)` public method on optimization service
-- [ ] Add `resume(request_id, amount)` convenience wrapper
+- [x] Encoder model cleanup — fields private, constructor + accessor methods
+- [x] `Indexer::dataset` async — trait signature + 4 implementors + 24 call sites
+- [x] `add_budget(request_id, amount)` public method on optimization service
+- [x] `REASON_OPTIMIZATION_BUDGET_ADDED` + event handler integration
+- [x] MQ `pg_notify` on publish (was missing — jobs sat silently)
+- [x] MQ listener poll interval 2s → 100ms
+- [x] Batch `publish_many` (single INSERT + one notify)
+- [x] `resume()` convenience wrapper — removed from scope (not needed)
 
 Prio 4 — F1: Evaluation Noise Estimation
 - [~] Probe genotype creation & evaluation job dispatch (scaffolding exists)
