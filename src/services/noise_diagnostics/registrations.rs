@@ -17,10 +17,21 @@ fn provide_noise_diagnostics_service(
 ) -> BoxFuture<'_, ProviderResult<Arc<Service>>> {
     Box::pin(async {
         let probe_wr = c.get::<super::repositories::probes::Write>().await?;
+        let probes_ro = c.get::<super::repositories::probes::Read>().await?;
         let genotypes_ro = c.get::<genotypes::Read>().await?;
         let evaluation = c.get::<Arc<evaluation::Service>>().await?;
         let mq = c.get::<Arc<Queries>>().await?;
-        let svc = Service::new(probe_wr, genotypes_ro, evaluation, mq);
+        let evaluations_ro = c
+            .get::<evaluation::repositories::evaluations::Read>()
+            .await?;
+        let svc = Service::new(
+            probe_wr,
+            probes_ro,
+            genotypes_ro,
+            evaluation,
+            mq,
+            evaluations_ro,
+        );
         Ok(Arc::new(svc))
     })
 }

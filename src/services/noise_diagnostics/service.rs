@@ -1,7 +1,8 @@
 use super::jobs::EvaluateNoiseProbeGenotypeMessage;
-use super::repositories::probes::{self, NoiseProbe};
+use super::repositories::probes::{self, NoiseProbe, SearchNoiseProbesFilter};
 use crate::infrastructure::db;
 use crate::repositories::genotypes;
+use crate::services::evaluation::repositories::evaluations;
 use crate::services::evaluation::{self, SHUTDOWN_SEMAPHORE as EVAL_SHUTDOWN};
 use fx_mq_jobs::Queries;
 use std::sync::Arc;
@@ -10,26 +11,44 @@ use uuid::Uuid;
 
 pub(super) const EVALUATION_REASON: &str = "noise_diagnostic";
 
+/// Noise estimate for a single probe.
+#[derive(Debug, Clone, serde::Serialize, schemars::JsonSchema)]
+pub struct ProbeNoise {
+    pub probe_id: Uuid,
+    pub genotype_id: Uuid,
+    pub sample_count: i64,
+    pub target_count: i32,
+    pub mean_fitness: Option<f64>,
+    pub stddev_fitness: Option<f64>,
+    pub converged: bool,
+}
+
 /// Estimates evaluation noise by repeatedly evaluating probe genotypes.
 pub struct Service {
     probe_wr: probes::Write,
+    probes_ro: probes::Read,
     genotypes_ro: genotypes::Read,
     evaluation: Arc<evaluation::Service>,
     mq: Arc<Queries>,
+    evaluations_ro: evaluations::Read,
 }
 
 impl Service {
     pub fn new(
         probe_wr: probes::Write,
+        probes_ro: probes::Read,
         genotypes_ro: genotypes::Read,
         evaluation: Arc<evaluation::Service>,
         mq: Arc<Queries>,
+        evaluations_ro: evaluations::Read,
     ) -> Self {
         Self {
             probe_wr,
+            probes_ro,
             genotypes_ro,
             evaluation,
             mq,
+            evaluations_ro,
         }
     }
 
@@ -106,6 +125,40 @@ impl Service {
             .map_err(|e| super::Error::Internal(anyhow::Error::from(e)))?;
 
         Ok(())
+    }
+
+    /// Returns noise estimates for all probes in a request.
+    #[instrument(level = "debug", skip(self))]
+    pub async fn probe_noise(&self, request_id: Uuid) -> Result<Vec<ProbeNoise>, super::Error> {
+        let probes = self
+            .probes_ro
+            .search_noise_probes(&SearchNoiseProbesFilter::default().with_request_id(request_id))
+            .await
+            .map_err(|e| super::Error::Internal(anyhow::Error::from(e)))?;
+
+        let mut results = Vec::with_capacity(probes.len());
+        for probe in probes {
+            let aggregates = self
+                .evaluations_ro
+                .get_evaluation_aggregates(
+                    &evaluations::GetEvaluationAggregatesFilter::default()
+                        .with_group_id(probe.id()),
+                )
+                .await
+                .map_err(|e| super::Error::Internal(anyhow::Error::from(e)))?;
+
+            results.push(ProbeNoise {
+                probe_id: probe.id(),
+                genotype_id: probe.genotype_id(),
+                sample_count: aggregates.count,
+                target_count: probe.evaluation_count(),
+                mean_fitness: aggregates.avg_fitness,
+                stddev_fitness: aggregates.stddev_fitness,
+                converged: aggregates.count >= probe.evaluation_count() as i64,
+            });
+        }
+
+        Ok(results)
     }
 }
 
@@ -199,6 +252,70 @@ mod tests {
             let payload: serde_json::Value = serde_json::from_value(job.payload.clone())?;
             assert_eq!(payload["probe_id"], serde_json::json!(probe_id));
         }
+
+        Ok(())
+    }
+
+    #[sqlx::test(migrations = false)]
+    async fn probe_noise_returns_estimates_for_all_probes(pool: PgPool) -> anyhow::Result<()> {
+        crate::migrations::run_default_migrations(&pool).await?;
+
+        let mut c = TestConfig::new(pool.clone())
+            .with_listeners()
+            .build()
+            .await?;
+
+        let evaluation = c.get::<Arc<crate::services::evaluation::Service>>().await?;
+        evaluation.register("test", TestEvaluator).await;
+
+        let svc = c.get::<Arc<Service>>().await?;
+        let probe_wr = c
+            .get::<crate::services::noise_diagnostics::repositories::probes::Write>()
+            .await?;
+
+        let request_id = create_request(&pool).await;
+        let genotype = Genotype::new("test", serde_json::json!([1]), request_id, None, None, None)?;
+        let stored = store_genotypes(&pool, &[genotype.clone()]).await?;
+        let genotype_id = stored[0].id();
+
+        let probe1 = NoiseProbe::new(genotype_id, request_id, 3);
+        let probe1_id = probe1.id();
+        let probe2 = NoiseProbe::new(genotype_id, request_id, 5);
+        let probe2_id = probe2.id();
+
+        db::begin(probe_wr, |tx| {
+            Box::pin(async move {
+                let mut wr =
+                    crate::services::noise_diagnostics::repositories::probes::WriteTx::new(tx);
+                wr.store_noise_probe(&probe1).await?;
+                wr.store_noise_probe(&probe2).await?;
+                Ok(())
+            })
+        })
+        .await?;
+
+        svc.evaluate_probe(probe1_id, genotype.clone()).await?;
+        svc.evaluate_probe(probe1_id, genotype.clone()).await?;
+        svc.evaluate_probe(probe1_id, genotype.clone()).await?;
+        svc.evaluate_probe(probe2_id, genotype.clone()).await?;
+
+        let results = svc.probe_noise(request_id).await?;
+
+        assert_eq!(results.len(), 2);
+
+        let p1 = results.iter().find(|r| r.probe_id == probe1_id).unwrap();
+        assert_eq!(p1.sample_count, 3);
+        assert_eq!(p1.target_count, 3);
+        assert!(p1.converged);
+        assert_eq!(p1.mean_fitness, Some(0.5));
+        assert_eq!(p1.stddev_fitness, Some(0.0));
+
+        let p2 = results.iter().find(|r| r.probe_id == probe2_id).unwrap();
+        assert_eq!(p2.sample_count, 1);
+        assert_eq!(p2.target_count, 5);
+        assert!(!p2.converged);
+        assert_eq!(p2.mean_fitness, Some(0.5));
+        assert_eq!(p2.stddev_fitness, Some(0.0));
 
         Ok(())
     }

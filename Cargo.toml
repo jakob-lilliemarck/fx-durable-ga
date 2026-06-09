@@ -42,9 +42,9 @@ tower-http = { version = "0.5.2", features = ["fs"] }
 rand = "0.9.2"
 const-fnv1a-hash = "1.1"
 futures = "0.3.31"
-fx-mq-jobs = { path = "/home/jakob/Projects/fx-mq-jobs" }
-fx-mq-building-blocks = { path = "/home/jakob/Projects/fx-mq-building-blocks" }
-fx-event-bus = { path = "/home/jakob/Projects/fx-event-bus", features = ["test-tools"] }
+fx-mq-jobs = { version = "0.1.12" }
+fx-mq-building-blocks = { version = "0.1.14" }
+fx-event-bus = { version = "0.3.0", features = ["test-tools"] }
 fx-pgmux = { version = "0.1.4" }
 chrono = { version = "0.4.39", features = ["serde"] }
 anyhow = "1.0.95"
@@ -63,9 +63,6 @@ burn-ndarray = { version = "0.20.0-pre.1" }
 sha2 = "0.10"
 moka = { version = "0.12.13", features = ["sync"] }
 reqwest = { version = "0.12.12", features = ["json"] }
-
-[patch.crates-io]
-fx-mq-building-blocks = { path = "/home/jakob/Projects/fx-mq-building-blocks" }
 
 [dev-dependencies]
 burn-ndarray = { version = "0.20.0-pre.1" }

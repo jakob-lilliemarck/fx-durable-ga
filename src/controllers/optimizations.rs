@@ -1,6 +1,7 @@
 use crate::repositories::genotypes as data;
 use crate::services::evaluation::{GetEvaluationStatsFilter, SearchEvaluationsFilter};
 use crate::services::indexing::Digest;
+use crate::services::noise_diagnostics::ProbeNoise;
 use crate::{
     bootstrap::App,
     controllers::models::{form_or_json::FormOrJson, namespaced_query::NamespacedQuery},
@@ -9,7 +10,7 @@ use crate::{
     services::optimization::{self, FitnessGoal, Schedule, SearchRequestsFilter, Selector},
     views::{
         self, diversity::KnnView, errors::ErrorResponse, fitness::FitnessView,
-        population::PopulationView,
+        noise_probes::NoiseProbesView, population::PopulationView,
     },
 };
 use aide::axum::ApiRouter;
@@ -110,11 +111,33 @@ pub fn router(app: Arc<App>) -> ApiRouter {
             }),
         )
         .api_route(
+            "/optimizations/{id}/noise-probes",
+            aide::axum::routing::get_with(get_noise_probes, |op| {
+                op.tag("optimizations")
+                    .summary("Noise probe estimates")
+                    .response::<200, Json<Vec<ProbeNoise>>>()
+                    .response_with::<500, Json<ErrorResponse>, _>(|r| {
+                        r.description("Internal server error")
+                    })
+            }),
+        )
+        .api_route(
             "/optimizations/index",
             aide::axum::routing::post_with(trigger_indexing, |op| {
                 op.tag("optimizations")
                     .summary("Trigger indexing")
                     .response::<201, ()>()
+                    .response_with::<500, Json<ErrorResponse>, _>(|r| {
+                        r.description("Internal server error")
+                    })
+            }),
+        )
+        .api_route(
+            "/noise-probes",
+            aide::axum::routing::post_with(post_noise_probe, |op| {
+                op.tag("optimizations")
+                    .summary("Create noise probe")
+                    .response::<200, Json<Vec<ProbeNoise>>>()
                     .response_with::<500, Json<ErrorResponse>, _>(|r| {
                         r.description("Internal server error")
                     })
@@ -428,7 +451,7 @@ async fn get_diversity(
     headers: HeaderMap,
 ) -> Response {
     let url = format!("/optimizations/{id}/knn", id = id);
-    let mut view = KnnView::new(url);
+    let mut view = KnnView::new(url, id);
 
     let request = match app.repositories().requests().get_request(id).await {
         Ok(request) => request,
@@ -576,7 +599,7 @@ async fn get_genotypes(
 ) -> Response {
     let genotypes_url = format!("/optimizations/{}/genotypes", id);
 
-    let mut view = views::genotypes::GenotypeListView::new(genotypes_url);
+    let mut view = views::genotypes::GenotypeListView::new(genotypes_url, id);
     let mut filter = SearchGenotypesFilter::default();
 
     if let Some(search) = query.search {
@@ -663,6 +686,80 @@ async fn trigger_indexing(
         return StatusCode::CREATED.into_response();
     }
     Redirect::to(&format!("/optimizations?id={}", form.request_id)).into_response()
+}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct NoiseProbePayload {
+    request_id: Uuid,
+    genotype_id: Uuid,
+    evaluation_count: i32,
+}
+
+async fn get_noise_probes(
+    State(app): State<Arc<App>>,
+    Path(id): Path<Uuid>,
+    headers: HeaderMap,
+) -> Response {
+    let probes = match app.services().noise_diagnostics.probe_noise(id).await {
+        Ok(probes) => probes,
+        Err(err) => {
+            error!(error = %err, "failed to fetch noise probes");
+            return RenderService.respond_error(
+                &headers,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                err.to_string(),
+            );
+        }
+    };
+
+    let view = NoiseProbesView::new().with_probes(probes);
+
+    RenderService.respond(&headers, StatusCode::OK, &view)
+}
+
+#[axum::debug_handler]
+async fn post_noise_probe(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    input: FormOrJson<NoiseProbePayload>,
+) -> Response {
+    let input = input.into_inner();
+
+    if let Err(err) = app
+        .services()
+        .noise_diagnostics
+        .new_noise_probe(input.genotype_id, input.request_id, input.evaluation_count)
+        .await
+    {
+        let status = match &err {
+            crate::services::noise_diagnostics::Error::InvalidEvaluationCount(_) => {
+                StatusCode::BAD_REQUEST
+            }
+            _ => StatusCode::INTERNAL_SERVER_ERROR,
+        };
+        return RenderService.respond_error(&headers, status, err);
+    }
+
+    let probes = match app
+        .services()
+        .noise_diagnostics
+        .probe_noise(input.request_id)
+        .await
+    {
+        Ok(probes) => probes,
+        Err(err) => {
+            error!(error = %err, "failed to fetch noise probes after creation");
+            return RenderService.respond_error(
+                &headers,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                err.to_string(),
+            );
+        }
+    };
+
+    let view = NoiseProbesView::new().with_probes(probes);
+
+    RenderService.respond(&headers, StatusCode::OK, &view)
 }
 
 /// Rendering infra

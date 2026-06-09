@@ -246,6 +246,10 @@ impl maud::Render for OptimizationView {
                     div id="diversity" class="fx-flex block"
                         hx-get=(knn_url)
                         hx-trigger="load" {}
+
+                    div id="noise-probes" class="fx-flex block"
+                        hx-get=(format!("{}/noise-probes", self.base_url()))
+                        hx-trigger="load" {}
                 }
 
                 div class="fx-flex layout-aside" {

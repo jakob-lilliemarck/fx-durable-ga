@@ -5,6 +5,7 @@ use uuid::Uuid;
 
 pub struct GenotypeListView {
     url: String,
+    request_id: Uuid,
     genotypes: Vec<Genotype>,
     fitness_map: HashMap<Uuid, f64>,
     max_fitness: Option<f64>,
@@ -14,9 +15,10 @@ pub struct GenotypeListView {
 }
 
 impl GenotypeListView {
-    pub fn new(url: String) -> Self {
+    pub fn new(url: String, request_id: Uuid) -> Self {
         Self {
             url,
+            request_id,
             genotypes: Vec::new(),
             fitness_map: HashMap::new(),
             min_fitness: None,
@@ -81,6 +83,10 @@ impl GenotypeListView {
                             }
                         }
                     }
+                    button type="button" class="card" data-genotype-id=(genotype.id)
+                        onclick="document.getElementById('probe-genotype-id').value=this.dataset.genotypeId; document.getElementById('noise-probe-dialog').showModal()" {
+                        "Probe"
+                    }
                 }
             }
         }
@@ -133,6 +139,24 @@ impl maud::Render for GenotypeListView {
                         ul id="genotypes-list-items" class="fx-flex" {
                             (self.items())
                         }
+                    }
+                }
+
+                dialog id="noise-probe-dialog" {
+                    form
+                        hx-post="/noise-probes"
+                        hx-target="#noise-probes"
+                        hx-swap="outerHTML"
+                        hx-on::after-request="if(event.detail.successful) this.closest('dialog').close()"
+                    {
+                        label for="probe-evaluation-count" {
+                            "Evaluations"
+                        }
+                        input type="hidden" name="genotype_id" id="probe-genotype-id" {}
+                        input type="hidden" name="request_id" value=(self.request_id) {}
+                        input id="probe-evaluation-count" type="number" name="evaluation_count" min="1" value="10" required {}
+                        button type="submit" { "Run Probe" }
+                        button type="button" onclick="this.closest('dialog').close()" { "Cancel" }
                     }
                 }
             }

@@ -1,10 +1,12 @@
 use crate::services::indexing::embeddings;
 use maud::Markup;
 use serde::Serialize;
+use uuid::Uuid;
 
 /// Provides a widget to select indexer, display knn statistics charts and trigger indexing
 pub struct KnnView {
     url: String,
+    request_id: Uuid,
     selected_indexer: Option<(String, bool)>,
     k: Option<i32>,
     indexer_options: Vec<String>,
@@ -12,9 +14,10 @@ pub struct KnnView {
 }
 
 impl KnnView {
-    pub fn new(url: String) -> Self {
+    pub fn new(url: String, request_id: Uuid) -> Self {
         Self {
             url,
+            request_id,
             k: None,
             selected_indexer: None,
             indexer_options: Vec::new(),
@@ -155,7 +158,10 @@ impl maud::Render for KnnView {
 
                 @if let Some((_, pending)) = self.selected_indexer {
                     @if !pending && self.knn_bins.is_empty() {
-                        "trigger indexing"
+                        form hx-post="/optimizations/index" {
+                            input type="hidden" name="request_id" value=(self.request_id.to_string());
+                            button type="submit" { "Index now" }
+                        }
                     } @else if pending && self.knn_bins.is_empty() {
                         "indexing pending"
                     } @else {
